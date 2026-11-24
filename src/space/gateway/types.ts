@@ -41,10 +41,20 @@ export type GatewayProvider = {
   preset?: string;
 };
 
+/** The tiers a gateway defines: the four ai-space tiers for text, and `image` for pictures (a text model cannot draw). */
+export const GATEWAY_TIERS = ["basic", "junior", "intermediate", "advanced", "image"] as const;
+export type GatewayTier = (typeof GATEWAY_TIERS)[number];
+export type GatewayTiers = Partial<Record<GatewayTier, string>>;
+
 export type GatewayConfig = {
   providers: GatewayProvider[];
   /** A group's members, tried in order: `provider/model` each. */
   groups: Record<string, string[]>;
+  /**
+   * Which model or group answers each ai-space tier through this gateway (`tiers:` in
+   * gateway.yaml), for every runtime with `gateway: space`; a runtime's own `models:` pin wins.
+   */
+  tiers: GatewayTiers;
   /** Providers kept in the file but off, with the reason (a key variable that is empty). */
   off: Record<string, string>;
 };
@@ -84,4 +94,6 @@ export type GatewayLink = {
   has(base: GatewayBase): boolean;
   /** Why the gateway cannot answer, or undefined when it can (the status table). */
   problem(): string | undefined;
+  /** The gateway's tier table as it is now (Settings may change it while ai-space runs). */
+  tiers(): GatewayTiers;
 };

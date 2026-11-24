@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { ClaudeLive, claudeLiveFingerprint } from "./claude-live.ts";
 import { LivePool } from "./live.ts";
 import type { GatewayLink } from "../gateway/types.ts";
-import { gatewayClaudeEnv, gatewayClaudeSettings, magpieClaudeEnv, magpieClaudeSettings } from "./magpie.ts";
+import { gatewayClaudeEnv, gatewayClaudeSettings, magpieClaudeEnv, magpieClaudeSettings, overGatewayTiers } from "./magpie.ts";
 import { pumpLines, spawnCollect } from "./process.ts";
 import { ustar } from "./tar.ts";
 import { readClaudeTranscript } from "./transcripts.ts";
@@ -74,7 +74,9 @@ export function createClaudeCode(spec: ClaudeCodeSpec & { models?: TierModels },
     if (!link || !url) return { error: `runtime ${spec.name} answers through the built-in model gateway, which is off: ${link?.problem() ?? "this space has none"}` };
     const grant = link.issue();
     const opts = { fill: true, extra: SPACE_GATEWAY_ENV };
-    return { env: (b) => gatewayClaudeEnv(url, grant.token, spec.models, b ?? process.env, opts), bin: [...cli, "--settings", gatewayClaudeSettings(url, grant.token, spec.models, opts)], run: grant.run };
+    // Its own pin, else the gateway's tier, else (fill) the nearest of those: read per process, so a tier saved in Settings applies.
+    const tiers = overGatewayTiers(spec.models, link.tiers());
+    return { env: (b) => gatewayClaudeEnv(url, grant.token, tiers, b ?? process.env, opts), bin: [...cli, "--settings", gatewayClaudeSettings(url, grant.token, tiers, opts)], run: grant.run };
   };
 
   return {

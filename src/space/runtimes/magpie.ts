@@ -199,6 +199,19 @@ export function gatewayClaudeEnv(url: string, token: string, models: TierModels 
   return env;
 }
 
+/**
+ * A runtime's tiers through the built-in model gateway: its own `models:` pin, else the tier the
+ * gateway defines (`tiers:` in gateway.yaml). `image` is the gateway's picture tier, not a text one.
+ */
+export function overGatewayTiers(pins: TierModels | undefined, gateway: Partial<Record<string, string>> | undefined): TierModels {
+  const out: TierModels = {};
+  for (const tier of MODEL_TIERS) {
+    const pick = pins?.[tier] || gateway?.[tier];
+    if (pick) out[tier] = pick;
+  }
+  return out;
+}
+
 /** Every tier with a model: its own pin, else the nearest lower pin, else the nearest higher one. */
 export function filledTiers(models: TierModels | undefined): TierModels {
   const out: TierModels = {};

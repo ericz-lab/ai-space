@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { readCatalog } from "../runtimes/magpie.ts";
 import { GATEWAY_PREFIX, createGatewayRoutes, gatewayBase } from "./api.ts";
-import { parseGatewayYaml } from "./config.ts";
+import { parseGatewayYaml, setGatewayTiersText } from "./config.ts";
 import { ModelGateway } from "./service.ts";
 import { GatewayTokens } from "./tokens.ts";
 import { TraceStore } from "./trace.ts";
@@ -229,6 +229,11 @@ describe("failover", () => {
     await post("/v1/messages", { model: "fast", max_tokens: 5, messages: [] }, {}, other.token);
     expect(a.seen).toHaveLength(1);
     expect(gateway.traces.get(other.run)?.tried).toEqual(["b/m-b"]);
+    // Settings shows the rest: until when and why.
+    const view = gateway.view();
+    expect(view.providers.find((p) => p.name === "a")).toMatchObject({ name: "a", messages: a.url, resting: { kind: "rate" } });
+    expect(Date.parse(view.providers.find((p) => p.name === "a")!.resting!.until)).toBeGreaterThan(Date.now());
+    expect(view.providers.find((p) => p.name === "b")?.resting).toBeUndefined();
   });
 
   test("a refusal about the request itself is not a reason to switch: it goes back as the provider wrote it", async () => {
@@ -291,5 +296,62 @@ describe("the model list", () => {
     expect(body.data.map((m: { id: string }) => m.id)).toEqual(["fast", "ds/deepseek-chat", "ds/deepseek-reasoner"]);
     expect(readCatalog(body)).toEqual({ models: ["fast", "ds/deepseek-chat", "ds/deepseek-reasoner"], groups: ["fast"] });
     expect((await fetch(`${base}/v1/models`)).status).toBe(401);
+  });
+});
+
+describe("tiers: in gateway.yaml", () => {
+  const head = "# my gateway\nproviders:\n  ds: { preset: deepseek, apiKeyEnv: DS }   # deepseek\n  glm:\n    preset: zai\n    apiKeyEnv: ZAI\n    models: [glm-4.6]\n  openai: { preset: openai, apiKeyEnv: OA }\ngroups:\n  fast: [ds/deepseek-chat, glm/glm-4.5-air]\n";
+  const env = { DS: "k", ZAI: "k" };
+
+  test("each tier any vendor's model or a group; image a provider with an openai base", () => {
+    const { config, warnings } = parseGatewayYaml(`${head}tiers:\n  basic: fast\n  intermediate: ds/deepseek-chat\n  advanced: glm/glm-4.6\n  image: openai/gpt-image-1\n`, env);
+    expect(config.tiers).toEqual({ basic: "fast", intermediate: "ds/deepseek-chat", advanced: "glm/glm-4.6", image: "openai/gpt-image-1" });
+    // openai is off (OA unset): a warning for it, none for the tiers.
+    expect(warnings).toEqual(["model gateway provider openai is off: OA is not set"]);
+    expect(parseGatewayYaml(head, env).config.tiers).toEqual({});
+    expect(() => parseGatewayYaml(`${head}tiers:\n  huge: fast\n`, env)).toThrow(/tiers has unknown key "huge"/);
+    expect(() => parseGatewayYaml(`${head}tiers: [fast]\n`, env)).toThrow(/tiers must map/);
+    expect(() => parseGatewayYaml(`${head}tiers:\n  basic: 3\n`, env)).toThrow(/tiers.basic must be a model or a group/);
+  });
+
+  test("a tier whose provider is gone, or that cannot answer it, stays with a warning", () => {
+    const { config, warnings } = parseGatewayYaml(`${head}tiers:\n  basic: kimi/k2\n  junior: openai/gpt-5\n  image: ds/deepseek-chat\n`, env);
+    expect(config.tiers).toEqual({ basic: "kimi/k2", junior: "openai/gpt-5", image: "ds/deepseek-chat" });
+    expect(warnings).toContain("gateway.yaml: tiers.basic: kimi/k2 names provider kimi, which is not in this file");
+    expect(warnings).toContain("gateway.yaml: tiers.junior: openai/gpt-5 has no provider with a messages base (text go there)");
+    expect(warnings).toContain("gateway.yaml: tiers.image: ds/deepseek-chat has no provider with a openai base (pictures go there)");
+  });
+
+  test("Settings edits the text: comments and order stay, the block is replaced, added at the end, or removed", () => {
+    const added = setGatewayTiersText(head, { advanced: "glm/glm-4.6", basic: "fast" }, env);
+    expect(added).toBe(`${head}tiers:\n  basic: "fast"\n  advanced: "glm/glm-4.6"\n`);
+    const withMore = `${head}tiers:\n  basic: fast   # cheap\n  advanced: glm/glm-4.6\n# after the tiers\nextra: no\n`.replace("extra: no\n", "");
+    const replaced = setGatewayTiersText(withMore, { junior: "ds/deepseek-chat", image: "openai/gpt-image-1" }, env);
+    expect(replaced).toBe(`${head}tiers:\n  junior: "ds/deepseek-chat"\n  image: "openai/gpt-image-1"\n# after the tiers\n`);
+    // A tier that keeps its value keeps its comment.
+    expect(setGatewayTiersText(withMore, { basic: "fast", junior: "ds/deepseek-chat" }, env)).toBe(`${head}tiers:\n  basic: "fast"   # cheap\n  junior: "ds/deepseek-chat"\n# after the tiers\n`);
+    expect(replaced.startsWith("# my gateway\n")).toBe(true);
+    expect(replaced).toContain("# deepseek");
+    const cleared = setGatewayTiersText(withMore, {}, env);
+    expect(cleared).toBe(`${head}# after the tiers\n`);
+    expect(parseGatewayYaml(cleared, env).config.tiers).toEqual({});
+    // A one-line tiers: is the operator's to change by hand.
+    expect(() => setGatewayTiersText(`${head}tiers: { basic: fast }\n`, { basic: "glm/glm-4.6" }, env)).toThrow(/on one line/);
+  });
+
+  test("the view: providers with bases and on/off, models, the ids pictures can go to, the tiers", () => {
+    const { config } = parseGatewayYaml(`${head}tiers:\n  advanced: glm/glm-4.6\n`, { ...env, OA: "k" });
+    const view = new ModelGateway({ config, log: () => {} }).view();
+    expect(view.configured).toBe(true);
+    expect(view.providers.map((p) => [p.name, p.preset, Boolean(p.messages), Boolean(p.openai), p.off])).toEqual([["ds", "deepseek", true, false, undefined], ["glm", "zai", true, false, undefined], ["openai", "openai", false, true, undefined]]);
+    expect(view.models).toEqual(["fast", "ds/deepseek-chat", "glm/glm-4.6", "glm/glm-4.5-air"]);
+    // openai lists no model: nothing to offer for pictures (an id can still be typed).
+    expect(view.imageModels).toEqual([]);
+    const drawn = parseGatewayYaml(`${head.replace("{ preset: openai, apiKeyEnv: OA }", "{ preset: openai, apiKeyEnv: OA, models: [gpt-image-1] }")}groups:\n  pics: [openai/gpt-image-1]\n`.replace("groups:\n  fast: [ds/deepseek-chat, glm/glm-4.5-air]\ngroups:\n", "groups:\n  fast: [ds/deepseek-chat, glm/glm-4.5-air]\n"), { ...env, OA: "k" });
+    expect(new ModelGateway({ config: drawn.config, log: () => {} }).view().imageModels).toEqual(["pics", "openai/gpt-image-1"]);
+    expect(view.tiers).toEqual({ advanced: "glm/glm-4.6" });
+    const off = new ModelGateway({ config: parseGatewayYaml(head, env).config, log: () => {} }).view();
+    expect(off.providers.find((p) => p.name === "openai")?.off).toBe("OA is not set");
+    expect(new ModelGateway({ log: () => {} }).view()).toMatchObject({ configured: false, providers: [], problem: expect.stringContaining("no gateway.yaml") });
   });
 });

@@ -166,7 +166,7 @@ export class ModelService {
 
   /** The runtime a request for pictures names; throws when it cannot make them. */
   resolveImage(model: string): { runtime: RuntimeAdapter; model: string } {
-    const r = this.runtimes.resolve(model);
+    const r = this.runtimes.resolve(model, "image");
     if (!r.runtime.capabilities.image || !r.runtime.image) throw new Error(`runtime ${r.runtime.name} does not make images`);
     return r;
   }

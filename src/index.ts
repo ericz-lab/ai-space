@@ -715,6 +715,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
         home: ws.home,
         token: config.apiToken,
         env,
+        gateway: modelGateway,
       })],
       ["owner", createModelPreferenceRoutes(modelPreferences, { model: config.model.defaultModel, base: config.chatModel })],
       ["app", createModelRoutes({ service: model, token: config.apiToken, appForToken: (t) => storage.appForToken(t), resolveModel: (app, tag) => appModels.resolve(app, tag), machines: machineCells, servesPeers: config.peerModel, space: config.name, ...(peers.names().length ? { peerLedgers: new PeerLedgers(peers, config.name) } : {}) })],

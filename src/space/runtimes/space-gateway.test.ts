@@ -223,3 +223,53 @@ describe("pictures through the built-in gateway (anthropic-api with gateway: spa
     expect(await rt.image!(image({ model: "ds/some-model" }))).toMatchObject({ ok: false, error: expect.stringMatching(/API 400: no provider can take ds\/some-model: .*has no openai base/) });
   });
 });
+
+describe("the built-in gateway's tiers (docs/model-gateway.md#tiers)", () => {
+  const yaml = (vendorUrl: string) =>
+    `providers:\n  ds: { messages: '${vendorUrl}', apiKeyEnv: K }\n  glm: { messages: '${vendorUrl}', apiKeyEnv: K }\n  openai: { openai: '${vendorUrl}/v1', apiKeyEnv: K }\ngroups:\n  fast: [ds/deepseek-chat, glm/glm-4.5-air]\ntiers:\n  basic: fast\n  advanced: glm/glm-4.6\n  image: openai/gpt-image-1\n`;
+  function gatewayTiered(vendorUrl: string) {
+    const { config } = parseGatewayYaml(yaml(vendorUrl), { K: "sk-vendor" });
+    const gateway = new ModelGateway({ config, log: () => {} });
+    const server = Bun.serve({ port: 0, hostname: "127.0.0.1", routes: createGatewayRoutes(gateway), fetch: () => new Response("", { status: 404 }) });
+    stops.push(() => server.stop(true));
+    gateway.listen(`http://127.0.0.1:${server.port}${GATEWAY_PREFIX}`);
+    return gateway;
+  }
+
+  test("an API runtime: its own pin, else the gateway's tier; an image call goes to the picture tier", () => {
+    const gateway = gatewayTiered("http://127.0.0.1:9");
+    const reg = new RuntimeRegistry(
+      { default: "api", runtimes: [{ name: "api", kind: "anthropic-api", apiKey: "", apiUrl: "", gateway: "space", models: { advanced: "ds/deepseek-v4-pro" } }, { name: "plain", kind: "anthropic-api", apiKey: "k", apiUrl: "", models: { basic: "claude-haiku" } }] },
+      { gateway: gateway.link },
+    );
+    expect(reg.resolve("api/advanced").model).toBe("ds/deepseek-v4-pro");
+    expect(reg.resolve("api/basic").model).toBe("fast");
+    expect(() => reg.resolve("api/junior")).toThrow(/no model for tier junior/);
+    expect(reg.resolve("api/advanced", "image").model).toBe("openai/gpt-image-1");
+    expect(reg.resolve("api/ds/deepseek-chat", "image").model).toBe("ds/deepseek-chat");
+    // A runtime not through the gateway keeps its own tiers.
+    expect(reg.resolve("plain/basic").model).toBe("claude-haiku");
+    expect(reg.resolve("plain/basic", "image").model).toBe("claude-haiku");
+    // The choices pickers list follow the gateway too.
+    expect(reg.tierOptions({ all: true }).filter((o) => o.runtime === "api").map((o) => [o.tier, o.model])).toEqual([["basic", "fast"], ["advanced", "ds/deepseek-v4-pro"]]);
+    // Saved in Settings: the next call resolves the new tiers, no restart.
+    gateway.setTiers({ junior: "glm/glm-4.6" });
+    expect(reg.resolve("api/junior").model).toBe("glm/glm-4.6");
+    expect(() => reg.resolve("api/basic")).toThrow(/no model for tier basic/);
+    expect(reg.resolve("api/advanced", "image").model).toBe("ds/deepseek-v4-pro");
+  });
+
+  test("Claude Code: its own pin, else the gateway's tier, else the nearest of those; read per process", async () => {
+    const vendor = provider();
+    const gateway = gatewayTiered(vendor.url);
+    const rt = createClaudeCode({ name: "gw", kind: "claude-code", bin: fakeModelBin(), chatArgs: [], gateway: "space", models: { advanced: "ds/deepseek-v4-pro" } }, { gateway: gateway.link });
+    const envOf = async () => {
+      const r = await rt.complete(input({ model: "haiku" }));
+      if (!r.ok) throw new Error(r.error);
+      return JSON.parse(/--settings (\{.*?\}) -p/.exec(r.text)![1]!).env as Record<string, string>;
+    };
+    expect(await envOf()).toMatchObject({ ANTHROPIC_DEFAULT_HAIKU_MODEL: "fast", ANTHROPIC_DEFAULT_SONNET_MODEL: "fast", ANTHROPIC_DEFAULT_OPUS_MODEL: "fast", ANTHROPIC_DEFAULT_FABLE_MODEL: "ds/deepseek-v4-pro", ANTHROPIC_SMALL_FAST_MODEL: "fast" });
+    gateway.setTiers({ junior: "glm/glm-4.6" });
+    expect(await envOf()).toMatchObject({ ANTHROPIC_DEFAULT_HAIKU_MODEL: "glm/glm-4.6", ANTHROPIC_DEFAULT_SONNET_MODEL: "glm/glm-4.6", ANTHROPIC_DEFAULT_OPUS_MODEL: "glm/glm-4.6", ANTHROPIC_DEFAULT_FABLE_MODEL: "ds/deepseek-v4-pro" });
+  });
+});

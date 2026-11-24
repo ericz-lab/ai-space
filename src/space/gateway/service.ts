@@ -4,7 +4,7 @@ import { splitModelId } from "./config.ts";
 import { carriesThinking, downstreamHeaders, errorText, readUsage, tapMessagesStream, upstreamHeaders } from "./forward.ts";
 import { GatewayTokens } from "./tokens.ts";
 import { TraceStore } from "./trace.ts";
-import type { GatewayBase, GatewayConfig, GatewayLink, GatewayProvider } from "./types.ts";
+import type { GatewayBase, GatewayConfig, GatewayLink, GatewayProvider, GatewayTiers } from "./types.ts";
 
 /**
  * The built-in model gateway (docs/model-gateway.md): for one request, the providers that can take
@@ -41,6 +41,34 @@ export type ModelGatewayOptions = {
 
 type Rest = { until: number; streak: number; kind: FailureKind };
 
+/** One provider as Settings shows it: its bases, whether it is on (and why not), and its rest. */
+export type GatewayProviderView = {
+  name: string;
+  preset?: string;
+  messages?: string;
+  openai?: string;
+  /** Why it is off (its key variable is empty); absent when it is on. */
+  off?: string;
+  /** Resting after a credit, quota, rate or transport failure: until when (ISO) and why. */
+  resting?: { until: string; kind: FailureKind };
+  /** Its `provider/model` ids in the model list. */
+  models: string[];
+};
+
+/** The built-in model gateway as Settings shows it (docs/model-gateway.md#settings). */
+export type GatewayView = {
+  configured: boolean;
+  /** Why it cannot answer; absent when it can. */
+  problem?: string;
+  providers: GatewayProviderView[];
+  groups: Record<string, string[]>;
+  /** `/v1/models` ids: groups first, then provider/model. */
+  models: string[];
+  /** The ids a picture can go to: on a provider with an openai base (a group: one of its members). */
+  imageModels: string[];
+  tiers: GatewayTiers;
+};
+
 type Target = { id: string; provider: GatewayProvider; model: string };
 
 type Body = { kind: "json"; value: Record<string, unknown> } | { kind: "form"; value: FormData };
@@ -56,9 +84,11 @@ export class ModelGateway {
   private readonly rests = new Map<string, Rest>();
   private baseUrl: string | undefined;
   private offReason: string | undefined;
+  private tierTable: GatewayTiers;
 
   constructor(opts: ModelGatewayOptions = {}) {
     this.config = opts.config;
+    this.tierTable = { ...opts.config?.tiers };
     this.error = opts.error;
     this.fetch = opts.fetch ?? fetch;
     this.now = opts.now ?? Date.now;
@@ -89,7 +119,43 @@ export class ModelGateway {
     provider: (name) => this.config?.providers.find((p) => p.name === name),
     has: (base) => Boolean(this.config?.providers.some((p) => p[base] && !this.config!.off[p.name])),
     problem: () => this.problem(),
+    tiers: () => ({ ...this.tierTable }),
   };
+
+  /**
+   * New tiers, as Settings saved them to gateway.yaml: the next call of every runtime with
+   * `gateway: space` resolves its tiers from them, without a restart. False when it is off.
+   */
+  setTiers(tiers: GatewayTiers): boolean {
+    if (!this.config) return false;
+    this.tierTable = { ...tiers };
+    return true;
+  }
+
+  /** What Settings shows: whether it answers, each provider with its bases, state and models, the model list and the tiers. */
+  view(): GatewayView {
+    const problem = this.problem();
+    const list = this.models().data;
+    const models = list.map((m) => String(m.id));
+    if (!this.config) return { configured: false, ...(problem ? { problem } : {}), providers: [], groups: {}, models, imageModels: [], tiers: {} };
+    const config = this.config;
+    const now = this.now();
+    const providers = config.providers.map((p): GatewayProviderView => {
+      const r = this.rests.get(p.name);
+      return {
+        name: p.name,
+        ...(p.preset ? { preset: p.preset } : {}),
+        ...(p.messages ? { messages: p.messages } : {}),
+        ...(p.openai ? { openai: p.openai } : {}),
+        ...(config.off[p.name] ? { off: config.off[p.name] } : {}),
+        ...(r && r.until > now ? { resting: { until: new Date(r.until).toISOString(), kind: r.kind } } : {}),
+        models: models.filter((id) => id.startsWith(`${p.name}/`)),
+      };
+    });
+    const drawsOn = (id: string) => Boolean(config.providers.find((p) => p.name === splitModelId(id)?.provider)?.openai);
+    const imageModels = models.filter((id) => (config.groups[id] ? config.groups[id]!.some(drawsOn) : drawsOn(id)));
+    return { configured: true, ...(problem ? { problem } : {}), providers, groups: { ...config.groups }, models, imageModels, tiers: { ...this.tierTable } };
+  }
 
   problem(): string | undefined {
     if (this.error) return this.error;
