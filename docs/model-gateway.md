@@ -89,6 +89,16 @@ A preset fills in the bases only. The key always comes from `apiKeyEnv`, and a b
 | `dashscope` | messages `https://dashscope.aliyuncs.com/apps/anthropic` (pay-as-you-go) | bearer | https://help.aliyun.com/zh/model-studio/claude-code |
 | `openai` | openai `https://api.openai.com/v1` | bearer | https://developers.openai.com/api/reference/resources/audio |
 | `groq` | openai `https://api.groq.com/openai/v1` (audio) | bearer | https://console.groq.com/docs/speech-to-text |
+| `ark` | messages `https://ark.cn-beijing.volces.com/api/compatible` (Volcengine Ark, pay-as-you-go) | bearer | https://docs.volcengine.com/docs/ark/ai-tools-claude-code?lang=zh |
+| `ark-coding` | messages `https://ark.cn-beijing.volces.com/api/coding` (Ark Coding Plan) | bearer | https://docs.volcengine.com/docs/ark/coding-plan-personal-ai-claude-code?lang=zh |
+| `ark-plan` | messages `https://ark.cn-beijing.volces.com/api/plan` (Ark Agent Plan) | bearer | https://docs.volcengine.com/docs/ark/agent-plan-personal-claude-code?lang=zh |
+| `openrouter` | messages `https://openrouter.ai/api`, openai `https://openrouter.ai/api/v1` (audio) | bearer | https://openrouter.ai/docs/cookbook/coding-agents/claude-code-integration |
+
+The four rows from `ark` down were checked on 2026-11-24.
+
+**Volcengine Ark** has one base per way of paying, and its docs warn that a plan's quota is not used on another base (calls there are billed). Pick the preset that matches the key. Pay-as-you-go takes the dated Model IDs of Ark's model list (`doubao-seed-2-1-pro-260915`); the two plans take the plan's own names (`doubao-seed-2.1-pro`, `ark-code-latest`). Ark's plan pages describe the plans as for AI tools such as Claude Code, and the Agent Plan overview says its text models are not for API calls, so use a plan preset with a Claude Code runtime, not an API runtime. Ark's Claude Code pages set the key as `ANTHROPIC_AUTH_TOKEN` (bearer); its Messages API page shows `x-api-key`. The preset has no `openai` base: Ark's pictures (`/api/v3/images/generations`) were not confirmed to answer in `b64_json`, it has no `/images/edits`, and its speech is on another host with its own protocol. BytePlus ModelArk, the international site, is not a preset.
+
+**OpenRouter** serves every model as `author/model` (`anthropic/claude-sonnet-4.5`) on one key. Its docs say Claude Code is made for Anthropic models and that other vendors' models "may not work correctly" through the Messages endpoint; the gateway forwards whatever is asked. Its `openai` base has `audio/speech` and `audio/transcriptions`. Pictures are at `/images`, not `/images/generations`, so the picture operation does not work through it.
 
 Not covered by a preset, so the base must be written out: DashScope's workspace and plan hosts, and any other vendor. For the Z.ai, Zhipu, Kimi, MiniMax and DashScope endpoints, none of those pages say whether `x-api-key` is accepted or whether `count_tokens` exists. The bearer default is what they document.
 
@@ -243,6 +253,8 @@ Where a vendor documents a list of models, **Load the vendor's list** reads it w
 | `minimax` | `GET {messages}/v1/models` | `x-api-key` | https://platform.minimax.io/docs/api-reference/models/anthropic/list-models.md |
 | `openai` | `GET {openai}/models` | bearer | https://developers.openai.com/api/reference/resources/models/methods/list |
 | `groq` | `GET {openai}/models` | bearer | https://console.groq.com/docs/models |
+| `openrouter` | `GET {openai}/models` (answers without a key too) | bearer | https://openrouter.ai/docs/api/api-reference/models/list-all-models-and-their-properties.md |
+| `ark`, `ark-coding`, `ark-plan` | none documented | | https://ark.volcengine.com/region:cn-beijing/docs/model-list |
 | `zai`, `zhipu`, `dashscope` | none documented for the Anthropic-compatible base | | https://docs.z.ai/api-reference/introduction, https://docs.bigmodel.cn/cn/guide/develop/claude/introduction, https://www.alibabacloud.com/help/en/model-studio/anthropic-api-messages |
 
 Without a list, or when reading it fails, the page offers the ids the vendor's docs name (the preset's defaults) and says why, and ids can always be typed. A custom provider is asked `GET {openai}/models` when it has an OpenAI-style base, else `GET {messages}/v1/models`. Each list answers `data[].id`.
