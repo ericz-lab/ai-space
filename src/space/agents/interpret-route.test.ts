@@ -34,7 +34,7 @@ test("interpret asks the model only for longer text and returns a checked sugges
   }) });
   const ask = async (text: string) => (await fetch(new URL("/api/shortcuts/interpret", server.url), { method: "POST", body: JSON.stringify({ text, timezone: "Asia/Seoul" }) })).json();
   try {
-    expect(await ask("明天下午3点写报")).toMatchObject({ ok: true, skipped: true, interpretation: null });
+    expect(await ask("8点开会")).toMatchObject({ ok: true, skipped: true, interpretation: null });
     expect(prompts).toHaveLength(0);
 
     answer = '{"kind":"action","id":"todo/create","args":{"title":"写周报","date":"tomorrow","time":"15:00"}}';
