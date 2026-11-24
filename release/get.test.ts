@@ -46,6 +46,22 @@ async function bin(m: Machine, opts: { manager?: boolean } = {}): Promise<string
     systemctl: `#!/bin/sh\nexit ${exit}\n`,
     launchctl: `#!/bin/sh\nexit ${exit}\n`,
     open: `#!/bin/sh\necho "$1" > "$GET_TEST_MARK.opened"\n`,
+    // curl as the network: file:// as is, the R2 mirror from $GET_TEST_MIRROR and GitHub from
+    // $GET_TEST_GITHUB (a source left unset does not answer), nothing else.
+    curl: [
+      "#!/bin/sh",
+      'out=""; url=""',
+      'while [ $# -gt 0 ]; do case "$1" in -o) out="$2"; shift 2 ;; -*) shift ;; *) url="$1"; shift ;; esac; done',
+      'case "$url" in',
+      '  file://*) src="${url#file://}" ;;',
+      '  https://bucket.ai-space.me/releases/latest/*) [ -n "$GET_TEST_MIRROR" ] || exit 6; src="$GET_TEST_MIRROR/${url##*/}" ;;',
+      '  https://github.com/ericz-lab/ai-space/releases/latest/download/*) [ -n "$GET_TEST_GITHUB" ] || exit 6; src="$GET_TEST_GITHUB/${url##*/}" ;;',
+      "  *) exit 6 ;;",
+      "esac",
+      '[ -f "$src" ] || exit 22',
+      'cp "$src" "$out"',
+      "",
+    ].join("\n"),
   };
   for (const [name, text] of Object.entries(files)) {
     await Bun.write(join(dir, name), text);
@@ -90,6 +106,34 @@ describe("the one-command installer", () => {
     expect(r.out).toContain("ai-space-9.9.9-linux-x64.tar.gz");
     expect(r.out).toContain("Open the panel: http://127.0.0.1:8700/");
     expect(r.out).toContain("No agent CLI found yet");
+  });
+
+  posixOnly("takes the release from the R2 mirror by default", async () => {
+    const mirror = await release(await mkdtemp(join(root, "rel-")), { version: "9.9.9" });
+    const r = await run("", { AI_SPACE_DOWNLOAD: "", GET_TEST_MIRROR: mirror });
+    expect(r.err).toBe("");
+    expect(r.installed).toBe("installed 9.9.9");
+    expect(r.out).toContain("from https://bucket.ai-space.me");
+  });
+
+  posixOnly("falls back to GitHub when the mirror does not answer or holds a mismatched archive", async () => {
+    const github = await release(await mkdtemp(join(root, "rel-")), { version: "9.9.9" });
+    const down = await run("", { AI_SPACE_DOWNLOAD: "", GET_TEST_GITHUB: github });
+    expect(down.err).toBe("");
+    expect(down.installed).toBe("installed 9.9.9");
+    expect(down.out).toContain("from https://github.com/ericz-lab/ai-space");
+    const stale = await release(await mkdtemp(join(root, "rel-")), { version: "9.9.9", badSum: true });
+    const r = await run("", { AI_SPACE_DOWNLOAD: "", GET_TEST_MIRROR: stale, GET_TEST_GITHUB: github });
+    expect(r.err).toBe("");
+    expect(r.installed).toBe("installed 9.9.9");
+    expect(r.out).toContain("from https://github.com/ericz-lab/ai-space");
+  });
+
+  posixOnly("fails with the last reason when no source has the release", async () => {
+    const r = await run("", { AI_SPACE_DOWNLOAD: "" });
+    expect(r.code).not.toBe(0);
+    expect(r.installed).toBeUndefined();
+    expect(r.err).toContain("could not download https://github.com/ericz-lab/ai-space/releases/latest/download/SHA256SUMS");
   });
 
   posixOnly("still installs a release from before the archive lost \"server\" in its name", async () => {

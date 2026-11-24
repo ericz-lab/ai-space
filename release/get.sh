@@ -16,11 +16,13 @@
 #   AI_SPACE_VERSION=0.2.0     that release instead of the latest
 #   AI_SPACE_PREFIX=<dir>      where the program goes (default ~/.local/share/ai-space)
 #   SPACE_HOME=<dir>           where the workspace goes (default ~/.ai-space)
-#   AI_SPACE_DOWNLOAD=<url>    where the release's files are (a mirror, or file:// for tests)
+#   AI_SPACE_DOWNLOAD=<url>    where the release's files are (a mirror, or file:// for tests); by
+#                              default bucket.ai-space.me/releases (R2), then GitHub
 #   AI_SPACE_NO_OPEN=1         do not open a browser at the end
 set -euo pipefail
 
 REPO="ericz-lab/ai-space"
+MIRROR="https://bucket.ai-space.me/releases"
 TMP_DIR=""
 
 say() { printf '%s\n' "$*"; }
@@ -46,7 +48,7 @@ find_cli() {
 }
 
 main() {
-  local os plat arch version base tmp line name want got dir port url ws
+  local os plat arch version base bases why tmp line name want got dir port url ws
   os="$(uname -s)"
   case "$os" in
     Linux) plat=linux ;;
@@ -77,9 +79,10 @@ main() {
 
   version="${AI_SPACE_VERSION:-latest}"
   version="${version#v}"
-  if [ -n "${AI_SPACE_DOWNLOAD:-}" ]; then base="${AI_SPACE_DOWNLOAD%/}"
-  elif [ "$version" = latest ]; then base="https://github.com/$REPO/releases/latest/download"
-  else base="https://github.com/$REPO/releases/download/v$version"
+  # The R2 mirror first (fast where GitHub is slow), then GitHub itself; AI_SPACE_DOWNLOAD replaces both.
+  if [ -n "${AI_SPACE_DOWNLOAD:-}" ]; then bases="${AI_SPACE_DOWNLOAD%/}"
+  elif [ "$version" = latest ]; then bases="$MIRROR/latest https://github.com/$REPO/releases/latest/download"
+  else bases="$MIRROR/v$version https://github.com/$REPO/releases/download/v$version"
   fi
 
   TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/ai-space-install.XXXXXX")"
@@ -87,21 +90,28 @@ main() {
   tmp="$TMP_DIR"
 
   say "ai-space: looking for the $( [ "$version" = latest ] && echo "latest release" || echo "release $version" ) for $plat-$arch"
-  fetch "$base/SHA256SUMS" "$tmp/SHA256SUMS" || fail "could not download $base/SHA256SUMS"
-  # ai-space-<version>-<os>-<arch>.tar.gz; releases up to 0.2.1 named it ai-space-server-<version>-...
-  if [ "$version" = latest ]; then
-    line="$(grep -E "  ai-space-(server-)?[0-9][^ ]*-$plat-$arch\.tar\.gz\$" "$tmp/SHA256SUMS" | head -n1 || true)"
-  else
-    line="$(grep -E "  ai-space-(server-)?${version//./\\.}-$plat-$arch\.tar\.gz\$" "$tmp/SHA256SUMS" | head -n1 || true)"
-  fi
-  [ -n "$line" ] || fail "the release has no Server archive for $plat-$arch"
-  want="${line%% *}"
-  name="${line##* }"
-
-  say "ai-space: downloading $name"
-  fetch "$base/$name" "$tmp/$name" || fail "could not download $base/$name"
-  got="$(sha256_of "$tmp/$name")"
-  [ "$got" = "$want" ] || fail "$name does not match the release's SHA256SUMS (expected $want, got $got); nothing was installed"
+  # From the first source that has the release whole: SHA256SUMS, the archive, and a matching hash
+  # (a mirror caught between two releases falls through to the next source).
+  name="" why=""
+  for base in $bases; do
+    rm -f "$tmp/SHA256SUMS"
+    if ! fetch "$base/SHA256SUMS" "$tmp/SHA256SUMS"; then why="could not download $base/SHA256SUMS"; continue; fi
+    # ai-space-<version>-<os>-<arch>.tar.gz; releases up to 0.2.1 named it ai-space-server-<version>-...
+    if [ "$version" = latest ]; then
+      line="$(grep -E "  ai-space-(server-)?[0-9][^ ]*-$plat-$arch\.tar\.gz\$" "$tmp/SHA256SUMS" | head -n1 || true)"
+    else
+      line="$(grep -E "  ai-space-(server-)?${version//./\\.}-$plat-$arch\.tar\.gz\$" "$tmp/SHA256SUMS" | head -n1 || true)"
+    fi
+    if [ -z "$line" ]; then why="the release has no Server archive for $plat-$arch"; continue; fi
+    want="${line%% *}"
+    name="${line##* }"
+    say "ai-space: downloading $name from ${base%%/releases*}"
+    if ! fetch "$base/$name" "$tmp/$name"; then why="could not download $base/$name"; name=""; continue; fi
+    got="$(sha256_of "$tmp/$name")"
+    if [ "$got" != "$want" ]; then why="$name does not match the release's SHA256SUMS (expected $want, got $got); nothing was installed"; rm -f "$tmp/$name"; name=""; continue; fi
+    break
+  done
+  [ -n "$name" ] || fail "$why"
 
   tar -xzf "$tmp/$name" -C "$tmp"
   dir="$tmp/${name%.tar.gz}"

@@ -14,7 +14,8 @@
 #   AI_SPACE_VERSION=0.2.0     that release instead of the latest
 #   AI_SPACE_PREFIX=<dir>      where the program goes (default %LOCALAPPDATA%\ai-space)
 #   SPACE_HOME=<dir>           where the workspace goes (default %USERPROFILE%\.ai-space)
-#   AI_SPACE_DOWNLOAD=<url>    where the release's files are (a mirror, or a directory for tests)
+#   AI_SPACE_DOWNLOAD=<url>    where the release's files are (a mirror, or a directory for tests); by
+#                              default bucket.ai-space.me/releases (R2), then GitHub
 #   AI_SPACE_NO_OPEN=1         do not open a browser at the end
 #   AI_SPACE_NO_PATH=1         do not add the space command's directory to the user's Path
 
@@ -58,31 +59,42 @@ function Install-AISpace {
   try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch { }
 
   $version = if ($env:AI_SPACE_VERSION) { $env:AI_SPACE_VERSION -replace '^v', '' } else { 'latest' }
-  if ($env:AI_SPACE_DOWNLOAD) { $base = $env:AI_SPACE_DOWNLOAD.TrimEnd('/', '\') }
-  elseif ($version -eq 'latest') { $base = "https://github.com/$repo/releases/latest/download" }
-  else { $base = "https://github.com/$repo/releases/download/v$version" }
+  # The R2 mirror first (fast where GitHub is slow), then GitHub itself; AI_SPACE_DOWNLOAD replaces both.
+  $mirror = 'https://bucket.ai-space.me/releases'
+  if ($env:AI_SPACE_DOWNLOAD) { $bases = @($env:AI_SPACE_DOWNLOAD.TrimEnd('/', '\')) }
+  elseif ($version -eq 'latest') { $bases = @("$mirror/latest", "https://github.com/$repo/releases/latest/download") }
+  else { $bases = @("$mirror/v$version", "https://github.com/$repo/releases/download/v$version") }
 
   $tmp = Join-Path ([IO.Path]::GetTempPath()) ("ai-space-install." + [Guid]::NewGuid().ToString('N').Substring(0, 8))
   New-Item -ItemType Directory -Path $tmp | Out-Null
   try {
     $what = if ($version -eq 'latest') { 'latest release' } else { "release $version" }
     Write-Host "ai-space: looking for the $what for $plat-$arch"
-    try { Get-ReleaseFile $base 'SHA256SUMS' (Join-Path $tmp 'SHA256SUMS') } catch { Fail "could not download $base/SHA256SUMS" }
+    # From the first source that has the release whole: SHA256SUMS, the archive, and a matching hash
+    # (a mirror caught between two releases falls through to the next source).
     $wanted = if ($version -eq 'latest') { '[0-9][^ ]*' } else { [regex]::Escape($version) }
-    # ai-space-<version>-windows-<arch>.tar.gz; releases up to 0.2.1 named it ai-space-server-<version>-...
-    $line = Get-Content -LiteralPath (Join-Path $tmp 'SHA256SUMS') | Where-Object { $_ -match "^([0-9a-fA-F]{64})  (ai-space-(?:server-)?$wanted-$plat-$arch\.tar\.gz)$" } | Select-Object -First 1
-    if (-not $line) { Fail "the release has no Server archive for $plat-$arch" }
-    $want = $line.Substring(0, 64).ToLower()
-    $name = $line.Substring(66)
-
-    Write-Host "ai-space: downloading $name"
-    $archive = Join-Path $tmp $name
-    try { Get-ReleaseFile $base $name $archive } catch { Fail "could not download $base/$name" }
-    # .NET's own hash, so the check depends on no module being found.
-    $sha = [System.Security.Cryptography.SHA256]::Create()
-    $stream = [System.IO.File]::OpenRead($archive)
-    try { $got = -join ($sha.ComputeHash($stream) | ForEach-Object { $_.ToString('x2') }) } finally { $stream.Dispose(); $sha.Dispose() }
-    if ($got -ne $want) { Fail "$name does not match the release's SHA256SUMS (expected $want, got $got); nothing was installed" }
+    $name = $null; $why = ''
+    foreach ($base in $bases) {
+      $sums = Join-Path $tmp 'SHA256SUMS'
+      Remove-Item -LiteralPath $sums -Force -ErrorAction SilentlyContinue
+      try { Get-ReleaseFile $base 'SHA256SUMS' $sums } catch { $why = "could not download $base/SHA256SUMS"; continue }
+      # ai-space-<version>-windows-<arch>.tar.gz; releases up to 0.2.1 named it ai-space-server-<version>-...
+      $line = Get-Content -LiteralPath $sums | Where-Object { $_ -match "^([0-9a-fA-F]{64})  (ai-space-(?:server-)?$wanted-$plat-$arch\.tar\.gz)$" } | Select-Object -First 1
+      if (-not $line) { $why = "the release has no Server archive for $plat-$arch"; continue }
+      $want = $line.Substring(0, 64).ToLower()
+      $candidate = $line.Substring(66)
+      Write-Host "ai-space: downloading $candidate from $(($base -split '/releases')[0])"
+      $archive = Join-Path $tmp $candidate
+      try { Get-ReleaseFile $base $candidate $archive } catch { $why = "could not download $base/$candidate"; continue }
+      # .NET's own hash, so the check depends on no module being found.
+      $sha = [System.Security.Cryptography.SHA256]::Create()
+      $stream = [System.IO.File]::OpenRead($archive)
+      try { $got = -join ($sha.ComputeHash($stream) | ForEach-Object { $_.ToString('x2') }) } finally { $stream.Dispose(); $sha.Dispose() }
+      if ($got -ne $want) { $why = "$candidate does not match the release's SHA256SUMS (expected $want, got $got); nothing was installed"; Remove-Item -LiteralPath $archive -Force; continue }
+      $name = $candidate
+      break
+    }
+    if (-not $name) { Fail $why }
 
     & $tar -xzf $archive -C $tmp
     if ($LASTEXITCODE -ne 0) { Fail "could not unpack $name" }
