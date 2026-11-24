@@ -1,4 +1,4 @@
-import { GATEWAY_PRESETS } from "./config.ts";
+import { GATEWAY_PRESETS, GATEWAY_SITES, type GatewaySite } from "./config.ts";
 import type { GatewayAuth } from "./types.ts";
 
 /**
@@ -49,7 +49,7 @@ export function customList(b: { messages?: string; openai?: string; auth: Gatewa
 }
 
 /** The presets as the page offers them. */
-export function presetList(): { name: string; label: string; messages?: string; openai?: string; auth: GatewayAuth; hasList: boolean; defaults: string[] }[] {
+export function presetList(): { name: string; label: string; messages?: string; openai?: string; auth: GatewayAuth; hasList: boolean; defaults: string[]; sites?: Record<GatewaySite, { messages?: string; openai?: string }> }[] {
   return Object.entries(GATEWAY_PRESETS).map(([name, p]) => ({
     name,
     label: VENDORS[name]?.label ?? name,
@@ -58,6 +58,7 @@ export function presetList(): { name: string; label: string; messages?: string; 
     auth: p.auth ?? "bearer",
     hasList: Boolean(VENDORS[name]?.list({ messages: p.messages, openai: p.openai })),
     defaults: VENDORS[name]?.defaults ?? [],
+    ...(GATEWAY_SITES[name] ? { sites: GATEWAY_SITES[name] } : {}),
   }));
 }
 
