@@ -80,7 +80,7 @@ providers:
 A model's kind is, in order:
 
 1. `kinds:` in the file: what the owner set in Settings, or accepted from the vendor's list. Each key must be one of the provider's `models`, each value one of the four.
-2. A rule the vendor documents for its own ids: the table in `DOCUMENTED_KINDS` (`src/space/gateway/kinds.ts`), with its pages, for `openai`, `groq`, `zhipu`, `zai`, `minimax` and `ark-plan` ([below](#speech-and-pictures)).
+2. A rule the vendor documents for its own ids: the table in `DOCUMENTED_KINDS` (`src/space/gateway/kinds.ts`), with its pages, for `openai`, `groq`, `zhipu`, `zai`, `minimax`, `ark` and `ark-plan` ([below](#speech-and-pictures)).
 3. Otherwise `text`.
 
 A kind is never guessed from how a name looks: `whisper-1` on a provider without a preset is text until the owner says otherwise. A file with `models:` only loads as before, every model text unless rule 2 covers it. Settings writes only kinds that differ from the rule; changing one is one click on its chip, and setting it back to the rule drops it from the file.
@@ -139,7 +139,7 @@ Which presets have OpenAI-style `audio/transcriptions`, `audio/speech` and `imag
 | `zhipu` | on `https://open.bigmodel.cn/api/paas/v4` (offered): `glm-asr-2512` (clips up to 30 s) | same base: `glm-tts`; voices tongtong, chuichui, xiaochen, jam, kazi, douji, luodo | same base: `glm-image`, `cogview-4-250304`, `cogview-4`, `cogview-3-flash`; URLs only | https://docs.bigmodel.cn/api-reference/%E6%A8%A1%E5%9E%8B-api/%E8%AF%AD%E9%9F%B3%E8%BD%AC%E6%96%87%E6%9C%AC, https://docs.bigmodel.cn/api-reference/%E6%A8%A1%E5%9E%8B-api/%E6%96%87%E6%9C%AC%E8%BD%AC%E8%AF%AD%E9%9F%B3, https://docs.bigmodel.cn/api-reference/%E6%A8%A1%E5%9E%8B-api/%E5%9B%BE%E5%83%8F%E7%94%9F%E6%88%90 |
 | `zai` | on `https://api.z.ai/api/paas/v4` (offered): `glm-asr-2512` | no | same base: `glm-image`; URLs only | https://docs.z.ai/api-reference/audio/audio-transcriptions, https://docs.z.ai/api-reference/image/generate-image |
 | `minimax` | no: `/v1/speech_to_text` | no: `t2a_v2` answers JSON with hex audio | on `https://api.minimax.io/v1` (international) or `https://api.minimaxi.com/v1` (China, the host of its messages base), offered: `MiniMax-H3-Image`, `MiniMax-H3-Image-Highspeed`; `b64_json` | https://platform.minimax.io/docs/api-reference/image-generation-h3-generations.md |
-| `ark` | no: speech is on openspeech.bytedance.com | no: likewise | on `https://ark.cn-beijing.volces.com/api/v3` (offered), Seedream; `b64_json` | https://docs.volcengine.com/docs/82379/1541523 |
+| `ark` | no: speech is on openspeech.bytedance.com | no: likewise | on `https://ark.cn-beijing.volces.com/api/v3` (offered): `doubao-seedream-5-5-261028`, `doubao-seedream-5-0-pro-260628`, `doubao-seedream-5-0-flash-260915`, `doubao-seedream-4-0-260415` (the dated Model IDs of https://www.volcengine.com/docs/82379/1330310); `b64_json` | https://docs.volcengine.com/docs/82379/1541523 |
 | `ark-plan` | no | no | on `https://ark.cn-beijing.volces.com/api/plan/v3` (offered): `doubao-seedream-5.5`, `doubao-seedream-5.0-pro`, `doubao-seedream-5.0-flash`, with the Agent Plan key | https://docs.volcengine.com/docs/ark/agent-plan-personal-visual-models?lang=zh |
 | `ark-coding` | no | no | no: a Coding Plan key is for coding tools only | https://docs.volcengine.com/docs/ark/coding-plan-personal-ai-claude-code?lang=zh |
 | `deepseek` | no: `/v1/tools/asr` | no: `/v1/tools/tts` | no | https://api-docs.deepseek.com |
@@ -148,7 +148,7 @@ Which presets have OpenAI-style `audio/transcriptions`, `audio/speech` and `imag
 
 **Offered, not added.** `openai`, `groq` and `openrouter` carry their `openai` base in the preset. For Zhipu, Z.ai, MiniMax and the two Ark presets the base above is not added by the preset: their docs do not say that the key for the Anthropic-compatible base works on it too, and for GLM's Coding Plan they say it does not (https://docs.z.ai/devpack/faq). Settings → Gateway shows it on the provider as **Use …**, with that caveat and the vendor's page, and the provider's **Test** says whether the key works there. On a vendor with two sites the offer follows the site picked ([below](#china-and-international-sites)); where the vendor documents the base on one site only, the page says the other site's key will not work there. The list is `OPENAI_OFFERS` in `kinds.ts`.
 
-**Not verified:** whether one key works on both bases for a Zhipu, Z.ai or MiniMax pay-as-you-go account; OpenRouter's `/images/generations` as an alias; the exact Seedream ids on pay-as-you-go Ark (none are offered: the owner types them); whether the Agent Plan's pictures answer `b64_json` (a URL answer is fetched under the rule in [Images](#images)).
+**Not verified:** whether one key works on both bases for a Zhipu, Z.ai or MiniMax pay-as-you-go account; OpenRouter's `/images/generations` as an alias; whether the Agent Plan's pictures answer `b64_json` (a URL answer is fetched under the rule in [Images](#images)).
 
 #### China and international sites
 
