@@ -409,6 +409,17 @@ button.gw-chip { cursor: pointer; }
 .gw-clip { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
 .gw-clip audio { width: 100%; max-width: 360px; }
 .gw-picture { max-width: min(256px, 100%); border-radius: 8px; border: 1px solid var(--hairline); }
+.gw-speech-list { list-style: none; margin: 0 0 4px; padding: 0; display: grid; gap: 8px; font-size: 13px; }
+.gw-speech-list li { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.gw-speech-list small { font-size: 12px; overflow-wrap: anywhere; }
+.gw-row-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.gw-row-head b { font-weight: 500; overflow-wrap: anywhere; }
+.gw-row-tests { display: flex; flex-wrap: wrap; gap: 6px; }
+.gw-row-tests .btn2 { padding: 2px 10px; font-size: 12px; }
+.gw-order-list { margin: 0; padding-left: 20px; display: grid; gap: 8px; font-size: 13px; }
+.gw-order-list li { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.gw-order-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; overflow-wrap: anywhere; }
+.gw-order-head .gw-order .btn2 { padding: 2px 10px; font-size: 12px; }
 .gw-who { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 2px; font-size: 12px; overflow-wrap: anywhere; }
 .gw-who b { font-weight: 500; }
 .linkbtn { border: none; background: none; padding: 0; color: var(--link); font: inherit; cursor: pointer; text-decoration: underline; }

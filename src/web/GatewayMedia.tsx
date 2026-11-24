@@ -1,73 +1,77 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { getJson, sendJson, type GatewayInfo, type GatewayMediaProvider, type GatewaySpeechInfo, type SpeechChains, type SpeechChoice, type SpeechPlace } from "./api.ts";
+import { getJson, sendJson, type GatewayInfo, type GatewayMediaProvider, type GatewaySpeechInfo, type SpeechChainItem, type SpeechChains, type SpeechCustomProvider, type SpeechOrder } from "./api.ts";
 import type { T } from "./MachineClis.tsx";
 
 /**
  * Settings → Gateway's Speech and Image groups (docs/model-gateway.md#speech-group, #image-group).
  *
- * Speech: where the gateway's speech sits in providers.yaml for ASR and for TTS: off, after the
- * current default (the safe choice: the default keeps answering), or the default. Saving never
- * moves the default unless the owner picks "default". Live never goes through the gateway.
+ * Speech: every speech provider in one list, the gateway's that can and the space's own from
+ * providers.yaml (custom), and for ASR and for TTS an order: the first answers, the rest are tried
+ * after it. Nothing here names a provider the space does not have: the names come from the server's
+ * view, which lists the built-in default's provider only when it is really there. Live is shown,
+ * read-only, when a provider can do it; it never goes through the gateway.
  * Image: the picture tier, which providers can draw and why others cannot, and a test picture.
- * Both tests run on click only and cost a little at the vendor.
+ * Every test runs on click only and costs a little at the vendor.
  */
 
 type Role = "asr" | "tts";
 const ROLES: Role[] = ["asr", "tts"];
 
-/** A chain as the page says it: the first answers, the rest are tried after it. */
-function Chain({ chain, t }: { chain: string[]; t: T }) {
-  if (!chain.length) return <span className="cli-dim">{t("speechg.none")}</span>;
+const keyOf = (i: SpeechChainItem) => ("gateway" in i ? `g:${i.gateway}` : `p:${i.provider}`);
+const canGw = (p: GatewayMediaProvider, role: Role | "image") => p.serves[role] === true && !p.off;
+const modelsOf = (p: GatewayMediaProvider, role: Role) => (role === "asr" ? p.asrModels : p.ttsModels);
+
+/** A gateway provider as an order item: its first model of the kind, and for TTS its first documented voice. */
+function gatewayItem(p: GatewayMediaProvider, role: Role): SpeechChainItem {
+  const model = modelsOf(p, role)[0] ?? "";
+  const voice = role === "tts" ? p.voices[model]?.[0] : undefined;
+  return { gateway: p.name, model, ...(voice ? { voice } : {}) };
+}
+
+/** Where a custom provider is, in the page's words. */
+function whereOf(c: SpeechCustomProvider, t: T): string | undefined {
+  if (c.located === false) return t("speechg.notFound");
+  if (c.machine === undefined) return undefined;
+  return c.machine ? t("speechg.onMachine", { machine: c.machine }) : t("speechg.here");
+}
+
+function ServesChips({ serves, t }: { serves: { asr: boolean; tts: boolean; live?: boolean }; t: T }) {
   return (
-    <span className="gw-chain">
-      {chain.map((n, i) => (
-        <span key={n}>
-          {i > 0 && <span className="cli-dim"> → </span>}
-          <b className={n.startsWith("gateway-") ? "gw-ours" : undefined}>{n}</b>
-        </span>
+    <>
+      {(["asr", "tts", "live"] as const).filter((k) => serves[k] !== undefined).map((k) => (
+        <span key={k} className={`gw-chip ${serves[k] ? "on" : "no"}`}>{serves[k] ? "✓" : "✕"} {t(`speechg.${k}`)}</span>
       ))}
-    </span>
+    </>
   );
 }
-
-function Chains({ chains, label, t }: { chains: SpeechChains; label: string; t: T }) {
-  return (
-    <div className="gw-chains">
-      <small className="cli-dim">{label}</small>
-      <small>{t("speechg.asr")}: <Chain chain={chains.asr} t={t} /></small>
-      <small>{t("speechg.tts")}: <Chain chain={chains.tts} t={t} /></small>
-      <small>{t("speechg.live")}: <Chain chain={chains.live} t={t} /></small>
-    </div>
-  );
-}
-
-const can = (p: GatewayMediaProvider, role: Role | "image") => p.serves[role] === true && !p.off;
 
 export function SpeechCard({ g, editable, onAddProvider, initial, t }: { g: GatewayInfo; editable: boolean; onAddProvider?: () => void; initial?: GatewaySpeechInfo; t: T }) {
   const [info, setInfo] = useState<GatewaySpeechInfo | null>(initial ?? null);
-  const [draft, setDraft] = useState<SpeechChoice | null>(initial?.choice ?? null);
+  const [draft, setDraft] = useState<SpeechOrder | null>(initial?.order ?? null);
   const [after, setAfter] = useState<SpeechChains | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
-  const [clip, setClip] = useState<{ audio: string; type: string; ms: number } | null>(null);
+  const [clip, setClip] = useState<{ audio: string; type: string; ms: number; by: string } | null>(null);
   const [heard, setHeard] = useState("");
   const [testError, setTestError] = useState("");
-  const [testing, setTesting] = useState<"" | Role>("");
+  const [testing, setTesting] = useState("");
   // Read again when the gateway's providers change (a provider added, a base set).
-  const stamp = JSON.stringify(g.providers.map((p) => [p.name, p.openai, p.disabled, p.off, p.models]));
+  const stamp = JSON.stringify(g.providers.map((p) => [p.name, p.openai, p.disabled, p.off, p.models, p.kinds]));
   const load = useCallback(() => {
     getJson<GatewaySpeechInfo>("/api/model/gateway/speech")
       .then((i) => {
         setInfo(i);
-        setDraft(i.choice);
+        setDraft(i.order);
         setAfter(null);
       })
       .catch((e) => setError((e as Error).message));
   }, []);
-  useEffect(load, [load, stamp]);
-  const changed = Boolean(info && draft && JSON.stringify(draft) !== JSON.stringify(info.choice));
-  const complete = Boolean(draft && ROLES.every((r) => draft[r].place === "off" || (draft[r].provider && draft[r].model)));
+  useEffect(() => {
+    if (!initial) load();
+  }, [load, stamp]);
+  const changed = Boolean(info && draft && JSON.stringify(draft) !== JSON.stringify(info.order));
+  const complete = Boolean(draft && ROLES.every((r) => draft[r].every((i) => !("gateway" in i) || i.model)));
   // What saving would give, asked of the server (the same planner that writes the file).
   useEffect(() => {
     if (!changed || !complete || !draft) {
@@ -87,10 +91,29 @@ export function SpeechCard({ g, editable, onAddProvider, initial, t }: { g: Gate
   }, [changed, complete, JSON.stringify(draft)]);
   if (!info || !draft) return <div className="setcard gw"><p className="sethead">{t("speechg.title")}</p><p className="setnote">{error || t("common.loading")}</p></div>;
   const lock = !editable || Boolean(info.readOnly) || busy;
-  const set = (role: Role, patch: Partial<SpeechChoice[Role]>) => {
+  const speechGw = info.providers.filter((p) => canGw(p, "asr") || canGw(p, "tts"));
+  const gwOf = (name: string) => info.providers.find((p) => p.name === name);
+  const customOf = (name: string) => info.custom.find((c) => c.name === name);
+  const nameOf = (i: SpeechChainItem) => ("gateway" in i ? i.gateway : i.provider);
+  const setRole = (role: Role, list: SpeechChainItem[]) => {
     setStatus("");
     setError("");
-    setDraft((d) => (d ? { ...d, [role]: { ...d[role], ...patch } } : d));
+    setDraft((d) => (d ? { ...d, [role]: list } : d));
+  };
+  const move = (role: Role, i: number, by: number) => {
+    const list = [...draft[role]];
+    const [x] = list.splice(i, 1);
+    list.splice(i + by, 0, x!);
+    setRole(role, list);
+  };
+  const patch = (role: Role, i: number, p: Partial<{ model: string; voice: string }>) => setRole(role, draft[role].map((x, j) => (j === i && "gateway" in x ? { ...x, ...p } : x)));
+  // What can join an order: custom providers that can take the role, gateway providers that can.
+  const addable = (role: Role) => {
+    const taken = new Set(draft[role].map(keyOf));
+    return [
+      ...info.custom.filter((c) => c.serves[role] && !taken.has(`p:${c.name}`)).map((c) => ({ key: `p:${c.name}`, label: `${c.name} · ${t("speechg.custom")}`, item: { provider: c.name } as SpeechChainItem })),
+      ...info.providers.filter((p) => canGw(p, role) && !taken.has(`g:${p.name}`)).map((p) => ({ key: `g:${p.name}`, label: `${p.name} · ${p.label} · ${t("speechg.viaGateway")}`, item: gatewayItem(p, role) })),
+    ];
   };
   const save = async () => {
     setBusy(true);
@@ -106,18 +129,27 @@ export function SpeechCard({ g, editable, onAddProvider, initial, t }: { g: Gate
       setBusy(false);
     }
   };
-  const test = async (role: Role) => {
-    const c = draft[role];
-    setTesting(role);
+  /** A test of one provider: its TTS speaks, its ASR transcribes the last clip. */
+  const test = async (role: Role, target: { speech: string } | { gateway: string }) => {
+    const id = `${role}:${"speech" in target ? target.speech : target.gateway}`;
+    setTesting(id);
     setTestError("");
     try {
+      let body: Record<string, unknown> = { role, ...target };
+      if ("gateway" in target) {
+        const p = gwOf(target.gateway)!;
+        const inOrder = draft[role].find((x) => "gateway" in x && x.gateway === target.gateway) as { model: string; voice?: string } | undefined;
+        const model = inOrder?.model ?? modelsOf(p, role)[0];
+        const voice = role === "tts" ? inOrder?.voice ?? p.voices[model ?? ""]?.[0] : undefined;
+        body = { role, provider: p.name, model, ...(voice ? { voice } : {}) };
+      }
       if (role === "tts") {
         setHeard("");
-        const r = await sendJson<{ failed?: boolean; error?: string; audio?: string; contentType?: string; ms: number }>("POST", "/api/model/gateway/speech/test", { role, provider: c.provider, model: c.model, ...(draft.tts.voice ? { voice: draft.tts.voice } : {}) });
+        const r = await sendJson<{ failed?: boolean; error?: string; audio?: string; contentType?: string; ms: number }>("POST", "/api/model/gateway/speech/test", body);
         if (r.failed || !r.audio) setTestError(r.error ?? "failed");
-        else setClip({ audio: r.audio, type: r.contentType ?? "audio/wav", ms: r.ms });
+        else setClip({ audio: r.audio, type: r.contentType ?? "audio/wav", ms: r.ms, by: "speech" in target ? target.speech : target.gateway });
       } else {
-        const r = await sendJson<{ failed?: boolean; error?: string; text?: string; ms: number }>("POST", "/api/model/gateway/speech/test", { role, provider: c.provider, model: c.model, audio: clip?.audio });
+        const r = await sendJson<{ failed?: boolean; error?: string; text?: string; ms: number }>("POST", "/api/model/gateway/speech/test", { ...body, audio: clip?.audio });
         if (r.failed) setTestError(r.error ?? "failed");
         else setHeard(t("speechg.heard", { text: r.text ?? "", ms: r.ms }));
       }
@@ -127,106 +159,156 @@ export function SpeechCard({ g, editable, onAddProvider, initial, t }: { g: Gate
       setTesting("");
     }
   };
-  const anyCan = (role: Role) => info.providers.some((p) => can(p, role));
+  const testButtons = (serves: { asr: boolean; tts: boolean }, target: { speech: string } | { gateway: string }) => {
+    const name = "speech" in target ? target.speech : target.gateway;
+    return (
+      <span className="gw-row-tests">
+        {serves.tts && <button className="btn2" disabled={Boolean(testing)} onClick={() => void test("tts", target)}>{testing === `tts:${name}` ? t("gateway.testing") : t("speechg.testTts")}</button>}
+        {serves.asr && <button className="btn2" disabled={Boolean(testing) || !clip} title={clip ? undefined : t("speechg.needClip")} onClick={() => void test("asr", target)}>{testing === `asr:${name}` ? t("gateway.testing") : t("speechg.testAsr")}</button>}
+      </span>
+    );
+  };
+  const nothing = info.custom.length === 0 && speechGw.length === 0;
   return (
     <div className="setcard gw">
       <p className="sethead">{t("speechg.title")}</p>
       <p className="setnote">{t("speechg.intro")}</p>
       <div className="gw-pad">
-        <Chains chains={info.now} label={t("speechg.now")} t={t} />
-        <small className="cli-dim gw-block">{t("speechg.liveNote")}</small>
         {info.readOnly && <p className="setnote err">{t("speechg.readOnly", { why: info.readOnly })}</p>}
         {info.problem && <p className="setnote err">{info.problem}</p>}
-        {info.handWritten.length > 0 && <small className="cli-dim gw-block">{t("speechg.handWritten", { names: info.handWritten.join(", ") })}</small>}
+        {nothing ? (
+          <p className="setnote">
+            {t("speechg.nothing")} {onAddProvider && <button className="linkbtn" onClick={onAddProvider}>{t("gateway.addCan")}</button>}
+          </p>
+        ) : (
+          <ul className="gw-speech-list">
+            {info.custom.map((c) => (
+              <li key={`p:${c.name}`}>
+                <span className="gw-row-head">
+                  <b>{c.name}</b>
+                  <span className="gw-chip">{t("speechg.custom")}</span>
+                  <ServesChips serves={c.serves} t={t} />
+                </span>
+                {(whereOf(c, t) || c.off) && <small className={c.located === false || c.off ? "gw-warn" : "cli-dim"}>{[whereOf(c, t), c.off].filter(Boolean).join(" · ")}</small>}
+                {c.testable && testButtons(c.serves, { speech: c.name })}
+              </li>
+            ))}
+            {speechGw.map((p) => (
+              <li key={`g:${p.name}`}>
+                <span className="gw-row-head">
+                  <b>{p.name}</b>
+                  {p.label !== p.name && <small className="cli-dim">{p.label}</small>}
+                  <span className="gw-chip kind-asr">{t("speechg.viaGateway")}</span>
+                  <ServesChips serves={{ asr: canGw(p, "asr"), tts: canGw(p, "tts") }} t={t} />
+                </span>
+                {testButtons({ asr: canGw(p, "asr"), tts: canGw(p, "tts") }, { gateway: p.name })}
+              </li>
+            ))}
+          </ul>
+        )}
+        {!nothing && onAddProvider && <small className="cli-dim gw-block"><button className="linkbtn" onClick={onAddProvider}>{t("gateway.addCan")}</button></small>}
         {ROLES.map((role) => {
-          const c = draft[role];
-          const offered = info.providers.filter((p) => can(p, role));
-          const p = info.providers.find((x) => x.name === c.provider);
-          const models = p ? (role === "asr" ? p.asrModels : p.ttsModels) : [];
-          const voices = p && role === "tts" && c.model ? p.voices[c.model] ?? [] : [];
-          const pick = (name: string) => {
-            const q = info.providers.find((x) => x.name === name);
-            const m = q ? (role === "asr" ? q.asrModels : q.ttsModels)[0] : undefined;
-            set(role, { provider: name, model: m, ...(role === "tts" ? { voice: m && q ? q.voices[m]?.[0] : undefined } : {}) });
-          };
+          const list = draft[role];
+          const more = addable(role);
           return (
             <fieldset key={role} className="gw-role">
               <legend>{t(role === "asr" ? "speechg.asrTitle" : "speechg.ttsTitle")}</legend>
-              <div className="gw-places" role="radiogroup" aria-label={t(role === "asr" ? "speechg.asrTitle" : "speechg.ttsTitle")}>
-                {(["off", "fallback", "default"] as SpeechPlace[]).map((place) => (
-                  <label key={place} className="gw-check">
-                    <input type="radio" name={`speech-${role}`} checked={c.place === place} disabled={lock || (place !== "off" && !anyCan(role))} onChange={() => (place !== "off" && !c.provider && offered[0] ? (set(role, { place }), pick(offered[0].name)) : set(role, { place }))} />
-                    {t(`speechg.place.${place}`)}
-                  </label>
-                ))}
-              </div>
-              {c.place === "default" && <small className="gw-warn">{t("speechg.defaultWarn")}</small>}
-              {!anyCan(role) && (
-                <small className="cli-dim">
-                  {t("speechg.nobody")} {onAddProvider && <button className="linkbtn" onClick={onAddProvider}>{t("gateway.addCan")}</button>}
-                </small>
+              {list.length === 0 ? (
+                <small className="cli-dim">{t("speechg.empty")}</small>
+              ) : (
+                <ol className="gw-order-list">
+                  {list.map((item, i) => {
+                    const p = "gateway" in item ? gwOf(item.gateway) : undefined;
+                    const c = "gateway" in item ? undefined : customOf(item.provider);
+                    const models = p ? modelsOf(p, role) : [];
+                    const voices = p && "gateway" in item && role === "tts" ? p.voices[item.model] ?? [] : [];
+                    return (
+                      <li key={keyOf(item)}>
+                        <div className="gw-order-head">
+                          <span>
+                            <b>{nameOf(item)}</b> <small className="cli-dim">{i === 0 ? t("speechg.first") : t("speechg.then")}{"gateway" in item ? ` · ${t("speechg.viaGateway")}` : c ? ` · ${t("speechg.custom")}` : ""}</small>
+                          </span>
+                          {!lock && (
+                            <span className="gw-order">
+                              <button className="btn2" aria-label={t("gateway.up1")} disabled={i === 0} onClick={() => move(role, i, -1)}>↑</button>
+                              <button className="btn2" aria-label={t("gateway.down1")} disabled={i === list.length - 1} onClick={() => move(role, i, 1)}>↓</button>
+                              <button className="btn2" aria-label={t("speechg.takeOut", { name: nameOf(item) })} onClick={() => setRole(role, list.filter((_, j) => j !== i))}>✕</button>
+                            </span>
+                          )}
+                        </div>
+                        {"gateway" in item && !p && <small className="gw-warn">{t("speechg.gone")}</small>}
+                        {"gateway" in item && p && (
+                          <>
+                            <label className="gw-field">
+                              <span>{t("speechg.model")}</span>
+                              {models.length ? (
+                                <select className="setselect" value={item.model} disabled={lock} onChange={(e) => patch(role, i, { model: e.target.value, ...(role === "tts" ? { voice: p.voices[e.target.value]?.[0] ?? "" } : {}) })}>
+                                  {!models.includes(item.model) && <option value={item.model}>{item.model}</option>}
+                                  {models.map((m) => <option key={m} value={m}>{m}</option>)}
+                                </select>
+                              ) : (
+                                <input className="setselect" value={item.model} spellCheck={false} autoCapitalize="off" placeholder={t("speechg.modelTyped")} disabled={lock} onChange={(e) => patch(role, i, { model: e.target.value.trim() })} />
+                              )}
+                            </label>
+                            {role === "tts" && (
+                              <label className="gw-field">
+                                <span>{t("speechg.voice")}</span>
+                                {voices.length ? (
+                                  <select className="setselect" value={item.voice ?? ""} disabled={lock} onChange={(e) => patch(role, i, { voice: e.target.value })}>
+                                    {voices.map((v) => <option key={v} value={v}>{v}</option>)}
+                                  </select>
+                                ) : (
+                                  <input className="setselect" value={item.voice ?? ""} spellCheck={false} autoCapitalize="off" placeholder={t("speechg.voiceTyped")} disabled={lock} onChange={(e) => patch(role, i, { voice: e.target.value.trim() })} />
+                                )}
+                              </label>
+                            )}
+                          </>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ol>
               )}
-              {c.place !== "off" && (
-                <>
-                  <label className="gw-field">
-                    <span>{t("speechg.provider")}</span>
-                    <select className="setselect" value={c.provider ?? ""} disabled={lock} onChange={(e) => pick(e.target.value)}>
-                      {!c.provider && <option value="" />}
-                      {offered.map((x) => <option key={x.name} value={x.name}>{x.label === x.name ? x.name : `${x.name} · ${x.label}`}</option>)}
-                    </select>
-                  </label>
-                  <label className="gw-field">
-                    <span>{t("speechg.model")}</span>
-                    {models.length ? (
-                      <select className="setselect" value={c.model ?? ""} disabled={lock} onChange={(e) => set(role, { model: e.target.value, ...(role === "tts" ? { voice: p?.voices[e.target.value]?.[0] } : {}) })}>
-                        {c.model && !models.includes(c.model) && <option value={c.model}>{c.model}</option>}
-                        {models.map((m) => <option key={m} value={m}>{m}</option>)}
-                      </select>
-                    ) : (
-                      <input className="setselect" value={c.model ?? ""} spellCheck={false} autoCapitalize="off" placeholder={t("speechg.modelTyped")} disabled={lock} onChange={(e) => set(role, { model: e.target.value.trim() })} />
-                    )}
-                  </label>
-                  {role === "tts" && (
-                    <label className="gw-field">
-                      <span>{t("speechg.voice")}</span>
-                      {voices.length ? (
-                        <select className="setselect" value={draft.tts.voice ?? ""} disabled={lock} onChange={(e) => set("tts", { voice: e.target.value })}>
-                          {voices.map((v) => <option key={v} value={v}>{v}</option>)}
-                        </select>
-                      ) : (
-                        <input className="setselect" value={draft.tts.voice ?? ""} spellCheck={false} autoCapitalize="off" placeholder={t("speechg.voiceTyped")} disabled={lock} onChange={(e) => set("tts", { voice: e.target.value.trim() })} />
-                      )}
-                    </label>
-                  )}
-                </>
+              {!lock && more.length > 0 && (
+                <select className="setselect" value="" aria-label={t("speechg.add")} onChange={(e) => { const m = more.find((x) => x.key === e.target.value); if (m) setRole(role, [...list, m.item]); }}>
+                  <option value="">{t("speechg.add")}</option>
+                  {more.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
+                </select>
               )}
             </fieldset>
           );
         })}
-        {after && <Chains chains={after} label={t("speechg.after")} t={t} />}
+        {info.live && (
+          <small className="cli-dim gw-block">
+            {t("speechg.live")}: {info.live.length ? info.live.join(" → ") : t("speechg.none")} · {t("speechg.liveNote")}
+          </small>
+        )}
+        {after && (
+          <div className="gw-chains">
+            <small className="cli-dim">{t("speechg.after")}</small>
+            <small>{t("speechg.asr")}: {after.asr.join(" → ") || t("speechg.none")}</small>
+            <small>{t("speechg.tts")}: {after.tts.join(" → ") || t("speechg.none")}</small>
+          </div>
+        )}
         {editable && !info.readOnly && (
           <div className="setbtns">
             <span className="setbtns-gap" />
-            <button className="btn2" disabled={busy || !changed} onClick={() => { setDraft(info.choice); setStatus(""); setError(""); }}>{t("common.cancel")}</button>
+            <button className="btn2" disabled={busy || !changed} onClick={() => { setDraft(info.order); setStatus(""); setError(""); }}>{t("common.cancel")}</button>
             <button className="btn2 primary" disabled={busy || !changed || !complete} onClick={() => void save()}>{t("magpie.save")}</button>
           </div>
         )}
         {status && <p className="setnote" role="status">{status}</p>}
         {error && <p className="setnote err" role="alert">{error}</p>}
-        <div className="gw-tests-row">
-          <button className="btn2" disabled={Boolean(testing) || draft.tts.place === "off" || !draft.tts.provider || !draft.tts.model} onClick={() => void test("tts")}>{testing === "tts" ? t("gateway.testing") : t("speechg.testTts")}</button>
-          <button className="btn2" disabled={Boolean(testing) || !clip || draft.asr.place === "off" || !draft.asr.provider || !draft.asr.model} onClick={() => void test("asr")}>{testing === "asr" ? t("gateway.testing") : t("speechg.testAsr")}</button>
-        </div>
-        <small className="cli-dim gw-block">{t("speechg.testCost")}</small>
+        {!nothing && <small className="cli-dim gw-block">{t("speechg.testCost")}</small>}
         {clip && (
           <div className="gw-clip">
             <audio controls src={`data:${clip.type};base64,${clip.audio}`} />
-            <small className="cli-dim">{t("speechg.spoke", { ms: clip.ms })}</small>
+            <small className="cli-dim">{t("speechg.spoke", { ms: clip.ms, name: clip.by })}</small>
           </div>
         )}
         {heard && <p className="setnote" role="status">{heard}</p>}
         {testError && <p className="setnote err" role="alert">{testError}</p>}
-        <small className="cli-dim gw-block">{t("speechg.file", { file: info.file })}</small>
+        {info.exists && <small className="cli-dim gw-block">{t("speechg.file", { file: info.file })}</small>}
       </div>
     </div>
   );
