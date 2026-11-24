@@ -145,27 +145,47 @@ test("a provider whose preset leaves that base out offers it on its own row, for
 
 const gw = (over: Partial<GatewayInfo> = {}): GatewayInfo => ({ file: "/w/gateway.yaml", exists: true, answers: true, providers: [base], groups: {}, tiers: {}, models: [], imageModels: [], textModels: [], asrModels: [], ttsModels: [], presets: [], runtimes: [], offer: { claude: false }, ...over });
 const oa = { name: "oa", label: "OpenAI", serves: { asr: true as const, tts: true as const, image: true as const }, asrModels: ["whisper-1"], ttsModels: ["tts-1"], imageModels: ["gpt-image-1"], voices: { "tts-1": ["alloy", "nova"] } };
-const speechInfo = (over: Partial<GatewaySpeechInfo> = {}): GatewaySpeechInfo => ({ file: "/w/providers.yaml", exists: false, source: "builtin", now: { asr: ["voice-studio"], tts: ["voice-studio"], live: ["voice-studio"] }, kinds: {}, choice: { asr: { place: "off" }, tts: { place: "off" } }, handWritten: [], providers: [oa], ...over });
+const speechInfo = (over: Partial<GatewaySpeechInfo> = {}): GatewaySpeechInfo => ({ file: "/w/providers.yaml", exists: false, source: "builtin", custom: [], order: { asr: [], tts: [] }, providers: [oa], ...over });
+const studio = { name: "voice-studio", kind: "voice-studio", serves: { asr: true, tts: true, live: true }, machine: "", located: true, testable: true };
 
-test("the Speech group: what answers now, the three places with the safe one named, live not through the gateway, tests that cost", () => {
-  const html = renderToStaticMarkup(<SpeechCard g={gw()} editable initial={speechInfo()} t={t} />);
-  expect(html).toContain("Answers now");
-  expect(html).toContain("<b>voice-studio</b>");
-  expect(html).toContain("Live conversation does not go through the gateway");
-  expect(html).toContain("After the current default (safe: the default keeps answering)");
-  expect(html).toMatch(/type="radio" name="speech-asr" checked=""\/>Not through the gateway/);
-  expect(html).toContain("cost a little");
-  expect(html).toMatch(/<button class="btn2" disabled="">Test TTS<\/button>/);
-  // As default: the warning, the provider, model and voice from the vendor's documentation.
-  const chosen = renderToStaticMarkup(<SpeechCard g={gw()} editable initial={speechInfo({ choice: { asr: { place: "fallback", provider: "oa", model: "whisper-1" }, tts: { place: "default", provider: "oa", model: "tts-1", voice: "nova" } } })} t={t} />);
-  expect(chosen).toContain("Apps&#x27; calls then go to this vendor first");
-  expect(chosen).toContain('<option value="nova" selected="">nova</option>');
-  expect(chosen).toContain(">Test TTS</button>");
-  // No provider can: said so, with a way to add one.
-  const none = renderToStaticMarkup(<SpeechCard g={gw()} editable initial={speechInfo({ providers: [{ ...oa, serves: { asr: "no openai base", tts: "no openai base", image: "no openai base" } }] })} onAddProvider={noop} t={t} />);
-  expect(none).toContain("No provider here can do this through the gateway yet.");
-  expect(none).toContain("Add a provider that can do this");
-  expect(renderToStaticMarkup(<SpeechCard g={gw()} editable initial={speechInfo()} t={zh} />)).toContain("实时对话不走网关");
+test("the Speech group, nothing of the space's own: the gateway's providers only, empty orders, no live, nothing named that is not there", () => {
+  for (const tr of [t, zh]) {
+    const html = renderToStaticMarkup(<SpeechCard g={gw()} editable initial={speechInfo()} onAddProvider={noop} t={tr} />);
+    expect(html).not.toMatch(/voice-studio/i);
+    expect(html).not.toContain(tr("speechg.live"));
+    expect(html).toContain("<b>oa</b>");
+    expect(html).toContain(tr("speechg.viaGateway"));
+    expect(html).toContain(tr("speechg.empty"));
+    expect(html).toContain(`<option value="g:oa">oa · OpenAI · ${tr("speechg.viaGateway")}</option>`);
+  }
+  // No provider at all can: the plain empty state with a way to add one.
+  const none = renderToStaticMarkup(<SpeechCard g={gw()} editable initial={speechInfo({ providers: [{ ...oa, serves: { asr: "no openai base", tts: "no openai base", image: "no openai base" } }] })} onAddProvider={noop} t={zh} />);
+  expect(none).toContain("还没有服务商负责语音。");
+  expect(none).toContain("添加能做这件事的服务商");
+  // No dictionary string names a provider.
+  for (const tr of [t, zh]) for (const k of ["speechg.intro", "speechg.nothing", "speechg.liveNote", "speechg.empty", "imageg.intro", "imageg.none", "imageg.urlRule"] as const) expect(tr(k)).not.toMatch(/voice.?studio/i);
+});
+
+test("the Speech group with a custom provider: one list, each order first-to-last with its controls, live read-only, tests that cost", () => {
+  const info = speechInfo({ source: "file", exists: true, custom: [studio], order: { asr: [{ provider: "voice-studio" }, { gateway: "oa", model: "whisper-1" }], tts: [{ gateway: "oa", model: "tts-1", voice: "nova" }, { provider: "voice-studio" }] }, live: ["voice-studio"] });
+  const html = renderToStaticMarkup(<SpeechCard g={gw()} editable initial={info} t={zh} />);
+  expect(html).toContain("<b>voice-studio</b><span class=\"gw-chip\">自定义</span>");
+  expect(html).toContain("在本机");
+  expect(html).toContain("实时对话: voice-studio · 实时对话不走网关");
+  expect(html).toMatch(/<b>voice-studio<\/b> <small class="cli-dim">首先负责 · 自定义<\/small>/);
+  expect(html).toMatch(/<b>oa<\/b> <small class="cli-dim">首先负责 · 经网关<\/small>/);
+  expect(html).toContain('<option value="nova" selected="">nova</option>');
+  expect(html).toContain('aria-label="把 voice-studio 移出这个顺序"');
+  expect(html).toContain(">测试 TTS</button>");
+  expect(html).toContain("云端厂商会收少量费用");
+  // Somewhere else, or nowhere: said so.
+  const away = renderToStaticMarkup(<SpeechCard g={gw()} editable initial={{ ...info, custom: [{ ...studio, machine: "gpu-box" }] }} t={t} />);
+  expect(away).toContain("On gpu-box");
+  const lost = renderToStaticMarkup(<SpeechCard g={gw()} editable initial={{ ...info, custom: [{ ...studio, located: false }] }} t={t} />);
+  expect(lost).toContain("Not found on this machine or its peers");
+  // A file the page cannot edit: no controls.
+  const ro = renderToStaticMarkup(<SpeechCard g={gw()} editable initial={{ ...info, readOnly: "one line" }} t={t} />);
+  expect(ro).not.toContain("aria-label=\"Move up\"");
 });
 
 test("the Image group: who can draw and why not, the picture model, a test that costs, the URL rule", () => {

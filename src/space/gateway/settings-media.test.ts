@@ -71,9 +71,11 @@ afterEach(async () => {
   await rm(home, { recursive: true, force: true });
 });
 
-const voiceStudio = { hasLocal: () => false, servicePort: () => undefined, callLocal: async () => new Response("", { status: 503 }), callRemote: async () => new Response("", { status: 503 }), peers: { get: () => undefined, names: () => [] } } as never;
+/** The voice-studio app's place, as the bus reports it: here (`studio`) or nowhere. */
+const voiceStudioDeps = (studio: boolean) => ({ hasLocal: () => studio, servicePort: () => (studio ? 9 : undefined), callLocal: async () => new Response("", { status: 503 }), callRemote: async () => new Response("", { status: 503 }), peers: { get: () => undefined, names: () => [], providerOf: () => undefined } }) as never;
 
-async function setup(gatewayYaml?: string) {
+async function setup(gatewayYaml?: string, o: { studio?: boolean } = {}) {
+  const voiceStudio = voiceStudioDeps(o.studio ?? false);
   const env: Record<string, string | undefined> = { OA: KEY };
   const lines: string[] = [];
   const gateway = new ModelGateway({ log: (l) => lines.push(l) });
@@ -105,7 +107,14 @@ async function setup(gatewayYaml?: string) {
     isAppCredential: async (t) => t === "app-token",
     claude: () => undefined,
     log: (l) => lines.push(l),
-    speech: { config: () => speech.config, source: () => speech.status().source, configError: () => speech.status().configError },
+    speech: {
+      config: () => speech.config,
+      source: () => speech.status().source,
+      configError: () => speech.status().configError,
+      cells: () => speech.cells(),
+      speak: (provider, text) => speech.speak({ app: "settings", tag: "t" }, { text, voices: [], provider }),
+      transcribe: async (provider, file) => (await speech.transcribe({ app: "settings", tag: "t" }, { file, filename: "t.wav", language: "", context: "", provider })).result,
+    },
     reloadSpeech: async () => {
       reloads++;
       speech.reload(await load());
@@ -191,43 +200,71 @@ describe("model kinds (docs/model-gateway.md#kinds)", () => {
   });
 });
 
-describe("the speech choice in providers.yaml (docs/speech.md#through-the-gateway)", () => {
-  const both = (asr: string, tts: string) => ({ asr: { place: asr as "off", provider: "oa", model: "whisper-1" }, tts: { place: tts as "off", provider: "oa", model: "tts-1", voice: "alloy" } });
+describe("the speech orders in providers.yaml (docs/speech.md#from-settings)", () => {
+  const gw = (_role: "asr" | "tts", model: string, voice?: string) => ({ gateway: "oa", model, ...(voice ? { voice } : {}) });
+  const vs = { provider: "voice-studio" };
 
-  test("no file: the built-in voice-studio default is written out, and stays the default with the gateway as fallback", () => {
-    const { text, after } = setSpeechText(undefined, both("fallback", "fallback"), {});
+  test("no file, voice-studio there: the built-in default is written out and stays first; the gateway after it", () => {
+    const { text, after } = setSpeechText(undefined, { asr: [vs, gw("asr", "whisper-1")], tts: [vs, gw("tts", "tts-1", "nova")] }, {}, "present");
     expect(text).toContain("    voice-studio:\n      kind: voice-studio\n      app: voice-studio\n");
     const b = builtinSpeech();
     for (const role of ["asr", "tts", "live"] as const) expect(after.default[role]).toBe(b.default[role]);
     expect(chainOf(after, "asr")).toEqual(["voice-studio", "gateway-oa"]);
     expect(chainOf(after, "tts")).toEqual(["voice-studio", "gateway-oa"]);
     expect(chainOf(after, "live")).toEqual(["voice-studio"]);
-  });
-
-  test("default for TTS only moves TTS; live stays; back to off restores the old default", () => {
-    const first = setSpeechText(undefined, both("fallback", "fallback"), {}).text;
-    const moved = setSpeechText(first, both("fallback", "default"), {});
+    // The gateway first for TTS: it answers, voice-studio after it; ASR and live stay.
+    const moved = setSpeechText(text, { asr: [vs, gw("asr", "whisper-1")], tts: [gw("tts", "tts-1", "nova"), vs] }, {}, "present");
     expect(chainOf(moved.after, "tts")).toEqual(["gateway-oa", "voice-studio"]);
     expect(chainOf(moved.after, "asr")).toEqual(["voice-studio", "gateway-oa"]);
     expect(chainOf(moved.after, "live")).toEqual(["voice-studio"]);
-    const back = setSpeechText(moved.text, both("off", "off"), {});
-    expect(back.after.default).toEqual({ asr: "voice-studio", tts: "voice-studio", live: "voice-studio" });
-    expect(back.after.providers.map((p) => p.name)).toEqual(["voice-studio"]);
   });
 
-  test("a hand-written file: comments, other providers and named voices kept; an ASR default leaves live where it was", () => {
-    const hand = "# my speech\nspeech:\n  default: { asr: gpu, tts: gpu }   # both on the GPU\n  providers:\n    gpu: { kind: voice-studio, machine: box }  # the GPU box\n    openai:\n      kind: openai-compatible\n      apiKeyEnv: OPENAI_API_KEY   # mine\n  fallback:\n    asr: [openai]\n  voices:\n    narrator: { gpu: en-Frank, openai: onyx }\n";
+  test("no file, voice-studio not there: nothing of it is written", () => {
+    const { text, after } = setSpeechText(undefined, { asr: [gw("asr", "whisper-1")], tts: [] }, {}, "absent");
+    expect(text).not.toContain("voice-studio");
+    expect(after.providers.map((p) => p.name)).toEqual(["gateway-oa"]);
+    expect(chainOf(after, "asr")).toEqual(["gateway-oa"]);
+    expect(chainOf(after, "tts")).toEqual([]);
+    expect(() => setSpeechText(undefined, { asr: [], tts: [] }, {}, "absent")).toThrow(/add a provider/);
+    expect(() => setSpeechText(undefined, { asr: [vs], tts: [] }, {}, "absent")).toThrow(/voice-studio is not a speech provider here/);
+  });
+
+  test("a hand-written file: reorder and remove custom providers, never rewrite them; comments and untouched lines stay", () => {
+    const hand = "# my speech\nspeech:\n  default: { asr: gpu, tts: gpu }   # both on the GPU\n  providers:\n    gpu: { kind: voice-studio, machine: box }  # the GPU box\n    openai:\n      kind: openai-compatible\n      apiKeyEnv: OPENAI_API_KEY   # mine\n  fallback:\n    asr: [openai]   # cloud second\n  voices:\n    narrator: { gpu: en-Frank, openai: onyx }\n";
     const env = { OPENAI_API_KEY: "sk-x" };
     const before = parseProvidersYaml(hand, env).config;
-    const { text, after } = setSpeechText(hand, { asr: { place: "default", provider: "oa", model: "whisper-1" }, tts: { place: "off" } }, env);
+    // Saving the orders as they are writes nothing.
+    const same = setSpeechText(hand, { asr: [{ provider: "gpu" }, { provider: "openai" }], tts: [{ provider: "gpu" }] }, env, "present");
+    expect(same.changed).toBe(false);
+    expect(same.text).toBe(hand);
+    // openai first for ASR, gpu taken out of TTS in favour of openai: only default: and fallback: change.
+    const { text, after } = setSpeechText(hand, { asr: [{ provider: "openai" }, { provider: "gpu" }], tts: [{ provider: "openai" }] }, env, "present");
     expect(text).toContain("# my speech\n");
     expect(text).toContain("    gpu: { kind: voice-studio, machine: box }  # the GPU box\n");
     expect(text).toContain("      apiKeyEnv: OPENAI_API_KEY   # mine\n");
     expect(text).toContain("  default:   # both on the GPU\n");
     expect(after.voices).toEqual(before.voices);
-    expect(chainOf(after, "asr")).toEqual(["gateway-oa", "gpu", "openai"]);
+    expect(text).toContain("    asr: [gpu]   # cloud second\n");
+    expect(chainOf(after, "asr")).toEqual(["openai", "gpu"]);
+    expect(chainOf(after, "tts")).toEqual(["openai"]);
     expect(chainOf(after, "live")).toEqual(chainOf(before, "live"));
-    expect(chainOf(after, "tts")).toEqual(["gpu"]);
+    expect(after.providers.filter((p) => p.name !== "gateway-oa")).toEqual(before.providers);
+    // A gateway provider added for TTS only: one new entry, ASR's lines untouched.
+    const added = setSpeechText(hand, { asr: [{ provider: "gpu" }, { provider: "openai" }], tts: [{ provider: "gpu" }, gw("tts", "tts-1")] }, env, "present");
+    expect(added.text).toContain("  default: { asr: gpu, tts: gpu }   # both on the GPU\n");
+    expect(added.text).toContain("    asr: [openai]   # cloud second\n");
+    expect(chainOf(added.after, "tts")).toEqual(["gpu", "gateway-oa"]);
+  });
+
+  test("a page provider keeps what the owner did not touch; one no order uses goes", () => {
+    const first = setSpeechText(undefined, { asr: [vs, gw("asr", "gpt-4o-transcribe")], tts: [vs, gw("tts", "tts-1-hd", "onyx")] }, {}, "present");
+    // Out of ASR only: its TTS model and voice stay.
+    const asrOut = setSpeechText(first.text, { asr: [vs], tts: [vs, { provider: "gateway-oa" }] }, {}, "present");
+    const p = asrOut.after.providers.find((x) => x.name === "gateway-oa") as { ttsModel: string; voice?: string };
+    expect([p.ttsModel, p.voice]).toEqual(["oa/tts-1-hd", "onyx"]);
+    const gone = setSpeechText(asrOut.text, { asr: [vs], tts: [vs] }, {}, "present");
+    expect(gone.after.providers.map((x) => x.name)).toEqual(["voice-studio"]);
+    expect(() => setSpeechText(first.text, { asr: [vs, vs], tts: [] }, {}, "present")).toThrow(/twice/);
   });
 
   test("a file the page cannot edit is refused with the reason", () => {
@@ -239,63 +276,81 @@ describe("the speech choice in providers.yaml (docs/speech.md#through-the-gatewa
   test("the gateway's speech provider is a cloud provider: a local-only app never reaches it", async () => {
     const v = vendor();
     const { speech, call } = await setup(`providers:\n  oa:\n    preset: openai\n    openai: '${v.url}/v1'\n    apiKeyEnv: OA\n    models: [whisper-1, tts-1]\n`);
-    expect((await call("PUT", "/api/model/gateway/speech", both("off", "default"))).status).toBe(200);
+    expect((await call("PUT", "/api/model/gateway/speech", { asr: [], tts: [{ gateway: "oa", model: "tts-1", voice: "alloy" }] })).status).toBe(200);
     expect(speech.cells().find((c) => c.provider === "gateway-oa")?.selfHosted).toBe(false);
     const seen = v.seen.length;
     const refused = await speech.speak({ app: "diary", tag: "t" }, { text: "secret", voices: [] }).catch((e) => e);
     expect(refused).toBeInstanceOf(SpeechError);
     expect(refused).toMatchObject({ status: 403, code: "local_only" });
     expect(v.seen.length).toBe(seen);
-    // Another app is answered by the gateway.
     const ok = await speech.speak({ app: "notes", tag: "t" }, { text: "hello", voices: [] });
     expect(new Uint8Array(ok.audio)).toEqual(WAV);
   });
 });
 
 describe("the Speech group's routes", () => {
-  test("view, preview, save as fallback (the default does not move), then as TTS default, applied at once; tests of each", async () => {
+  const gwYaml = (url: string) => `providers:\n  oa:\n    preset: openai\n    openai: '${url}/v1'\n    apiKeyEnv: OA\n    models: [gpt-5, whisper-1, tts-1]\n  ds:\n    preset: deepseek\n    messages: '${url}'\n    apiKeyEnv: OA\n`;
+
+  test("no file and no voice-studio: the view names none of it; a save writes a file without it", async () => {
     const v = vendor();
-    const { call, speech, reloads, lines } = await setup(`providers:\n  oa:\n    preset: openai\n    openai: '${v.url}/v1'\n    apiKeyEnv: OA\n    models: [gpt-5, whisper-1, tts-1]\n  ds:\n    preset: deepseek\n    messages: '${v.url}'\n    apiKeyEnv: OA\n`);
+    const { call, speech } = await setup(gwYaml(v.url));
     const view = (await call("GET", "/api/model/gateway/speech")).json;
-    expect(view.exists).toBe(false);
-    expect(view.now).toEqual({ asr: ["voice-studio"], tts: ["voice-studio"], live: ["voice-studio"] });
-    expect(view.choice).toEqual({ asr: { place: "off" }, tts: { place: "off" } });
+    expect(view.source).toBe("builtin");
+    expect(view.custom).toEqual([]);
+    expect(view.order).toEqual({ asr: [], tts: [] });
+    expect(view.live).toBeUndefined();
+    expect(JSON.stringify(view)).not.toContain("voice-studio");
     const oa = view.providers.find((p: { name: string }) => p.name === "oa");
-    expect(oa.asrModels).toContain("whisper-1");
-    expect(oa.ttsModels).toEqual(expect.arrayContaining(["tts-1", "gpt-4o-mini-tts"]));
     expect(oa.voices["tts-1"]).toContain("alloy");
     expect(view.providers.find((p: { name: string }) => p.name === "ds").serves.tts).toMatch(/tools\/tts/);
+    const saved = await call("PUT", "/api/model/gateway/speech", { asr: [{ gateway: "oa", model: "whisper-1" }], tts: [] });
+    expect(saved.json).toMatchObject({ ok: true, applied: true, created: true, after: { asr: ["gateway-oa"], tts: [] } });
+    const text = await readFile(join(home, "providers.yaml"), "utf8");
+    expect(text).not.toContain("voice-studio");
+    expect(speech.status().default).toEqual({ asr: "gateway-oa" });
+  });
 
+  test("no file, voice-studio here: listed as custom and first; the gateway after it keeps it default, the gateway first takes over at once", async () => {
+    const v = vendor();
+    const { call, speech, reloads } = await setup(gwYaml(v.url), { studio: true });
+    const view = (await call("GET", "/api/model/gateway/speech")).json;
+    expect(view.custom).toEqual([{ name: "voice-studio", kind: "voice-studio", serves: { asr: true, tts: true, live: true }, machine: "", located: true, testable: true }]);
+    expect(view.order).toEqual({ asr: [{ provider: "voice-studio" }], tts: [{ provider: "voice-studio" }] });
+    expect(view.live).toEqual(["voice-studio"]);
     // A provider that cannot speak is refused.
-    expect((await call("PUT", "/api/model/gateway/speech", { asr: { place: "off" }, tts: { place: "default", provider: "ds", model: "x" } })).status).toBe(400);
-    const choice = { asr: { place: "fallback", provider: "oa", model: "whisper-1" }, tts: { place: "fallback", provider: "oa", model: "tts-1", voice: "nova" } };
-    const preview = await call("PUT", "/api/model/gateway/speech", { ...choice, dryRun: true });
+    expect((await call("PUT", "/api/model/gateway/speech", { asr: [], tts: [{ gateway: "ds", model: "x" }] })).status).toBe(400);
+    const after = { asr: [{ provider: "voice-studio" }, { gateway: "oa", model: "whisper-1" }], tts: [{ provider: "voice-studio" }, { gateway: "oa", model: "tts-1", voice: "nova" }] };
+    const preview = await call("PUT", "/api/model/gateway/speech", { ...after, dryRun: true });
     expect(preview.json.after).toEqual({ asr: ["voice-studio", "gateway-oa"], tts: ["voice-studio", "gateway-oa"], live: ["voice-studio"] });
     expect(await Bun.file(join(home, "providers.yaml")).exists()).toBe(false);
-
-    const saved = await call("PUT", "/api/model/gateway/speech", choice);
-    expect(saved.json).toMatchObject({ ok: true, applied: true, created: true });
+    expect((await call("PUT", "/api/model/gateway/speech", after)).json).toMatchObject({ ok: true, applied: true, created: true });
     expect(reloads()).toBe(1);
     expect(speech.status().default).toEqual({ asr: "voice-studio", tts: "voice-studio", live: "voice-studio" });
-    expect(speech.status().fallback).toMatchObject({ asr: ["gateway-oa"], tts: ["gateway-oa"] });
-    expect((await call("GET", "/api/model/gateway/speech")).json.choice).toEqual({ asr: { place: "fallback", provider: "oa", model: "whisper-1" }, tts: { place: "fallback", provider: "oa", model: "tts-1", voice: "nova" } });
-
-    // The file keeps its mode; TTS default now: the running service moves with no restart.
+    expect((await call("GET", "/api/model/gateway/speech")).json.order).toEqual({ asr: after.asr, tts: [{ provider: "voice-studio" }, { gateway: "oa", model: "tts-1", voice: "nova" }] });
+    // The file keeps its mode; the gateway first for TTS: the running service moves with no restart.
     if (process.platform !== "win32") await chmod(join(home, "providers.yaml"), 0o640);
-    await call("PUT", "/api/model/gateway/speech", { ...choice, tts: { ...choice.tts, place: "default" } });
+    await call("PUT", "/api/model/gateway/speech", { asr: after.asr, tts: [after.tts[1], after.tts[0]] });
     if (process.platform !== "win32") expect((await stat(join(home, "providers.yaml"))).mode & 0o777).toBe(0o640);
     expect(speech.status().default).toEqual({ asr: "voice-studio", tts: "gateway-oa", live: "voice-studio" });
     const spoken = await speech.speak({ app: "notes", tag: "t" }, { text: "hi", voices: [] });
     expect(spoken.call.provider).toBe("gateway-oa");
     expect(v.seen.at(-1)).toMatchObject({ path: "/v1/audio/speech", json: { model: "tts-1", voice: "nova", input: "hi" } });
+  });
 
-    // Tests: TTS gives audio to play; ASR transcribes that clip; both through the gateway.
+  test("tests: TTS plays and ASR transcribes that clip, through the gateway or a custom provider; errors never carry the key", async () => {
+    const v = vendor();
+    const { call, lines } = await setup(gwYaml(v.url));
+    await writeFile(join(home, "providers.yaml"), `speech:\n  providers:\n    lan:\n      kind: openai-compatible\n      url: '${v.url}/v1'\n      apiKeyEnv: OA\n      selfHosted: true\n      voice: alloy\n`);
+    const { call: call2 } = await setup(gwYaml(v.url));
+    const view = (await call2("GET", "/api/model/gateway/speech")).json;
+    expect(view.custom).toEqual([{ name: "lan", kind: "openai-compatible", serves: { asr: true, tts: true, live: false }, located: true, testable: true }]);
+    expect(view.live).toBeUndefined();
+    const own = (await call2("POST", "/api/model/gateway/speech/test", { role: "tts", speech: "lan" })).json;
+    expect(own).toMatchObject({ ok: true, role: "tts", contentType: "audio/wav", bytes: WAV.length });
+    expect((await call2("POST", "/api/model/gateway/speech/test", { role: "asr", speech: "lan", audio: own.audio })).json).toMatchObject({ ok: true, text: "hello from ai-space" });
     const tts = (await call("POST", "/api/model/gateway/speech/test", { role: "tts", provider: "oa", model: "tts-1", voice: "alloy" })).json;
-    expect(tts).toMatchObject({ ok: true, role: "tts", contentType: "audio/wav", bytes: WAV.length });
     expect(new Uint8Array(Buffer.from(tts.audio, "base64"))).toEqual(WAV);
-    const asr = (await call("POST", "/api/model/gateway/speech/test", { role: "asr", provider: "oa", model: "whisper-1", audio: tts.audio })).json;
-    expect(asr).toMatchObject({ ok: true, role: "asr", text: "hello from ai-space" });
-    // A vendor error comes back as text, never with the key.
+    expect((await call("POST", "/api/model/gateway/speech/test", { role: "asr", provider: "oa", model: "whisper-1", audio: tts.audio })).json).toMatchObject({ ok: true, role: "asr", text: "hello from ai-space" });
     const bad = (await call("POST", "/api/model/gateway/speech/test", { role: "tts", provider: "ds", model: "x" })).json;
     expect(bad.failed).toBe(true);
     expect(JSON.stringify(bad)).not.toContain(KEY);
@@ -313,7 +368,7 @@ describe("the Speech group's routes", () => {
   test("a gateway change reloads speech: a provider removed turns its speech provider off", async () => {
     const v = vendor();
     const { call, speech } = await setup(`providers:\n  oa:\n    preset: openai\n    openai: '${v.url}/v1'\n    apiKeyEnv: OA\n    models: [tts-1]\n  keep:\n    messages: '${v.url}'\n`);
-    await call("PUT", "/api/model/gateway/speech", { asr: { place: "off" }, tts: { place: "fallback", provider: "oa", model: "tts-1" } });
+    await call("PUT", "/api/model/gateway/speech", { asr: [], tts: [{ gateway: "oa", model: "tts-1" }] });
     expect(speech.config!.off["gateway-oa"]).toBeUndefined();
     await call("PUT", "/api/model/gateway/providers/oa", { disabled: true });
     expect(speech.config!.off["gateway-oa"]).toMatch(/off/);

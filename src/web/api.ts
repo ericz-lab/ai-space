@@ -96,21 +96,24 @@ export type GatewayTest = { base: "messages" | "openai"; ok: boolean; ms: number
 export type GatewayModelList = { source: "vendor" | "defaults"; models: string[]; defaults: string[]; kinds?: Record<string, GatewayKind>; error?: string; note?: string };
 /** What a gateway model is for (docs/model-gateway.md#kinds). */
 export type GatewayKind = "text" | "asr" | "tts" | "image";
-export type SpeechPlace = "off" | "fallback" | "default";
-export type SpeechChoice = { asr: { place: SpeechPlace; provider?: string; model?: string }; tts: { place: SpeechPlace; provider?: string; model?: string; voice?: string } };
 export type SpeechChains = { asr: string[]; tts: string[]; live: string[] };
+/** One place in an ASR or TTS order: a provider of the speech configuration by name, or a gateway provider with its model. */
+export type SpeechChainItem = { provider: string } | { gateway: string; model: string; voice?: string };
+export type SpeechOrder = { asr: SpeechChainItem[]; tts: SpeechChainItem[] };
 /** One gateway provider as the Speech and Image groups offer it (`GET /api/model/gateway/speech`). */
 export type GatewayMediaProvider = { name: string; label: string; off?: string; serves: { asr: true | string; tts: true | string; image: true | string }; asrModels: string[]; ttsModels: string[]; imageModels: string[]; voices: Record<string, string[]> };
+/** A speech provider that is not the gateway's: written in providers.yaml by hand, or the built-in one when it is here. */
+export type SpeechCustomProvider = { name: string; kind: string; serves: { asr: boolean; tts: boolean; live: boolean }; machine?: string; located?: boolean; off?: string; testable: boolean };
 export type GatewaySpeechInfo = {
   file: string;
   exists: boolean;
   readOnly?: string;
   problem?: string;
   source: string;
-  now: SpeechChains;
-  kinds: Record<string, { kind: string; selfHosted: boolean; gateway?: string }>;
-  choice: SpeechChoice;
-  handWritten: string[];
+  custom: SpeechCustomProvider[];
+  order: SpeechOrder;
+  /** Live's order, read-only; absent when no provider can do live. */
+  live?: string[];
   providers: GatewayMediaProvider[];
   restart?: boolean;
 };
