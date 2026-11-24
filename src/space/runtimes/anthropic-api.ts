@@ -1,11 +1,13 @@
 import type { GatewayLink } from "../gateway/types.ts";
+import { sniffImage } from "../model/images.ts";
 import type { AnthropicApiSpec, Backend, CompleteInput, CompleteOutcome, RuntimeAdapter, Usage } from "./types.ts";
-import { Unsupported } from "./types.ts";
+import { FILE_NAME_PATTERN, Unsupported } from "./types.ts";
 
 /**
  * The Messages API as a runtime: answers only. No login state, no tools (a
  * request that asks for them is refused rather than quietly served without),
- * no agent runs or chats. Aliases the CLI understands are mapped to model ids;
+ * no agent runs or chats. Files (images an app or the chat service sends) go
+ * in the user message as base64 image blocks. Aliases the CLI understands are mapped to model ids;
  * anything else is passed to the API as is. Cost is computed from the list
  * prices below for the models listed, and left unknown otherwise.
  *
@@ -58,7 +60,6 @@ export function createAnthropicApi(spec: AnthropicApiSpec, deps: { fetch?: typeo
     backend,
     capabilities: { complete: true, agent: false, chat: false },
     complete: async (input, signal) => {
-      if (input.files?.length) return { ok: false, error: "files need a runtime with a Read tool; the API backend takes text only", backend };
       const t = target();
       if ("error" in t) return { ok: false, error: t.error, backend };
       const outcome = await runApi(input, { apiKey: t.apiKey, apiUrl: t.apiUrl, fetch: doFetch, signal });
@@ -72,9 +73,33 @@ export function createAnthropicApi(spec: AnthropicApiSpec, deps: { fetch?: typeo
   };
 }
 
+/**
+ * The user message: the prompt alone, or, with files, each image as a base64 block after a text
+ * block naming it (the prompt refers to files by name, `img1.png`), then the prompt.
+ */
+export async function userContent(input: Pick<CompleteInput, "prompt" | "files">): Promise<string | Record<string, unknown>[]> {
+  if (!input.files?.length) return input.prompt;
+  const blocks: Record<string, unknown>[] = [];
+  for (const f of input.files) {
+    const bytes = await Bun.file(f.path).bytes();
+    const type = sniffImage(bytes);
+    if (!type) throw new Error(`${f.name} is not a png, jpeg, gif or webp image`);
+    blocks.push({ type: "text", text: f.name }, { type: "image", source: { type: "base64", media_type: type, data: Buffer.from(bytes).toString("base64") } });
+  }
+  blocks.push({ type: "text", text: input.prompt });
+  return blocks;
+}
+
 async function runApi(input: CompleteInput, o: { apiKey: string; apiUrl: string; fetch: typeof fetch; signal?: AbortSignal }): Promise<CompleteOutcome> {
   const backend: Backend = "api";
   if (input.tools.length) return { ok: false, error: "tools need a CLI runtime; the API has none", backend };
+  if (input.files?.some((f) => !FILE_NAME_PATTERN.test(f.name))) return { ok: false, error: "file name not allowed", backend };
+  let content: Awaited<ReturnType<typeof userContent>>;
+  try {
+    content = await userContent(input);
+  } catch (e) {
+    return { ok: false, error: `could not read a file: ${(e as Error).message}`, backend };
+  }
   const model = API_MODELS[input.model] ?? input.model;
   const signal = o.signal ? AbortSignal.any([o.signal, AbortSignal.timeout(input.timeoutMs)]) : AbortSignal.timeout(input.timeoutMs);
   let res: Response;
@@ -82,7 +107,7 @@ async function runApi(input: CompleteInput, o: { apiKey: string; apiUrl: string;
     res = await o.fetch(o.apiUrl, {
       method: "POST",
       headers: { "x-api-key": o.apiKey, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-      body: JSON.stringify({ model, max_tokens: input.maxTokens, system: input.system, messages: [{ role: "user", content: input.prompt }] }),
+      body: JSON.stringify({ model, max_tokens: input.maxTokens, system: input.system, messages: [{ role: "user", content }] }),
       signal,
     });
   } catch (e) {

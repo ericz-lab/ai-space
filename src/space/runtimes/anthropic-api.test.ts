@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { API_MODELS, apiCost, createAnthropicApi, retryAfterSeconds } from "./anthropic-api.ts";
 import type { CompleteInput } from "./types.ts";
 
@@ -72,5 +75,34 @@ describe("a gateway that speaks the Messages API (magpie, docs/runtimes.md#magpi
     expect(retryAfterSeconds(new Date(Date.now() + 90_000).toUTCString())).toBeGreaterThanOrEqual(89);
     expect(retryAfterSeconds("soon")).toBeUndefined();
     expect(retryAfterSeconds(null)).toBeUndefined();
+  });
+});
+
+describe("images in an API call", () => {
+  const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13]);
+  test("each file goes as a base64 image block after a text block naming it, then the prompt", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "api-img-"));
+    try {
+      await Bun.write(join(dir, "img1.png"), png);
+      let sent: { messages: { content: unknown }[] } | undefined;
+      const f = (async (_url: string, init?: RequestInit) => {
+        sent = JSON.parse(String(init?.body));
+        return new Response(JSON.stringify({ content: [{ type: "text", text: "a red square" }] }), { status: 200 });
+      }) as unknown as typeof fetch;
+      const rt = createAnthropicApi({ name: "api", kind: "anthropic-api", apiKey: "k", apiUrl: "" }, { fetch: f });
+      const r = await rt.complete(input({ prompt: "What is in img1.png?", files: [{ name: "img1.png", path: join(dir, "img1.png") }] }));
+      expect(r).toMatchObject({ ok: true, text: "a red square" });
+      expect(sent!.messages[0]!.content).toEqual([
+        { type: "text", text: "img1.png" },
+        { type: "image", source: { type: "base64", media_type: "image/png", data: Buffer.from(png).toString("base64") } },
+        { type: "text", text: "What is in img1.png?" },
+      ]);
+      // Not an image, or a name that is not one ai-space makes: refused before any request.
+      await Bun.write(join(dir, "img2.png"), "plain text");
+      expect(await rt.complete(input({ files: [{ name: "img2.png", path: join(dir, "img2.png") }] }))).toMatchObject({ ok: false, error: expect.stringMatching(/not a png, jpeg, gif or webp/) });
+      expect(await rt.complete(input({ files: [{ name: "../x.png", path: join(dir, "img1.png") }] }))).toMatchObject({ ok: false, error: "file name not allowed" });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });
