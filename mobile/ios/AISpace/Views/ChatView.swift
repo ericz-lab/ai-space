@@ -153,8 +153,11 @@ struct ChatPage: View {
             // As the head of the panel's chat on a phone: Stop while a turn runs, the history, a new conversation.
             ToolbarItemGroup(placement: .primaryAction) {
                 if store.isRunning {
-                    Button { store.stop() } label: { Image(systemName: "stop.fill") }
-                        .accessibilityLabel(Text("Stop"))
+                    Button { store.stop() } label: {
+                        if store.stopping { ProgressView() } else { Image(systemName: "stop.fill") }
+                    }
+                    .disabled(store.stopping)
+                    .accessibilityLabel(store.stopping ? Text("Stopping") : Text("Stop"))
                 }
                 if machines.count > 1 { machineMenu }
                 Menu {
@@ -164,7 +167,7 @@ struct ChatPage: View {
                         Section {
                             ForEach(store.sessions.prefix(20)) { session in
                                 Button { Task { await store.open(session) } } label: {
-                                    Text(verbatim: session.title.flatMap { $0.isEmpty ? nil : String($0.prefix(60)) } ?? session.sid)
+                                    Text(verbatim: Self.title(of: session))
                                 }
                             }
                         } header: {
@@ -301,6 +304,14 @@ struct ChatPage: View {
 
     private func machineLabel(_ m: CatalogueEntry) -> String {
         m.isOffline ? machineName(m) + " (" + String(localized: "offline") + ")" : machineName(m)
+    }
+
+    /// An earlier chat's name in the history: its title, or "Untitled" with when it was, as on Android.
+    static func title(of session: ChatSessionInfo) -> String {
+        if let title = session.title, !title.isEmpty { return String(title.prefix(60)) }
+        let untitled = String(localized: "Untitled")
+        guard let ts = session.ts else { return untitled }
+        return untitled + " · " + HubFormat.relative(Date(timeIntervalSince1970: ts / 1000))
     }
 
     private var intro: some View {

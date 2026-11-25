@@ -54,6 +54,7 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.HighlightOff
 import androidx.compose.material.icons.filled.LibraryAdd
 import androidx.compose.material.icons.filled.LibraryAddCheck
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.Public
@@ -110,6 +111,7 @@ import dev.aispace.android.core.PagePoint
 import dev.aispace.android.core.PageSize
 import dev.aispace.android.core.Screens
 import dev.aispace.android.core.Urls
+import dev.aispace.android.ui.home.screenTitle
 import dev.aispace.android.ui.theme.AiTheme
 import dev.aispace.android.ui.theme.ConnectingMark
 import kotlin.math.roundToInt
@@ -439,13 +441,33 @@ private fun PageMenu(model: AppModel, page: OpenPage, close: () -> Unit, modifie
             val connection = model.store.connection(page.connection)
             if (key != null && connection != null) {
                 @Suppress("UNUSED_EXPRESSION") records
-                val pinned = model.screens.isPinned(key, page.connection)
-                MenuItem(
-                    if (pinned) Icons.Filled.LibraryAddCheck else Icons.Filled.LibraryAdd,
-                    stringResource(if (pinned) R.string.shell_remove_from_panel else R.string.shell_add_to_panel),
-                ) {
-                    model.togglePin(key, Screens.home, connection)
-                    close()
+                val list = model.screens.screens(page.connection)
+                if (Screens.asksForScreen(list)) {
+                    // As Home's long press: one choice per screen, ticked where the app already is.
+                    var choosing by remember { mutableStateOf(false) }
+                    val holding = Screens.holding(list, key)
+                    MenuItem(
+                        if (holding.isEmpty()) Icons.Filled.LibraryAdd else Icons.Filled.LibraryAddCheck,
+                        stringResource(R.string.shell_add_to_panel),
+                    ) { choosing = !choosing }
+                    if (choosing) {
+                        list.forEachIndexed { index, s ->
+                            ScreenChoice(screenTitle(index), s.id in holding) {
+                                model.togglePin(key, s.id, connection)
+                                close()
+                            }
+                        }
+                    }
+                } else {
+                    val screen = list.firstOrNull()?.id ?: Screens.home
+                    val pinned = Screens.isPinned(list, screen, key)
+                    MenuItem(
+                        if (pinned) Icons.Filled.LibraryAddCheck else Icons.Filled.LibraryAdd,
+                        stringResource(if (pinned) R.string.shell_remove_from_panel else R.string.shell_add_to_panel),
+                    ) {
+                        model.togglePin(key, screen, connection)
+                        close()
+                    }
                 }
             }
             MenuItem(Icons.Filled.Close, stringResource(R.string.shell_close_tab), color = Color(0xFFEF4444)) {
@@ -499,6 +521,21 @@ private fun TabChip(model: AppModel, tab: OpenPage, current: Boolean, close: () 
         IconButton(onClick = { model.closeTab(tab.id) }, modifier = Modifier.size(44.dp).semantics { contentDescription = closeLabel }) {
             Icon(Icons.Filled.Close, contentDescription = null, tint = t.text, modifier = Modifier.size(16.dp))
         }
+    }
+}
+
+/** A screen under Add to Panel, indented below it, with a tick where the app already is. */
+@Composable
+private fun ScreenChoice(title: String, on: Boolean, onClick: () -> Unit) {
+    val t = AiTheme.tokens
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 44.dp).clickable(onClick = onClick).padding(start = 36.dp)
+            .semantics { selected = on },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (on) Icon(Icons.Filled.Check, contentDescription = null, tint = t.accent, modifier = Modifier.size(20.dp)) else Spacer(Modifier.size(20.dp))
+        Spacer(Modifier.size(12.dp))
+        Text(title, color = t.text, fontSize = 17.sp)
     }
 }
 

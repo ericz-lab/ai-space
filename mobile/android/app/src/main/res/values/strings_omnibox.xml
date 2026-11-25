@@ -8,6 +8,7 @@
     <string name="omnibox_choose_action">Choose an action</string>
     <string name="omnibox_searching">Searching…</string>
     <string name="omnibox_ask_assistant">Ask Space Assistant</string>
+    <string name="omnibox_copied">Copied</string>
     <string name="omnibox_agent_busy">This agent is still replying. Open its chat to continue.</string>
     <string name="omnibox_result">Result</string>
     <string name="omnibox_retry">Retry</string>

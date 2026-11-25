@@ -91,8 +91,10 @@ fun ConnectView(model: AppModel, isFirst: Boolean, modifier: Modifier = Modifier
             error = context.getString(R.string.shell_error_invalid)
             return
         }
-        if (model.store.connections.value.any { ConnectionRules.sameOrigin(it.url, url) }) {
-            error = context.getString(R.string.shell_error_saved)
+        // A Space already saved is not added twice: the phone switches to it.
+        model.store.connections.value.firstOrNull { ConnectionRules.sameOrigin(it.url, url) }?.let { saved ->
+            model.showingAdd = false
+            model.select(saved.id)
             return
         }
         model.add(name, url)

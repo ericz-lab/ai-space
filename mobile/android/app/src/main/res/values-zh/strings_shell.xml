@@ -17,7 +17,6 @@
     <string name="shell_error_scheme">地址必须以 https:// 开头。</string>
     <string name="shell_error_credentials">地址里不要带用户名和密码，连接后再登录。</string>
     <string name="shell_error_insecure">其他机器上的 Space 必须使用 https://。</string>
-    <string name="shell_error_saved">这个 Space 已经保存过了。</string>
 
     <string name="shell_screen_main">主屏</string>
     <string name="shell_screen_n">屏幕 %1$d</string>

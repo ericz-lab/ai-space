@@ -112,7 +112,6 @@
     <string name="hub_over_stream">over a stream</string>
     <string name="hub_no_packages">No package is installed on this Space.</string>
     <string name="hub_installed_here">Installed here</string>
-    <string name="hub_this_space">This Space: %1$s</string>
     <string name="hub_nothing_shared">Nothing is shared over this connection.</string>
     <string name="hub_shared_by">Shared by %1$s</string>
     <string name="hub_not_answering">That Space is not answering.</string>
@@ -146,6 +145,7 @@
     <string name="chat_message">Message</string>
     <string name="chat_send">Send</string>
     <string name="chat_stop">Stop</string>
+    <string name="chat_stopping">Stopping</string>
     <string name="chat_starting">Starting…</string>
     <string name="chat_reconnecting">Reconnecting…</string>
     <string name="chat_thinking">Thinking…</string>
@@ -204,6 +204,9 @@
     <string name="terminal_recent">Recent sessions</string>
     <string name="terminal_new_session">New session</string>
     <string name="terminal_end_session">End session</string>
+    <string name="terminal_end_title">End this session?</string>
+    <string name="terminal_end_detail">What is running in it stops.</string>
+    <string name="terminal_open_again">Open again</string>
     <string name="terminal_passphrase_title">Terminal passphrase</string>
     <string name="terminal_passphrase">Passphrase</string>
     <string name="terminal_open">Open</string>

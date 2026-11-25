@@ -98,8 +98,10 @@ struct ConnectView: View {
 
     private func connect() {
         guard let url = form.url() else { return }
-        if model.store.connections.contains(where: { ConnectionRules.sameOrigin($0.url, url) }) {
-            form.error = String(localized: "This Space is already saved.")
+        // A Space already saved is not added twice: the phone switches to it.
+        if let saved = model.store.connections.first(where: { ConnectionRules.sameOrigin($0.url, url) }) {
+            model.showingAdd = false
+            model.select(saved.id)
             return
         }
         model.add(name: form.name, url: url)

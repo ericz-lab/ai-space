@@ -3,7 +3,6 @@ package dev.aispace.android.live
 import dev.aispace.android.core.Json
 import dev.aispace.android.core.ModelPreferences
 import dev.aispace.android.core.SpaceApi
-import dev.aispace.android.core.SpaceApiError
 import dev.aispace.android.core.SpaceSettings
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -31,6 +30,10 @@ class SettingsLoader(private val api: SpaceApi, @Suppress("unused") private val 
     private val saveErrorState = MutableStateFlow<String?>(null)
     val saveError: StateFlow<String?> = saveErrorState.asStateFlow()
 
+    /** Why the model preferences could not be read, while the other settings could. */
+    private val modelsErrorState = MutableStateFlow<String?>(null)
+    val modelsError: StateFlow<String?> = modelsErrorState.asStateFlow()
+
     private var generation = 0
 
     suspend fun refresh() {
@@ -41,23 +44,28 @@ class SettingsLoader(private val api: SpaceApi, @Suppress("unused") private val 
             val (s, b, m) = coroutineScope {
                 val services = async { text("/api/services") }
                 val backups = async { text("/api/backups") }
-                val models = async { text("/api/model/preferences") }
+                val models = async { read("/api/model/preferences") }
                 Triple(services.await(), backups.await(), models.await())
             }
             if (generation != this.generation) return
             // No route answered (signed out, offline): what was shown is no longer known.
-            settingsState.value = if (s == null && b == null && m == null) null else SpaceSettings.decode(s, b, m)
+            val fresh = if (s == null && b == null && m.first == null) null else SpaceSettings.decode(s, b, m.first)
+            settingsState.value = fresh
+            modelsErrorState.value = if (fresh == null) null else m.second
         } finally {
             if (generation == this.generation) loadingState.value = false
         }
     }
 
-    private suspend fun text(path: String): String? = try {
-        String(api.data(path), StandardCharsets.UTF_8)
+    private suspend fun text(path: String): String? = read(path).first
+
+    /** The route's answer, or why it could not be read. */
+    private suspend fun read(path: String): Pair<String?, String?> = try {
+        String(api.data(path), StandardCharsets.UTF_8) to null
     } catch (e: CancellationException) {
         throw e
     } catch (e: Exception) {
-        null
+        null to HubStore.message(e)
     }
 
     /**
@@ -77,12 +85,9 @@ class SettingsLoader(private val api: SpaceApi, @Suppress("unused") private val 
             saveErrorState.value = null
         } catch (e: CancellationException) {
             throw e
-        } catch (e: SpaceApiError.Http) {
-            if (generation != this.generation) return
-            saveErrorState.value = "HTTP ${e.code} ${e.msg}"
         } catch (e: Exception) {
             if (generation != this.generation) return
-            saveErrorState.value = e.localizedMessage ?: e.toString()
+            saveErrorState.value = HubStore.message(e)
         } finally {
             if (generation == this.generation) savingState.value = false
         }
@@ -93,6 +98,7 @@ class SettingsLoader(private val api: SpaceApi, @Suppress("unused") private val 
         loadingState.value = false
         savingState.value = false
         saveErrorState.value = null
+        modelsErrorState.value = null
         settingsState.value = null
     }
 }

@@ -16,7 +16,6 @@
 "The address must start with https://." = "地址必须以 https:// 开头。";
 "Leave user names and passwords out of the address; sign in after connecting." = "地址里不要带用户名和密码，连接后再登录。";
 "A Space on another machine must use https://." = "其他机器上的 Space 必须使用 https://。";
-"This Space is already saved." = "这个 Space 已经保存过了。";
 
 /* Home */
 "Search apps, agents and widgets" = "搜索应用、智能体和小组件";
@@ -54,7 +53,7 @@
 /* Status */
 "Connecting…" = "正在连接…";
 "Sign in to %@" = "登录 %@";
-"Your Space is behind a sign-in. It opens on the Panel tab and is kept for this Space only." = "你的 Space 需要登录。登录页会在“面板”标签中打开，登录状态只用于这个 Space。";
+"Your Space is behind a sign-in. It opens over the pages and is kept for this Space only." = "你的 Space 需要登录。登录页会在页面上方打开，登录状态只用于这个 Space。";
 "Sign In" = "登录";
 "Cannot reach this Space" = "无法连接到这个 Space";
 "This address is not an ai-space panel" = "这个地址不是 ai-space 面板";
@@ -84,6 +83,8 @@
 "Back" = "后退";
 "Forward" = "前进";
 "Stop" = "停止";
+"Stopping" = "正在停止";
+"Untitled" = "无标题";
 "Reload" = "重新载入";
 "Share" = "共享";
 "Page controls" = "页面操作";
@@ -108,7 +109,7 @@
 "Not an ai-space panel" = "不是 ai-space 面板";
 
 /* Tabs, screens and the Space's settings */
-"Touch and hold an app, agent or widget on the Home tab and choose Add to Panel. Touch and hold here for the screen's own actions." = "在主页标签里长按应用、智能体或小组件，选择“添加到面板”。在这里长按可以新建、编辑或删除屏幕。";
+"Touch and hold an app, agent or widget on Home and choose Add to Panel. Touch and hold here for the screen's own actions." = "在主页里长按应用、智能体或小组件，选择“添加到面板”。在这里长按可以新建、编辑或删除屏幕。";
 "Open Home" = "打开主页";
 "Web Panel" = "网页面板";
 "Search" = "搜索";
@@ -248,7 +249,6 @@
 "over a stream" = "通过事件流";
 "No package is installed on this Space." = "这个 Space 还没有安装应用包。";
 "Installed here" = "本机已安装";
-"This Space: %@" = "本 Space：%@";
 "Nothing is shared over this connection." = "这个连接没有共享任何应用。";
 "Shared by %@" = "来自 %@ 的共享";
 "That Space is not answering." = "对方 Space 没有响应。";
@@ -305,6 +305,9 @@
 "Recent sessions" = "最近的会话";
 "New session" = "新建会话";
 "End session" = "结束会话";
+"End this session?" = "结束这个会话？";
+"What is running in it stops." = "其中正在运行的内容会停止。";
+"Open again" = "重新打开";
 "Terminal passphrase" = "终端口令";
 "Passphrase" = "口令";
 "Open" = "打开";
@@ -348,6 +351,7 @@
 "Choose an action" = "请选择一个操作";
 "Searching…" = "搜索中…";
 "Ask Space Assistant" = "询问空间助手";
+"Copied" = "已复制";
 "This agent is still replying. Open its chat to continue." = "此智能体仍在回复，请打开它的对话继续。";
 "Result" = "结果";
 "Create" = "创建";

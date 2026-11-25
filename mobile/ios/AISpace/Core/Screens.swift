@@ -95,4 +95,13 @@ enum Screens {
     static func title(at index: Int) -> String {
         index == 0 ? String(localized: "Main") : String(localized: "Screen \(index + 1)")
     }
+
+    /// Whether "Add to Panel" asks which screen, as Home's long press does: with one screen it
+    /// is a toggle on that screen, with several a choice of screen, each marked when it has the entry.
+    static func asksForScreen(_ screens: [PanelScreen]) -> Bool { screens.count > 1 }
+
+    /// The screens that have the entry, in their order.
+    static func holding(_ screens: [PanelScreen], _ key: String) -> [String] {
+        screens.filter { $0.items.contains(key) }.map(\.id)
+    }
 }

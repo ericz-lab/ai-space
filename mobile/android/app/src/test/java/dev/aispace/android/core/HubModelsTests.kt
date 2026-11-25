@@ -148,6 +148,22 @@ class HubModelsTests {
         assertEquals(true, links.first().connected)
     }
 
+    @Test fun namesAConnectedSpaceAsTheWebPanelDoes() {
+        val links = Hub.rows(
+            "connections",
+            """{"connections":[{"id":"c1","remoteSpaceId":"0d8c1234-aaaa","alias":"office","remoteName":"david","peer":{"name":"david","state":"peer"}},{"id":"c2","remoteSpaceId":"9f00aaaa-bbbb","alias":null,"remoteName":"seoul","peer":{"name":"seoul-peer","state":"peer"}},{"id":"c3","remoteSpaceId":"77aa5500-cccc","alias":" ","peer":{"name":"mac","state":"peer"}},{"id":"c4","remoteSpaceId":"12345678-dddd"}]}""",
+            SpaceLink,
+        )
+        assertEquals(listOf("office", "seoul", "mac", "12345678"), links.map { it.name })
+        assertEquals("peer", links[2].peer?.state)
+
+        val catalogue = Hub.decode(
+            """{"spaceId":"c551","remotes":[{"connectionId":"c2","spaceId":"9f00aaaa-bbbb"},{"connectionId":"gone","spaceId":"abcdef0123"}]}""",
+            PackageCatalogue,
+        )
+        assertEquals(listOf("seoul", "abcdef01"), catalogue.remotes!!.map { SpaceLink.name(it, links) })
+    }
+
     @Test fun readsTheInboxAndItsFilters() {
         val items = Hub.rows(
             "items",

@@ -5,6 +5,8 @@ import dev.aispace.android.core.SpaceApi
 import kotlinx.coroutines.*
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.Dispatcher
+import okhttp3.mockwebserver.RecordedRequest
 import org.junit.After
 import org.junit.Before
 import org.junit.Test
@@ -80,5 +82,28 @@ class SettingsLoaderTests {
         assertNull(loader.saveError.value)
         assertNull(loader.settings.value)
         assertFalse(loader.isSaving.value)
+    }
+    @Test fun aFailedModelsReadIsKeptAndARefusedChangeReadsAsAMessage() = runBlocking {
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse = when {
+                request.path == "/api/model/preferences" && request.method == "GET" ->
+                    MockResponse().setResponseCode(503).setBody("""{"error":"models are down"}""")
+                request.path == "/api/model/preferences" ->
+                    MockResponse().setResponseCode(400).setBody("""{"error":"unknown model"}""")
+                else -> MockResponse().setBody("""{"services":[],"backups":[]}""")
+            }
+        }
+        val loader = loader(this)
+        loader.refresh()
+        assertNotNull(loader.settings.value)
+        assertNull(loader.settings.value?.models)
+        assertEquals("models are down (HTTP 503)", loader.modelsError.value)
+
+        loader.setDefaultModel("nope")
+        assertEquals("unknown model (HTTP 400)", loader.saveError.value)
+
+        loader.forget()
+        assertNull(loader.modelsError.value)
+        assertNull(loader.saveError.value)
     }
 }

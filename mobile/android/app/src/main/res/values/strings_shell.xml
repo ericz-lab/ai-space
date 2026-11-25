@@ -18,7 +18,6 @@
     <string name="shell_error_scheme">The address must start with https://.</string>
     <string name="shell_error_credentials">Leave user names and passwords out of the address; sign in after connecting.</string>
     <string name="shell_error_insecure">A Space on another machine must use https://.</string>
-    <string name="shell_error_saved">This Space is already saved.</string>
 
     <string name="shell_screen_main">Main</string>
     <string name="shell_screen_n">Screen %1$d</string>

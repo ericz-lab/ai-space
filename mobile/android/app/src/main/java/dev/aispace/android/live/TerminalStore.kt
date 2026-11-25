@@ -7,6 +7,7 @@ import dev.aispace.android.core.SpaceApi
 import dev.aispace.android.core.TerminalMachine
 import dev.aispace.android.core.TerminalRoute
 import dev.aispace.android.core.TerminalStatus
+import dev.aispace.android.core.TerminalTabRules
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import java.net.URI
@@ -20,7 +21,12 @@ import java.util.UUID
  */
 class TerminalStore(api: SpaceApi, scope: CoroutineScope) : HubStore(api, scope) {
     /** A machine waiting for its passphrase, with what the Space said about the last one. */
-    data class Ask(val machine: TerminalMachine, val message: String? = null) {
+    data class Ask(
+        val machine: TerminalMachine,
+        val message: String? = null,
+        /** The closed tab the new session takes the place of. */
+        val replacing: UUID? = null,
+    ) {
         val id: String get() = machine.id
     }
 
@@ -34,6 +40,9 @@ class TerminalStore(api: SpaceApi, scope: CoroutineScope) : HubStore(api, scope)
     /** What is being typed for it; view state lives here, as on the other pages. */
     var passphraseDraft by mutableStateOf("")
     var showingRecent by mutableStateOf(false)
+
+    /** The open tab whose end is being asked about. */
+    var confirmingEnd by mutableStateOf<UUID?>(null)
     var openLink: (URI) -> Unit = {}
 
     /** By machine, in memory only, as the panel's page keeps it for a page load. */
@@ -47,10 +56,13 @@ class TerminalStore(api: SpaceApi, scope: CoroutineScope) : HubStore(api, scope)
         status = api.get(TerminalRoute.status, TerminalStatus)
     }
 
-    /** A new shell on that machine, after its passphrase when the Space says it wants one. */
-    fun open(machine: TerminalMachine) {
+    /**
+     * A new shell on that machine, after its passphrase when the Space says it wants one. With
+     * [replacing], it takes that tab's place in the strip.
+     */
+    fun open(machine: TerminalMachine, replacing: UUID? = null) {
         if (machine.peer == null && status?.passphrase == true && passphrases[machine.id] == null) {
-            asking = Ask(machine)
+            asking = Ask(machine, replacing = replacing)
             return
         }
         val n = (counters[machine.id] ?: 0) + 1
@@ -64,17 +76,33 @@ class TerminalStore(api: SpaceApi, scope: CoroutineScope) : HubStore(api, scope)
             asking = Ask(machine, message)
         }
         session.onClosed = { scope.launch { refresh() } }
-        tabs = tabs + tab
+        if (replacing != null) tabs.firstOrNull { it.id == replacing }?.session?.close()
+        tabs = TerminalTabRules.place(tab, replacing, tabs) { it.id }
         current = tab.id
     }
 
-    fun submit(machine: TerminalMachine) {
+    /** A closed tab's machine again, in the same place in the strip. */
+    fun reopen(tab: TerminalTab) {
+        val machine = machines.firstOrNull { it.id == tab.session.machine.id } ?: tab.session.machine
+        open(machine, replacing = tab.id)
+    }
+
+    fun submit(machine: TerminalMachine, replacing: UUID? = null) {
         val passphrase = passphraseDraft
         passphraseDraft = ""
         asking = null
         if (passphrase.isEmpty()) return
         passphrases[machine.id] = passphrase
-        open(machine)
+        open(machine, replacing)
+    }
+
+    /** The tab's close button: an open session is asked about first, a closed one goes at once. */
+    fun requestEnd(tab: TerminalTab) {
+        if (TerminalTabRules.asksBeforeEnding(closed = tab.session.state == TerminalSession.State.closed)) {
+            confirmingEnd = tab.id
+        } else {
+            close(tab)
+        }
     }
 
     /** Closes the tab; its shell is hung up by the Space. */
@@ -90,6 +118,7 @@ class TerminalStore(api: SpaceApi, scope: CoroutineScope) : HubStore(api, scope)
         current = null
         passphrases.clear()
         asking = null
+        confirmingEnd = null
         for (tab in all) tab.session.close()
     }
 

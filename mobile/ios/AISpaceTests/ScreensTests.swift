@@ -21,6 +21,15 @@ struct ScreensTests {
         #expect(Screens.pin(screens, "nowhere", "app:todo") == screens)
     }
 
+    @Test func addToPanelAsksForAScreenOnlyWhenThereAreSeveral() {
+        #expect(Screens.asksForScreen(screens))
+        #expect(!Screens.asksForScreen([screens[0]]))
+        // Every screen that has the entry is marked, not only the first.
+        #expect(Screens.holding(screens, "app:reader") == ["s1"])
+        #expect(Screens.holding(Screens.pin(screens, "s1", "app:todo"), "app:todo") == ["home", "s1"])
+        #expect(Screens.holding(screens, "app:none").isEmpty)
+    }
+
     @Test func reordersAGroupAndLeavesTheRestInPlace() {
         // The tiles move among themselves; the built-in tile and the widget between them stay put.
         let tiles = ["app:todo", "agent:space/assistant", "app:docs"]

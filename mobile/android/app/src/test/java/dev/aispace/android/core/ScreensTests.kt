@@ -27,6 +27,15 @@ class ScreensTests {
         assertEquals(screens, Screens.pin(screens, "nowhere", "app:todo"))
     }
 
+    @Test fun addToPanelAsksForAScreenOnlyWhenThereAreSeveral() {
+        assertTrue(Screens.asksForScreen(screens))
+        assertFalse(Screens.asksForScreen(listOf(screens[0])))
+        // Every screen that has the entry is marked, not only the first.
+        assertEquals(listOf("s1"), Screens.holding(screens, "app:reader"))
+        assertEquals(listOf("home", "s1"), Screens.holding(Screens.pin(screens, "s1", "app:todo"), "app:todo"))
+        assertTrue(Screens.holding(screens, "app:none").isEmpty())
+    }
+
     @Test fun reordersAGroupAndLeavesTheRestInPlace() {
         // The tiles move among themselves; the built-in tile and the widget between them stay put.
         val tiles = listOf("app:todo", "agent:space/assistant", "app:docs")

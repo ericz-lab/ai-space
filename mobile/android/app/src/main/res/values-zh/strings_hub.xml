@@ -112,7 +112,6 @@
     <string name="hub_over_stream">通过事件流</string>
     <string name="hub_no_packages">这个 Space 还没有安装应用包。</string>
     <string name="hub_installed_here">本机已安装</string>
-    <string name="hub_this_space">本 Space：%1$s</string>
     <string name="hub_nothing_shared">这个连接没有共享任何应用。</string>
     <string name="hub_shared_by">来自 %1$s 的共享</string>
     <string name="hub_not_answering">对方 Space 没有响应。</string>
@@ -146,6 +145,7 @@
     <string name="chat_message">消息</string>
     <string name="chat_send">发送</string>
     <string name="chat_stop">停止</string>
+    <string name="chat_stopping">正在停止</string>
     <string name="chat_starting">正在启动…</string>
     <string name="chat_reconnecting">正在重新连接…</string>
     <string name="chat_thinking">思考中…</string>
@@ -204,6 +204,9 @@
     <string name="terminal_recent">最近的会话</string>
     <string name="terminal_new_session">新建会话</string>
     <string name="terminal_end_session">结束会话</string>
+    <string name="terminal_end_title">结束这个会话？</string>
+    <string name="terminal_end_detail">其中正在运行的内容会停止。</string>
+    <string name="terminal_open_again">重新打开</string>
     <string name="terminal_passphrase_title">终端口令</string>
     <string name="terminal_passphrase">口令</string>
     <string name="terminal_open">打开</string>

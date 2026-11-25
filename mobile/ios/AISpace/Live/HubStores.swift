@@ -523,6 +523,8 @@ final class ChatStore: ObservableObject {
     @Published var imageError: String?
     @Published private(set) var bubbles: [Bubble] = []
     @Published private(set) var isRunning = false
+    /// Stop was pressed and the turn has not ended yet.
+    @Published private(set) var stopping = false
     @Published private(set) var sessions: [ChatSessionInfo] = []
     @Published private(set) var error: String?
     private var sessionID: String?
@@ -621,6 +623,18 @@ final class ChatStore: ObservableObject {
         draft = ""
         self.images = []
         imageError = nil
+        submit(text: text, images: images, intentID: intentID, timezone: timezone)
+    }
+
+    /// Sends `text` as it is, leaving the field and its pictures alone: a question asked from
+    /// universal search must not take what is being written here, nor send its pictures.
+    func send(text: String, intentID: String? = nil, timezone: String? = nil) {
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        submit(text: text, images: [], intentID: intentID, timezone: timezone)
+    }
+
+    private func submit(text: String, images: [ChatImage], intentID: String?, timezone: String?) {
         error = nil
         // A message written while a turn runs joins that turn (docs/runtimes.md#live-chat); a turn
         // that cannot take it is queued and sent next. An intent keeps its own route through chat,
@@ -726,6 +740,7 @@ final class ChatStore: ObservableObject {
         }
         isRunning = true
         stopRequested = false
+        stopping = false
         runID = nil
         pending = []
         steersSeen = 0
@@ -832,6 +847,7 @@ final class ChatStore: ObservableObject {
             start(next)
         } else {
             stopRequested = false
+            stopping = false
             isRunning = false
         }
         onTurnSettled?()
@@ -846,12 +862,26 @@ final class ChatStore: ObservableObject {
     /// Stops the run on the Space; the stream then ends by itself. Before the Space has named the
     /// new run, the stop is sent as soon as it does (`follow`).
     func stop() {
+        guard isRunning, !stopping else { return }
         stopRequested = true
+        stopping = true
         guard let run = runID else { return }
         sendStop(run)
     }
 
+    /// A stop the Space did not take is said, and Stop can be pressed again.
     private func sendStop(_ run: String) {
-        Task { _ = try? await api.send("POST", "\(base)/runs/\(SpacePath.escape(run))/stop", json: [:]) }
+        let conversation = self.conversation
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                _ = try await api.send("POST", "\(base)/runs/\(SpacePath.escape(run))/stop", json: [:])
+            } catch {
+                guard conversation == self.conversation, self.runID == run else { return }
+                self.error = HubStore.message(error)
+                self.stopRequested = false
+                self.stopping = false
+            }
+        }
     }
 }

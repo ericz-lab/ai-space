@@ -15,6 +15,7 @@ struct TerminalPage: View {
                         // A view per tab: each keeps its own emulator and scrollback.
                         .id(tab.id)
                         .background(Color(TerminalPalette.ground).ignoresSafeArea(edges: .bottom))
+                        .overlay(alignment: .bottom) { TerminalReopen(store: store, tab: tab, session: tab.session) }
                         .onAppear { tab.focus() }
                 }
             } else {
@@ -52,7 +53,7 @@ struct TerminalPage: View {
         }
         .alert(Text("Terminal passphrase"), isPresented: Binding(get: { store.asking != nil }, set: { if !$0 { store.asking = nil } }), presenting: store.asking) { ask in
             SecureField("Passphrase", text: $store.passphraseDraft)
-            Button("Open") { store.submit(for: ask.machine) }
+            Button("Open") { store.submit(for: ask.machine, replacing: ask.replacing) }
             Button("Cancel", role: .cancel) { store.passphraseDraft = "" }
         } message: { ask in
             if let message = ask.message {
@@ -60,6 +61,34 @@ struct TerminalPage: View {
             } else {
                 Text("\(ask.machine.name) asks for its passphrase before a shell opens. It is kept in memory only.")
             }
+        }
+        .alert(Text("End this session?"), isPresented: Binding(get: { store.confirmingEnd != nil }, set: { if !$0 { store.confirmingEnd = nil } })) {
+            Button("End session", role: .destructive) {
+                if let id = store.confirmingEnd, let tab = store.tabs.first(where: { $0.id == id }) { store.close(tab) }
+                store.confirmingEnd = nil
+            }
+            Button("Cancel", role: .cancel) { store.confirmingEnd = nil }
+        } message: {
+            Text("What is running in it stops.")
+        }
+    }
+}
+
+/// Over a tab whose session has ended: a new shell on the same machine, in the tab's place.
+private struct TerminalReopen: View {
+    @ObservedObject var store: TerminalStore
+    let tab: TerminalTab
+    @ObservedObject var session: TerminalSession
+
+    var body: some View {
+        if session.state == .closed {
+            Button { store.reopen(tab) } label: {
+                Label("Open again", systemImage: "arrow.clockwise")
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(Theme.accent)
+            .disabled(!(store.machines.first { $0.id == session.machine.id }?.canOpen ?? true))
+            .padding(.bottom, 16)
         }
     }
 }
@@ -159,10 +188,10 @@ private struct TerminalTabStrip: View {
             HStack(spacing: 6) {
                 ForEach(store.tabs) { tab in
                     TerminalTabChip(tab: tab, session: tab.session, selected: tab.id == store.current,
-                                    select: { store.current = tab.id }, close: { store.close(tab) })
+                                    select: { store.current = tab.id }, close: { store.requestEnd(tab) })
                 }
             }
-            .padding(.horizontal, 10).padding(.vertical, 6)
+            .padding(.horizontal, 10).padding(.vertical, 2)
         }
         .background(.bar)
     }
@@ -185,12 +214,14 @@ private struct TerminalTabChip: View {
             }
             .accessibilityValue(Text(verbatim: state))
             Button(action: close) {
-                Image(systemName: "xmark").font(.caption2.weight(.semibold)).foregroundStyle(.secondary).frame(width: 22, height: 22)
+                // The mark stays small; the tap target is 44 pt.
+                Image(systemName: "xmark").font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                    .frame(width: 44, height: 44).contentShape(Rectangle())
             }
             .accessibilityLabel(Text("End session"))
         }
         .buttonStyle(.plain)
-        .padding(.leading, 10).padding(.trailing, 4).padding(.vertical, 3)
+        .padding(.leading, 10)
         .background(selected ? Theme.solid : Theme.hairline, in: Capsule())
     }
 

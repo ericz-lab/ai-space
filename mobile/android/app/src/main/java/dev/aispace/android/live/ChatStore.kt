@@ -84,6 +84,9 @@ class ChatStore(
         private set
     var isRunning by mutableStateOf(false)
         private set
+    /** Stop was pressed and the turn has not ended yet. */
+    var stopping by mutableStateOf(false)
+        private set
     var sessions by mutableStateOf<List<ChatSessionInfo>>(emptyList())
         private set
     var error by mutableStateOf<String?>(null)
@@ -151,7 +154,11 @@ class ChatStore(
         sessions = try { Hub.rows("sessions", data, ChatSessionInfo) } catch (e: Exception) { emptyList() }
     }
 
-    fun newChat() {
+    /**
+     * A new conversation. [keepComposer] leaves the field's images as they are: a question asked
+     * from universal search starts a chat without taking what is being written here.
+     */
+    fun newChat(keepComposer: Boolean = false) {
         if (isRunning) return
         selection += 1
         history?.cancel()
@@ -161,8 +168,10 @@ class ChatStore(
         bubbles = emptyList()
         cards.clear()
         error = null
-        images = emptyList()
-        imageError = null
+        if (!keepComposer) {
+            images = emptyList()
+            imageError = null
+        }
     }
 
     /** Shows a stored conversation; the next message continues it. */
@@ -214,6 +223,20 @@ class ChatStore(
         draft.value = ""
         this.images = emptyList()
         imageError = null
+        submit(text, images, intentID, timezone)
+    }
+
+    /**
+     * Sends [text] as it is, leaving the field and its images alone: a question asked from
+     * universal search must not take what is being written here, nor send its images.
+     */
+    fun send(text: String, intentID: String? = null, timezone: String? = null) {
+        val question = text.trim()
+        if (isOpening || question.isEmpty()) return
+        submit(question, emptyList(), intentID, timezone)
+    }
+
+    private fun submit(text: String, images: List<ChatImage>, intentID: String?, timezone: String?) {
         error = null
         val turn = QueuedTurn(UUID.randomUUID(), text, images, intentID, timezone)
         // A message written while a turn runs joins that turn (docs/runtimes.md#live-chat); a turn
@@ -317,6 +340,7 @@ class ChatStore(
         bubbles = list
         isRunning = true
         stopRequested = false
+        stopping = false
         runID = null
         pending = emptyList()
         steersSeen = 0
@@ -357,6 +381,8 @@ class ChatStore(
         try {
             val first = api.events("POST", "$base/chat", body)
             runID = first.runId
+            // Stop was pressed before the Space named the run: send it now that it has.
+            if (stopRequested && generation == this.generation) first.runId?.let { sendStop(it) }
             var stream: Flow<SSEMessage>? = first.messages
             while (!reply.finished) {
                 try {
@@ -425,21 +451,36 @@ class ChatStore(
         val next = if (queue.isEmpty()) null else queue.removeAt(0)
         if (next != null) start(next) else {
             stopRequested = false
+            stopping = false
             isRunning = false
         }
     }
 
-    /** Stops the run on the Space; the stream then ends by itself. */
+    /**
+     * Stops the run on the Space; the stream then ends by itself. Before the Space has named the
+     * new run, the stop is sent as soon as it does (`follow`).
+     */
     fun stop() {
+        if (!isRunning || stopping) return
         stopRequested = true
+        stopping = true
         val run = runID ?: return
+        sendStop(run)
+    }
+
+    /** A stop the Space did not take is said, and Stop can be pressed again. */
+    private fun sendStop(run: String) {
+        val generation = this.generation
         scope.launch {
             try {
                 api.send("POST", "$base/runs/${SpacePath.escape(run)}/stop", JSONObject())
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                // As the panel: a stop that did not reach the Space leaves the run to end on its own.
+                if (generation != this@ChatStore.generation || runID != run) return@launch
+                error = HubStore.message(e)
+                stopRequested = false
+                stopping = false
             }
         }
     }
@@ -459,6 +500,7 @@ class ChatStore(
         queue.clear()
         pending = emptyList()
         stopRequested = false
+        stopping = false
         draft.value = ""
         images = emptyList()
         imageError = null

@@ -877,6 +877,12 @@ struct PackageCatalogue: Decodable, Hashable {
 
 /// A connection to another Space, and the apps this Space shares over it.
 struct SpaceLink: Decodable, Hashable, Identifiable {
+    /// How the other Space shows here as a peer.
+    struct Peer: Decodable, Hashable {
+        var name: String?
+        var state: String?
+    }
+
     var id: String
     var remoteSpaceId: String?
     var direction: String?
@@ -884,6 +890,24 @@ struct SpaceLink: Decodable, Hashable, Identifiable {
     var apps: [String]?
     var enabled: Bool?
     var connected: Bool?
+    /// The name this Space gives the other one, and the name the other one gives itself.
+    var alias: String?
+    var remoteName: String?
+    var peer: Peer?
+
+    /// What the other Space is called here, as the web panel names it: the alias, the name it
+    /// gives itself, its peer name, or the start of its id.
+    var name: String {
+        for candidate in [alias, remoteName, peer?.name] {
+            if let text = candidate?.trimmingCharacters(in: .whitespaces), !text.isEmpty { return text }
+        }
+        return String((remoteSpaceId ?? id).prefix(8))
+    }
+
+    /// The name of the Space behind a catalogue's remote: its connection's, or the start of its id.
+    static func name(of remote: PackageCatalogue.Remote, in links: [SpaceLink]) -> String {
+        links.first { $0.id == remote.connectionId }?.name ?? String((remote.spaceId ?? remote.connectionId).prefix(8))
+    }
 }
 
 // MARK: Inbox (docs/notify.md#inbox)

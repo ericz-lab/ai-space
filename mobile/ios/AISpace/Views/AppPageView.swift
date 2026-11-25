@@ -168,12 +168,32 @@ struct AppPageView: View {
                     ShareLink(item: session.shareURL) { Label("Share", systemImage: "square.and.arrow.up").frame(maxWidth: .infinity, alignment: .leading) }
                     Button { model.openInBrowser(session.shareURL); menuOpen = false } label: { Label("Open in Safari", systemImage: "safari").frame(maxWidth: .infinity, alignment: .leading) }
                     if let key = page.key, let connection = model.store.connection(page.connection) {
-                        Button {
-                            model.togglePin(key, screen: Screens.home, in: connection)
-                            menuOpen = false
-                        } label: {
-                            if screens.isPinned(key, page.connection) { Label("Remove from Panel", systemImage: "checkmark.rectangle.stack.fill") }
-                            else { Label("Add to Panel", systemImage: "plus.rectangle.on.rectangle") }
+                        let list = screens.screens(page.connection)
+                        if Screens.asksForScreen(list) {
+                            // As Home's long press: one choice per screen, marked where the app already is.
+                            let holding = Screens.holding(list, key)
+                            Menu {
+                                ForEach(Array(list.enumerated()), id: \.element.id) { index, s in
+                                    Button {
+                                        model.togglePin(key, screen: s.id, in: connection)
+                                        menuOpen = false
+                                    } label: {
+                                        if holding.contains(s.id) { Label(Screens.title(at: index), systemImage: "checkmark") } else { Text(verbatim: Screens.title(at: index)) }
+                                    }
+                                }
+                            } label: {
+                                Label("Add to Panel", systemImage: holding.isEmpty ? "plus.rectangle.on.rectangle" : "checkmark.rectangle.stack.fill")
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        } else {
+                            let screen = list.first?.id ?? Screens.home
+                            Button {
+                                model.togglePin(key, screen: screen, in: connection)
+                                menuOpen = false
+                            } label: {
+                                if screens.isPinned(key, screen: screen, page.connection) { Label("Remove from Panel", systemImage: "checkmark.rectangle.stack.fill") }
+                                else { Label("Add to Panel", systemImage: "plus.rectangle.on.rectangle") }
+                            }
                         }
                     }
                     Button(role: .destructive) { model.closeTab(page.id) } label: { Label("Close Tab", systemImage: "xmark") }

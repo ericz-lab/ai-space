@@ -271,6 +271,13 @@ struct SettingsSectionPage: View {
                             .settingsRow()
                     }
                 }
+            } else if let reason = settings.modelsError {
+                SettingsCard {
+                    LabeledContent("Default model") {
+                        Text("Unavailable: \(reason)").font(.footnote).foregroundStyle(Color.secondary).multilineTextAlignment(.trailing)
+                    }
+                    .settingsRow(vertical: 6)
+                }
             }
             SettingsCard {
                 pageRow("App models", "cpu", .appModels)

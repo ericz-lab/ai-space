@@ -172,3 +172,20 @@ enum TerminalNotice {
     /// The reasons the Space names before it closes a socket; any other close reason is shown as it came.
     static let knownReasons: Set<String> = ["idle", "killed", "shutdown", "exit"]
 }
+
+/// What the tab strip does with its tabs: ending a tab whose shell may still run is asked first,
+/// a closed one goes at once; a session opened again takes the place of the tab it replaces.
+enum TerminalTabRules {
+    static func asksBeforeEnding(closed: Bool) -> Bool { !closed }
+
+    /// `list` with `item` in the place of the element `old` names, or at the end when it is gone.
+    static func place<T: Identifiable>(_ item: T, replacing old: T.ID?, in list: [T]) -> [T] {
+        var list = list
+        if let old, let i = list.firstIndex(where: { $0.id == old }) {
+            list[i] = item
+        } else {
+            list.append(item)
+        }
+        return list
+    }
+}
