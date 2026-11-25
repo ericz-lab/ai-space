@@ -259,6 +259,19 @@ export default function Terminal({ open, onClose }: { open: boolean; onClose: ()
     setErr("");
   };
 
+  // Closing a tab ends its shell and what runs in it: a live session asks once more, in place, and
+  // the question goes away by itself; a session already closed just leaves.
+  const [closing, setClosing] = useState<string | null>(null);
+  useEffect(() => {
+    if (!closing) return;
+    const timer = setTimeout(() => setClosing(null), 4000);
+    return () => clearTimeout(timer);
+  }, [closing]);
+  const askClose = (tab: Tab) => {
+    if (tab.state === "open" && closing !== tab.key) return setClosing(tab.key);
+    setClosing(null);
+    closeTab(tab);
+  };
   const closeTab = (tab: Tab) => {
     tab.gone = true;
     try {
@@ -353,15 +366,23 @@ export default function Terminal({ open, onClose }: { open: boolean; onClose: ()
                 <i />
                 {tab.machine.name} #{tab.n}
                 <span
-                  className="term-tab-x"
+                  className={`term-tab-x${closing === tab.key ? " ask" : ""}`}
                   role="button"
+                  tabIndex={0}
                   title={t("term.closeTab")}
+                  aria-label={closing === tab.key ? t("term.closeConfirm") : t("term.closeTab")}
                   onClick={(e) => {
                     e.stopPropagation();
-                    closeTab(tab);
+                    askClose(tab);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key !== "Enter" && e.key !== " ") return;
+                    e.preventDefault();
+                    e.stopPropagation();
+                    askClose(tab);
                   }}
                 >
-                  ✕
+                  {closing === tab.key ? t("term.closeConfirm") : "✕"}
                 </span>
               </button>
             ))}
@@ -393,7 +414,7 @@ export default function Terminal({ open, onClose }: { open: boolean; onClose: ()
                 <div className="run-line">
                   <span className={`status ${r.endedAt === undefined ? "running" : r.reason === "exit" && r.exitCode === 0 ? "ok" : r.reason === "exit" ? "down" : "paused"}`}>
                     <i />
-                    {r.endedAt === undefined ? t("term.open") : r.reason === "exit" ? t("term.exitCode", { code: r.exitCode ?? "signal" }) : (r.reason ?? "")}
+                    {r.endedAt === undefined ? t("term.open") : r.reason === "exit" ? t("term.exitCode", { code: r.exitCode ?? "signal" }) : (CLOSED_REASON[r.reason ?? ""] ? t(CLOSED_REASON[r.reason ?? ""]!) : (r.reason ?? ""))}
                   </span>
                   <span className="run-time" title={dateTime(r.startedAt, lang)}>
                     {relTime(r.startedAt, lang)}

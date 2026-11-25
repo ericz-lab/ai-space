@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { type InboxItem, type InboxSummary, dateTime, getJson, relTime, sendJson } from "./api.ts";
-import { type Key, useLang } from "./i18n.ts";
+import { type AppInfo, type InboxItem, type InboxSummary, dateTime, getJson, relTime, sendJson } from "./api.ts";
+import { type Key, localized, useLang } from "./i18n.ts";
 import { PAGE } from "./panel-link.ts";
 import { pollWhileVisible } from "./poll.ts";
 
@@ -30,6 +30,17 @@ export default function Inbox({ open, onClose, onSummary }: { open: boolean; onC
   const [apps, setApps] = useState<string[]>([]);
   const [err, setErr] = useState("");
   const [openThread, setOpenThread] = useState<string | null>(null);
+  const openRef = useRef(openThread);
+  openRef.current = openThread;
+  // Apps by their titles, not their ids (keyed by the layout id, as in the Tasks window).
+  const [labels, setLabels] = useState<Record<string, { title: string; i18n?: AppInfo["i18n"] }>>({});
+  useEffect(() => {
+    if (!open) return;
+    getJson<{ apps: AppInfo[] }>("/api/apps?all=1")
+      .then((d) => setLabels(Object.fromEntries((d.apps || []).map((a) => [a.id || a.name, { title: a.title, ...(a.i18n ? { i18n: a.i18n } : {}) }]))))
+      .catch(() => {});
+  }, [open]);
+  const appTitle = (id: string) => (labels[id] ? localized(lang, labels[id]!).title : id);
 
   const report = (s: InboxSummary) => {
     setSummary(s);
@@ -42,7 +53,14 @@ export default function Inbox({ open, onClose, onSummary }: { open: boolean; onC
     return getJson<{ items: InboxItem[]; summary: InboxSummary }>(`/api/inbox?${QUERY[filter]}&limit=200${app ? `&app=${encodeURIComponent(app)}` : ""}`)
       .then((d) => {
         if (mine !== request.current) return;
-        setItems(d.items || []);
+        // Under "Unread", the thread being read stays where it is: opening it marked it read, and a
+        // refresh must not take it away from under the reader.
+        setItems((prev) => {
+          const next = d.items || [];
+          const at = filter === "unread" && prev ? prev.findIndex((x) => x.thread === openRef.current) : -1;
+          if (at < 0 || next.some((x) => x.thread === openRef.current)) return next;
+          return [...next.slice(0, at), { ...prev![at]!, unread: false }, ...next.slice(at)];
+        });
         report(d.summary);
         // The app menu remembers every app seen, so narrowing the list does not empty it.
         setApps((prev) => [...new Set([...prev, ...(d.items || []).map((i) => i.app)])].sort());
@@ -113,7 +131,7 @@ export default function Inbox({ open, onClose, onSummary }: { open: boolean; onC
             <option value="">{t("inbox.allApps")}</option>
             {apps.map((a) => (
               <option key={a} value={a}>
-                {a}
+                {appTitle(a)}
               </option>
             ))}
           </select>
@@ -137,7 +155,7 @@ export default function Inbox({ open, onClose, onSummary }: { open: boolean; onC
                     </span>
                   </span>
                   <span className="task-meta">
-                    <span className="task-badge">{i.app}</span>
+                    <span className="task-badge" title={i.app}>{appTitle(i.app)}</span>
                     {i.action && !i.done && <span className="task-on">{t("inbox.needsAction")}</span>}
                     {i.done && <span>{t("inbox.doneTag")}</span>}
                     {i.title && <span className="ev-data">{firstLine(i.text)}</span>}

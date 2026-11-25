@@ -74,7 +74,7 @@ export default function ScreenNav({ pos, names, onGo, onNew, onSearch }: NavProp
         </button>
       )}
       <nav className={`dock${near || hint ? " shown" : ""}`} aria-label={t("screens.nav")}>
-        <ScreenButtons pos={pos} names={names} onGo={onGo} onSearch={onSearch} />
+        <ScreenButtons pos={pos} names={names} onGo={onGo} onNew={onNew} onSearch={onSearch} />
       </nav>
       {hint && (
         <div className="screens-hint" role="note">
@@ -89,7 +89,7 @@ export default function ScreenNav({ pos, names, onGo, onNew, onSearch }: NavProp
 }
 
 /** The library, home, one monitor per screen and search: the dock's buttons, and the phone's row. */
-function ScreenButtons({ pos, names, onGo, onSearch }: NavProps) {
+function ScreenButtons({ pos, names, onGo, onNew, onSearch }: NavProps & { onNew: () => void }) {
   const { t } = useLang();
   return (
     <>
@@ -115,6 +115,12 @@ function ScreenButtons({ pos, names, onGo, onSearch }: NavProps) {
           </svg>
         </button>
       ))}
+      {/* A touch screen has no right edge to hover: a new screen is made from here as well. */}
+      <button className="dock-btn" onClick={onNew} aria-label={t("screens.new")} title={t("screens.new")}>
+        <svg viewBox="0 0 20 20" aria-hidden="true">
+          <path d="M10 4.5v11M4.5 10h11" />
+        </svg>
+      </button>
       <span className="dock-sep" />
       <button className="dock-btn" onClick={onSearch} aria-label={t("screens.search")} aria-keyshortcuts="Meta+K Control+K">
         <svg viewBox="0 0 20 20" aria-hidden="true">
@@ -131,7 +137,7 @@ function ScreenButtons({ pos, names, onGo, onSearch }: NavProps) {
  * flow, so nothing floats over what is being read. The stylesheet shows it on a phone only (a
  * touch screen 640 px wide or less), where it hides the dock.
  */
-export function PhoneNav(props: NavProps) {
+export function PhoneNav(props: NavProps & { onNew: () => void }) {
   const { t } = useLang();
   return (
     <nav className="phone-nav" aria-label={t("screens.nav")}>

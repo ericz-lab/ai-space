@@ -251,7 +251,8 @@ export default function SettingsStatus() {
             <span className="svc-port">:{s.port}</span>
             {supervised && (
               <span className="svc-ctl">
-                {(["start", "stop", "restart"] as const).map((a) => (
+                {/* Only what can do something now: no Start on a service that answers, no Stop on one that is down. */}
+                {(["start", "stop", "restart"] as const).filter((a) => (a === "start" ? s.health !== "ok" : a === "stop" ? s.health !== "down" : true)).map((a) => (
                   <button key={a} type="button" disabled={svcBusy === s.app} title={t(`services.${a}`)} aria-label={t(`services.${a}`)} onClick={() => void controlService(s.app, a)}>
                     {a === "start" ? "▶" : a === "stop" ? "■" : "↻"}
                   </button>

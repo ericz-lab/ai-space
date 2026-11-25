@@ -135,12 +135,14 @@ function ModelPicker({ task, peer, onSaved }: { task: TaskInfo; peer?: string; o
     return () => { live = false; };
   }, [peer]);
   const eligible = options.filter((o) => task.target.kind === "agent" ? o.capabilities.agent : o.capabilities.complete);
-  const save = async () => {
+  // A menu saves its new value at once, as every other model menu does; a failed save puts the saved one back.
+  const save = async (next: string) => {
+    setValue(next);
     setBusy(true); setError(""); setSaved(false);
     try {
-      const result = await sendJson<{ task: TaskInfo }>("PATCH", modelPath(task.id, peer), { model: value || null });
+      const result = await sendJson<{ task: TaskInfo }>("PATCH", modelPath(task.id, peer), { model: next || null });
       onSaved(result.task); setSaved(true);
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setValue(task.overrides.model ?? ""); setError((e as Error).message); }
     finally { setBusy(false); }
   };
   if (!task.modelSelectable) return <p className="task-note">{t("tasks.modelUnsupported")}</p>;
@@ -148,14 +150,13 @@ function ModelPicker({ task, peer, onSaved }: { task: TaskInfo; peer?: string; o
   return <div className="task-model">
     <label htmlFor={selectId}>{t("tasks.model")}</label>
     <div className="task-model-controls">
-      <select id={selectId} value={value} disabled={busy || !loaded || task.orphaned} onChange={(e) => { setValue(e.target.value); setSaved(false); }}>
+      <select id={selectId} value={value} disabled={busy || !loaded || task.orphaned} onChange={(e) => void save(e.target.value)}>
         <option value="">{t("tasks.modelDefault", { model: task.base?.model ?? t("chat.modelDefault") })}</option>
         {value && !eligible.some((o) => o.value === value) && <SavedChoice value={value} t={t} />}
         {[...new Set(eligible.map((o) => o.runtime))].map((runtime) => <optgroup key={runtime} label={runtime}>
           {eligible.filter((o) => o.runtime === runtime).map((o) => <ChoiceOption key={o.value} o={o} label={`${t(`modelTier.${o.tier}`)} · ${o.model}`} t={t} />)}
         </optgroup>)}
       </select>
-      <button type="button" disabled={busy || !loaded || task.orphaned || value === (task.overrides.model ?? "")} onClick={() => void save()}>{busy ? t("common.loading") : t("common.save")}</button>
     </div>
     <p className="task-note">{t("tasks.modelNextRun")}</p>
     {saved && <p role="status" className="task-note">{t("tasks.modelSaved")}</p>}
@@ -168,7 +169,7 @@ function TaskRow({ t, peer, open, onToggle, onSaved }: { t: TaskInfo; peer?: str
   const st = rowStatus(t);
   const next = t.enabled && !t.orphaned && t.state.nextRunAt ? untilTime(t.state.nextRunAt, lang) : "";
   const last = t.state.lastRunAt ? relTime(t.state.lastRunAt, lang) : "";
-  const badges = [t.source === "api" ? "api" : "", t.overrides.enabled !== undefined || t.overrides.schedule || t.overrides.model ? "override" : ""].filter(Boolean);
+  const badges = [t.source === "api" ? tr("tasks.badge.api") : "", t.overrides.enabled !== undefined || t.overrides.schedule || t.overrides.model ? tr("tasks.badge.override") : ""].filter(Boolean);
   return (
     <div className={`taskrow ${st.cls} ${open ? "open" : ""}`}>
       <button className="task-main" onClick={onToggle} title={t.description || `${t.app}/${t.name}`}>
@@ -198,7 +199,7 @@ function TaskRow({ t, peer, open, onToggle, onSaved }: { t: TaskInfo; peer?: str
             {last && <span title={t.state.lastRunAt && dateTime(t.state.lastRunAt, lang)}>{last}</span>}
             {next && <span title={t.state.nextRunAt && dateTime(t.state.nextRunAt, lang)}>{tr("tasks.next", { time: next })}</span>}
             {t.state.pending && <span title={t.state.pending.dueAt && dateTime(t.state.pending.dueAt, lang)}>{tr("tasks.pending", { n: t.state.pending.events })}</span>}
-            <span className="task-kind">{t.target.kind}</span>
+            <span className="task-kind">{tr(`tasks.kind.${t.target.kind}`)}</span>
             {t.model && <span className="task-kind">{t.model}</span>}
           </span>
         </span>

@@ -321,7 +321,7 @@ function KeyForm({ busy, onSave, t }: { busy: boolean; onSave: (key: string) => 
     <div className="gw-form">
       <label className="gw-field">
         <span>{t("gateway.newKey")}</span>
-        <input className="setselect" type="password" autoComplete="off" spellCheck={false} value={key} onChange={(e) => setKey(e.target.value)} disabled={busy} />
+        <input className="setselect" type="password" autoComplete="off" spellCheck={false} value={key} onChange={(e) => setKey(e.target.value)} disabled={busy} onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing && !busy && key.trim()) { e.preventDefault(); onSave(key.trim()); } }} />
       </label>
       <div className="setbtns"><span className="setbtns-gap" /><button className="btn2" disabled={busy || !key.trim()} onClick={() => onSave(key.trim())}>{t("magpie.save")}</button></div>
     </div>

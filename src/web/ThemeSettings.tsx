@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { type Key, useLang } from "./i18n.ts";
 import {
   type Issue,
@@ -44,7 +44,7 @@ export default function ThemeSettings() {
   const [note, setNote] = useState<{ err: boolean; text: string } | null>(null);
   const file = useRef<HTMLInputElement>(null);
 
-  useEffect(() => () => previewAppearance(null), []);
+  // The draft outlives a look at another section; closing the settings drops it (App.tsx).
 
   const issueText = (issues: Issue[]) =>
     issues

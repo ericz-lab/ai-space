@@ -36,7 +36,8 @@ export default function Activity({ nameOf }: { nameOf: (kind: UsageKind, key: st
   const [kind, setKind] = useState<UsageKind | "all">("all");
   const [rows, setRows] = useState<UsageRow[] | null>(null);
   const [expandedDevice, setExpandedDevice] = useState<string | null>(null);
-  const [devices, setDevices] = useState<DeviceUsageRow[] | null>(null);
+  // `undefined` while the answer is on its way, `null` when this Space has no device report.
+  const [devices, setDevices] = useState<DeviceUsageRow[] | null | undefined>(undefined);
   const [loadedAt, setLoadedAt] = useState(Date.now);
   const [err, setErr] = useState("");
 
@@ -44,7 +45,7 @@ export default function Activity({ nameOf }: { nameOf: (kind: UsageKind, key: st
     let active = true;
     let request = 0;
     setRows(null);
-    setDevices(null);
+    setDevices(undefined);
     setErr("");
     const q = kind === "all" ? "" : `&kind=${kind}`;
     const load = async () => {
@@ -96,7 +97,7 @@ export default function Activity({ nameOf }: { nameOf: (kind: UsageKind, key: st
           <section className="task-group">
             <h3 className="task-app"><span className="svc-name">{t("activity.devices")}</span></h3>
             <p className="task-note">{t("activity.devicesNote")}</p>
-            {devices === null ? <p className="task-note">{t("activity.devicesUnavailable")}</p> : devices.length === 0 ? <p className="task-note">{t("activity.devicesEmpty")}</p> : (
+            {devices === undefined ? <p className="task-note">{t("common.loading")}</p> : devices === null ? <p className="task-note">{t("activity.devicesUnavailable")}</p> : devices.length === 0 ? <p className="task-note">{t("activity.devicesEmpty")}</p> : (
               <div className="usage-scroll"><table className="usage-table device-usage-table">
                 <thead><tr><th>{t("activity.device")}</th><th>{t("activity.sessions")}</th><th>{t("activity.foreground")}</th><th>{t("activity.last")}</th></tr></thead>
                 <tbody>{devices.map(d => <Fragment key={`${d.client}:${d.deviceId}`}><tr>

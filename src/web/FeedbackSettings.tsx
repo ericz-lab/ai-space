@@ -136,6 +136,8 @@ export default function FeedbackSettings() {
         <input type="checkbox" role="switch" checked={s.enabled} onChange={() => void save({ enabled: !s.enabled })} />
       </label>
       <p className="setnote">{t("feedback.enabledHelp")}</p>
+      {/* The rows below only shape a feature that is on. */}
+      {s.enabled && <>
       <label className="setrow">
         {t("feedback.mode")}
         <select className="setselect" value={s.mode} onChange={(e) => void save({ mode: e.target.value as Settings["mode"] })}>
@@ -174,9 +176,10 @@ export default function FeedbackSettings() {
         <kbd className="setkbd">{view.shortcut}</kbd>
       </div>
       <p className="setnote">{t("feedback.trust")}</p>
+      </>}
     </div>
 
-    <div className="setcard">
+    {s.enabled && <div className="setcard">
       <p className="sethead">{t("feedback.apps")}</p>
       <label className="setrow">
         {t("feedback.appsDefault")}
@@ -184,9 +187,9 @@ export default function FeedbackSettings() {
       </label>
       {view.apps.map(appRow)}
       <p className="setnote">{t("feedback.appsHelp")}</p>
-    </div>
+    </div>}
 
-    {peers.map((p) => (
+    {s.enabled && peers.map((p) => (
       <div className="setcard" key={`peer-${p.name}`}>
         <p className="sethead">{t("feedback.peerApps", { name: p.name })}</p>
         {!p.ok && <p className="setnote err">{t("feedback.peerDown", { name: p.name, error: p.error ?? "" })}</p>}

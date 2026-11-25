@@ -18,9 +18,13 @@ type Connection = {
 };
 type Operation = { id: string; app: string; version: string; state: string };
 
+/** Another Space by the name people gave it, then its own, then the peer's; its id only as the last resort. */
+const spaceName = (c: Connection | undefined, id: string) => c?.alias || c?.remoteName || c?.peer?.name || id.slice(0, 8);
+
 export default function Packages({ onChange }: { onChange?: () => void }) {
   const { t } = useLang();
-  const [open, setOpen] = useState(false), [data, setData] = useState<Catalogue | null>(null);
+  // The section has a page of its own, so its rows start shown (as the Status section's do).
+  const [open, setOpen] = useState(true), [data, setData] = useState<Catalogue | null>(null);
   const [connections, setConnections] = useState<Connection[]>([]), [operations, setOperations] = useState<Operation[]>([]);
   const [busy, setBusy] = useState(false), [error, setError] = useState("");
   const [file, setFile] = useState<File | null>(null), [unsigned, setUnsigned] = useState(false), [upgrade, setUpgrade] = useState(false);
@@ -116,7 +120,7 @@ export default function Packages({ onChange }: { onChange?: () => void }) {
     <button className="setrow setlink" aria-expanded={open} onClick={() => setOpen(!open)}><span>{t("packages.manage")}</span><span className={`setchev${open ? " open" : ""}`}>›</span></button>
     {open && <div className="package-settings">
       {error && <p role="alert" className="setnote">{error}</p>}
-      {pending && <div className="package-card"><p className="setnote">{t("packages.operation")}: {pending.id}<br />{progress || t("packages.uncertain")}</p><button disabled={busy} onClick={() => void act(async () => {
+      {pending && <div className="package-card"><p className="setnote" title={pending.id}>{progress || t("packages.uncertain")}</p><button disabled={busy} onClick={() => void act(async () => {
         const list = pending.upgrade ? (await getJson<{ changes: { id: string; state: string }[] }>("/api/panel/packages/changes")).changes : (await getJson<{ operations: Operation[] }>("/api/panel/packages")).operations;
         const operation = list.find((o) => o.id === pending.id);
         if (!operation) { setProgress(t("packages.notRecorded")); return; }
@@ -132,11 +136,11 @@ export default function Packages({ onChange }: { onChange?: () => void }) {
       <p className="sethead sub">{t("packages.local")}</p>
       {data ? <><p className="setnote">{t("packages.identity")}: {data.spaceId}</p>{cards(data.apps, true)}</> : <p>{t("common.loading")}</p>}
       <p className="sethead sub">{t("packages.remote")}</p>
-      {data?.remotes.map((r) => <div key={r.connectionId}><p className="setnote">{r.spaceId} · {t(r.available ? "status.up" : "status.down")}</p>{cards(r.apps, false)}</div>)}
+      {data?.remotes.map((r) => <div key={r.connectionId}><p className="setnote" title={r.spaceId}>{spaceName(connections.find((c) => c.id === r.connectionId), r.spaceId)} · {t(r.available ? "status.up" : "status.down")}</p>{cards(r.apps, false)}</div>)}
       <p className="sethead sub">{t("packages.connections")}</p>
       <p className="setnote">{t("packages.grantHint")}</p>
       {connections.map((c) => <div className="package-card" key={c.id}>
-        <p className="setnote">{c.remoteSpaceId} · {t(c.connected ? "status.up" : "status.down")}</p>
+        <p className="setnote" title={c.remoteSpaceId}><b>{spaceName(c, c.remoteSpaceId)}</b> · {t(c.connected ? "status.up" : "status.down")}</p>
         <label><input type="checkbox" checked={c.enabled} disabled={busy} onChange={(e) => void act(() => sendJson("PATCH", `/api/panel/connections/${c.id}`, { enabled: e.target.checked }))} />{t("packages.connected")}</label>
         {(data?.shareable ?? data?.apps.map((a) => ({ app: a.app, title: a.title, page: a.page !== false })))?.map((a) => <label key={a.app}><input type="checkbox" disabled={busy} checked={c.apps.includes(a.app)} onChange={(e) => void act(() => sendJson("PATCH", `/api/panel/connections/${c.id}`, { apps: e.target.checked ? [...c.apps, a.app] : c.apps.filter((v) => v !== a.app) }))} />{a.title}{!a.page && <> · {t("packages.apiOnly")}</>}</label>)}
         {c.peer && <p className="setnote">{t(`packages.peer.${c.peer.state}`, { name: c.peer.name })}</p>}
