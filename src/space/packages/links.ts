@@ -11,10 +11,17 @@ import { mapping } from "./contract.ts";
 export type SharedApp = { app: string; title: string; version: string; page?: boolean; icon?: string; iconFile?: boolean };
 export type LinkHandler = (connection: Connection, meta: unknown, body: ReadableStream<Uint8Array>, signal: AbortSignal) => Promise<Response>;
 type Live = { channel?: PackageChannel; close: () => void };
+/** Bun's client WebSocket: control-frame pings and a close without the closing handshake. */
+type DialSocket = WebSocket & { ping(data?: string): void; terminate(): void };
 /** The header a dialing Space names its channel protocol in (channel.ts `CHANNEL_PROTOCOL`). */
 export const PROTOCOL_HEADER = "x-space-channel-protocol";
 /** What a dialing Space says itself; a connection's extra headers cannot replace these. */
 const OWN_HEADERS = new Set(["authorization", "x-space-id", PROTOCOL_HEADER, "host", "upgrade", "connection"]);
+/**
+ * How a dialer watches its socket: `handshakeMs` to upgrade and say `hello`; then a ping every `heartbeatMs`,
+ * and a channel nothing (a pong, a frame) has come back on for `deadMs` is dropped and dialed again.
+ */
+export const DIAL_TIMING = { handshakeMs: 10_000, heartbeatMs: 15_000, deadMs: 45_000 };
 
 /**
  * Who a stream belongs to, for the channel's per-kind cap and for ending the streams of a revoked grant:
@@ -52,6 +59,8 @@ export class PackageLinks {
     /** The icon image of a locally owned app, for the tile a connected Space shows. */
     icon?: (app: string) => Promise<Response | undefined>;
     handle?: LinkHandler;
+    /** Tests shorten these. */
+    timing?: Partial<typeof DIAL_TIMING>;
   }) {
     this.unsubscribe = connections.onChange((id, change) => {
       // A changed app list or scope set keeps the channel: only the streams that needed what was taken away
@@ -131,30 +140,49 @@ export class PackageLinks {
       try { extra = parseHeaders(raw); } catch (e) { this.errors.set(c.id, `connection headers ${c.headersEnv}: ${(e as Error).message}`); return; }
       for (const name of Object.keys(extra)) if (OWN_HEADERS.has(name.toLowerCase())) delete extra[name];
     }
-    let socket: WebSocket;
-    try { socket = new WebSocket(c.url!.replace(/^http/, "ws") + "/api/connections/channel", { headers: { ...extra, authorization: `Bearer ${token}`, "x-space-id": this.connections.spaceId, [PROTOCOL_HEADER]: String(CHANNEL_PROTOCOL) } } as unknown as string[]); }
+    const timing = { ...DIAL_TIMING, ...this.options.timing };
+    let socket: DialSocket;
+    try { socket = new WebSocket(c.url!.replace(/^http/, "ws") + "/api/connections/channel", { headers: { ...extra, authorization: `Bearer ${token}`, "x-space-id": this.connections.spaceId, [PROTOCOL_HEADER]: String(CHANNEL_PROTOCOL) } } as unknown as string[]) as DialSocket; }
     catch { this.errors.set(c.id, "could not open connection"); return; }
     let channel: PackageChannel | undefined;
-    const live: Live = { close: () => { channel?.close(); socket.close(1000, "connection changed"); } };
+    let heartbeat: ReturnType<typeof setInterval> | undefined;
+    let heard = Date.now(), ended = false;
+    // Every way this socket ends comes through here. Bun fires no `close` event for a socket closed before its
+    // upgrade finished, so a handshake that hangs (the other Space restarting behind its proxy) would otherwise
+    // keep its entry in `live` for good and `refresh` would never dial again.
+    const drop = (code: number, reason: string) => {
+      if (ended) return;
+      ended = true;
+      clearTimeout(timeout); clearInterval(heartbeat); channel?.close();
+      if (this.live.get(c.id) === live) this.live.delete(c.id);
+      try { if (socket.readyState === WebSocket.OPEN) socket.close(code, reason); else socket.terminate(); } catch { /* already gone */ }
+    };
+    const live: Live = { close: () => drop(1000, "connection changed") };
     this.live.set(c.id, live);
-    const timeout = setTimeout(() => socket.close(4002, "identity handshake timed out"), 10_000);
+    const timeout = setTimeout(() => { if (!this.errors.has(c.id)) this.errors.set(c.id, "identity handshake timed out"); drop(4002, "identity handshake timed out"); }, timing.handshakeMs);
+    socket.addEventListener("pong", () => { heard = Date.now(); });
     socket.onmessage = (e) => {
-      if (typeof e.data !== "string") { socket.close(4002, "invalid channel data"); return; }
+      heard = Date.now();
+      if (typeof e.data !== "string") { drop(4002, "invalid channel data"); return; }
       if (!channel) {
         try {
           const hello = JSON.parse(e.data) as { kind: string; spaceId: string; protocol: number };
           if (hello.kind !== "hello" || hello.spaceId !== c.remoteSpaceId) throw new Error("remote Space identity mismatch");
           if (hello.protocol !== CHANNEL_PROTOCOL) throw new Error(`remote Space speaks channel protocol ${String(hello.protocol).slice(0, 8)}, this one ${CHANNEL_PROTOCOL}: upgrade both Spaces to the same ai-space version`);
           clearTimeout(timeout);
-          channel = new PackageChannel((data) => { if (socket.bufferedAmount > 4 * 1024 ** 2) throw new Error("connection backpressure limit"); socket.send(data); }, (meta, body, signal) => this.handle(c.id, meta, body, signal), "a", () => socket.close(4002, "channel closed"), { classify: streamKind });
+          channel = new PackageChannel((data) => { if (socket.bufferedAmount > 4 * 1024 ** 2) throw new Error("connection backpressure limit"); socket.send(data); }, (meta, body, signal) => this.handle(c.id, meta, body, signal), "a", () => drop(4002, "channel closed"), { classify: streamKind });
           live.channel = channel; this.errors.delete(c.id);
-        } catch (err) { this.errors.set(c.id, (err as Error).message); socket.close(4003, "handshake refused"); }
+          // A channel can die without a close reaching this end (the other Space restarted behind a proxy that
+          // keeps our leg open, a sleep, a dropped route): ping it, and one that stops answering is dropped and redialed.
+          heartbeat = setInterval(() => {
+            if (Date.now() - heard > timing.deadMs) { this.errors.set(c.id, "remote Space stopped answering"); drop(4002, "heartbeat timed out"); return; }
+            try { socket.ping(); } catch { drop(4002, "heartbeat failed"); }
+          }, timing.heartbeatMs);
+          heartbeat.unref?.();
+        } catch (err) { this.errors.set(c.id, (err as Error).message); drop(4003, "handshake refused"); }
       } else channel.receive(e.data);
     };
-    socket.onclose = () => {
-      clearTimeout(timeout); channel?.close();
-      if (this.live.get(c.id) === live) this.live.delete(c.id);
-    };
+    socket.onclose = () => drop(1000, "closed");
     // A refused upgrade (an acceptor of another protocol answers 426) reaches a WebSocket only as an error.
     socket.onerror = () => { if (!this.errors.has(c.id)) this.errors.set(c.id, "connection failed (an unreachable Space, a revoked credential, or one running another ai-space version)"); };
   }
