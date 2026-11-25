@@ -82,19 +82,38 @@ Settings → Gateway → **Speech** ([model-gateway.md](model-gateway.md#speech-
 
 **Without this file** the built-in default is `voice-studio` for everything, and it counts only while it is really there: the voice-studio app on this machine, or its capability on a peer, as the speech service locates it for its status (no probe on page load). Then it is listed as custom and first, and a save writes it out with the built-in defaults, live included, before the gateway's providers (so writing the file never drops it). When it is not there the space has no speech provider: a call answers 503 `no_provider` ("no speech provider is set up on this space"), status lists none, and the default is back by itself once the app is installed or a peer lists it. The page then names none of it, shows "nothing answers speech yet", and a save writes a file with only the providers chosen.
 
-The entries the page writes are named `gateway-<provider>` with `kind: openai-compatible`, `gateway: space`, `provider:` and the models; one no order uses is removed, unless `voices:` names it. A hand-written file keeps its comments, other providers and `voices:`; a file the page cannot edit is shown read-only. These entries are cloud providers, so a [local-only](#privacy) app never reaches them.
+The entries the page writes are named `gateway-<provider>` with `kind: openai-compatible`, `gateway: space`, `provider:` and the models (as `kind: minimax` with MiniMax's own model ids for a provider of the `minimax` preset, see [Kinds](#kinds)); one no order uses is removed, unless `voices:` names it. A hand-written file keeps its comments, other providers and `voices:`; a file the page cannot edit is shown read-only. These entries are cloud providers, so a [local-only](#privacy) app never reaches them.
 
 ## Kinds
 
-Each kind is one adapter (`src/space/speech/voice-studio.ts`, `openai.ts`) and declares its capabilities: `transcribe` (a file), `live` (a microphone), `speak` (text to WAV), `clone` (a new voice from a sample; no adapter offers it through the Space yet). A call for a capability the chosen provider lacks is a 400 that names the provider and the capability, never a quiet move to another one.
+Each kind is one adapter (`src/space/speech/voice-studio.ts`, `openai.ts`, `minimax.ts`) and declares its capabilities: `transcribe` (a file), `live` (a microphone), `speak` (text to WAV), `clone` (a new voice from a sample; no adapter offers it through the Space yet). A call for a capability the chosen provider lacks is a 400 that names the provider and the capability, never a quiet move to another one.
 
 | kind | capabilities | where it runs | limits |
 | --- | --- | --- | --- |
 | `voice-studio` | transcribe, live, speak | the `voice-studio` app on this machine, else on `machine:`, else the one peer that provides it; reached through the bus (`/api/call`, `/api/peer/call`) and, for live, the peer's WebSocket bridge to the app ([peers.md](peers.md)). Self-hosted. | 4 MB per file (the bus's call limit), at most 4 voices per script |
 | `openai-compatible` | transcribe, speak | `POST {url}/audio/transcriptions` (multipart: `file`, `model`, `language`, `prompt` from `context`, `response_format`) and `POST {url}/audio/speech` (`model`, `input`, `voice`, `response_format: wav`) with the key as a bearer. A cloud API unless `selfHosted: true` (a server the operator runs, such as a Whisper server on the LAN). | 25 MB per file, 4,096 characters per text, one voice |
+| `minimax` | transcribe, speak | MiniMax's own API, which is not OpenAI's shape: `POST {root}/v1/speech_to_text` (multipart: `model`, `file`, `response_format: verbose_json`; the language as a `language` header) and `POST {root}/v1/t2a_v2` (JSON: `model`, `text`, `voice_setting.voice_id`, `audio_setting.format: wav`, `output_format: hex`; the audio comes back hex-encoded inside JSON and is decoded here). A cloud API. | 50 MB per request and 500 s per file: a longer WAV is cut into pieces of 480 s, another format is refused by MiniMax (a 400); 9,999 characters per text, one voice |
 | `dashscope` | — | not built yet: the provider loads as off with a warning ([Later](#later)) | |
 
 `openai-compatible` may instead point at a model gateway, `gateway: space` (the built-in one) or `gateway: magpie`, with `provider:` naming the gateway's provider; it then has no `url` or key of its own, and its models are sent as `<provider>/<model>` ([model-gateway.md](model-gateway.md#speech)). `openai-compatible` further takes `voices` (the voices it accepts: an unknown one is refused before the call), `selfHosted`, `responseFormat` (`verbose_json`, which carries segments and the duration, is the default for `whisper*` models; `json` for the others, which do not support it) and `price` ([Ledger](#ledger)). Whisper names the language in full (`chinese`); the adapter answers its code (`zh`).
+
+`minimax` takes its key and host one of two ways:
+
+```yaml
+    gateway-minimax:              # what Settings writes for a gateway.yaml provider of the minimax preset
+      kind: minimax
+      gateway: space
+      provider: minimax           # that provider's key, and the host of its openai base (without /v1) or messages base (without /anthropic)
+      asrModel: asr-1.0           # optional: default shown
+      ttsModel: speech-2.8-turbo  # optional: default shown; also speech-2.8-hd, speech-2.6-*, speech-02-*, speech-01-*
+      voice: English_Graceful_Lady
+    mm:                           # hand-written, with its own key
+      kind: minimax
+      site: cn                    # cn: api.minimaxi.com, intl: api.minimax.io (a key from one is refused at the other); or url: the API's origin
+      apiKeyEnv: MINIMAX_API_KEY
+```
+
+The models are MiniMax's own ids, never `<provider>/<model>`: through `gateway: space` the call still goes straight to MiniMax, because the gateway forwards without translating; only the key and the host are the gateway provider's, read when the call is made, so a key changed in Settings applies at once. A voice id is MiniMax's (`Chinese (Mandarin)_News_Anchor`, a cloned one); without a `voices:` list MiniMax refuses an unknown one itself. What does not map onto the contract: MiniMax has no prompt, so `context` is not sent; it does not say which language it heard, so `language` answers the hint (sent only when it is one MiniMax documents: zh, yue, en, ja, ko, th, vi, id, ms, fil, ar, tr, fr, de, es, it, pt, pl, ru, uk; otherwise it recognises mixed languages); its segments carry a speaker (`S1`), which the contract drops. Its errors carry a code: in `base_resp.status_code` under HTTP 200 for `t2a_v2`, at the end of `error.message` (`… (1004)`) with the real HTTP status for `speech_to_text`. Codes 1004 and 2049 are `auth`, 1008 and 2053 `credit`, 2056 and 2067 `quota`, 1002, 1039, 1041, 1045, 2045–2047, 2062 and 2064 `rate`, 1000, 1001, 1024, 1033, 2066 and 2160 `transport`; any other code ends the call as a refusal (422 for flagged content, else 400) ([errorcode.md](https://platform.minimax.io/docs/api-reference/errorcode.md)).
 
 ## Choosing a provider
 
@@ -156,6 +175,8 @@ Audio and text are not stored, only their sizes.
 
 ASR is priced per minute of audio, TTS per million characters, in USD. An `openai-compatible` provider's `price: { transcribePerMinute, speakPerMillionChars }` wins; else, for a provider whose `url` is OpenAI's own, `src/space/speech/prices.json` gives OpenAI's list prices (verified 2026-11-19: `whisper-1` and `gpt-4o-transcribe` $0.006 a minute, `gpt-4o-mini-transcribe` $0.003, `gpt-transcribe` $0.0045, `tts-1` $15 and `tts-1-hd` $30 per million characters). A model priced by tokens (`gpt-4o-mini-tts`), a call whose length the provider did not report, and a self-hosted provider have no cost. A provider with `gateway: space` is priced by the built-in model gateway's prices first ([model-gateway.md](model-gateway.md#prices)), and its rows follow a later change of them.
 
+A `minimax` provider is priced the same way (its `price:`, else the gateway's price for `<provider>/<model>` when it uses a gateway provider), else by MiniMax's list prices on its international host only (`api.minimax.io`, verified 2026-11-24 at [platform.minimax.io/docs/pricing/overview.md](https://platform.minimax.io/docs/pricing/overview.md): Speech-to-Text $0.38 an hour, `speech-2.8-hd` / `-2.6-hd` / `-02-hd` $100 and the `-turbo` models $60 per million characters). TTS is priced by MiniMax's own count of billable characters (`extra_info.usage_characters`: a Chinese character counts 2). The China site (`api.minimaxi.com`) lists its prices in CNY only, so a provider there is unpriced unless `price:` or `gateway-prices.yaml` gives a USD price: no exchange rate is guessed.
+
 ## Status
 
 `GET /api/speech` has one cell per provider: kind, capabilities, where it runs (this machine, a peer, or the API's host), `selfHosted`, `off` with the reason, `reachable` (for `voice-studio`: the app is here with a service, or on a peer whose snapshot is fresh), `signedIn` (an API provider's key is set), the rest after a failure (`limitedUntil`, `restKind`: the same causes and rests as a runtime's cell, [model-machines.md](model-machines.md#status), kept by the same `RuntimeHealth` class), `lastError`, `lastOkAt` (seeded from the ledger at boot), `used` (a default or in a fallback list) and `problem` (used and off, unreachable, not signed in or resting). Nothing is probed with a paid call: the cells learn from the calls.
@@ -195,4 +216,4 @@ Callers in apps, each in its own repository and deployed on its own: an app that
 
 ## Code
 
-`src/space/speech/`: `types.ts` (capabilities, requests and answers, the adapter interface, `SpeechError`), `config.ts` (`providers.yaml`'s `speech:` section and the built-in default), `spec.ts` (the manifest's `speech:` section), `voice-studio.ts` and `openai.ts` (the adapters), `wav.ts` (a WAV's length), `prices.ts` with `prices.json`, `store.ts` (the `speech_calls` ledger), `service.ts` (choosing, fallback, voices, local-only, status cells, rows), `live.ts` (the live session between the client and the provider's socket), `api.ts` (the routes, the compatibility routes).
+`src/space/speech/`: `types.ts` (capabilities, requests and answers, the adapter interface, `SpeechError`), `config.ts` (`providers.yaml`'s `speech:` section and the built-in default), `spec.ts` (the manifest's `speech:` section), `voice-studio.ts`, `openai.ts` and `minimax.ts` (the adapters), `wav.ts` (a WAV's length, cutting and wrapping one), `prices.ts` with `prices.json`, `store.ts` (the `speech_calls` ledger), `service.ts` (choosing, fallback, voices, local-only, status cells, rows), `live.ts` (the live session between the client and the provider's socket), `api.ts` (the routes, the compatibility routes).
