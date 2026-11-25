@@ -2,6 +2,7 @@ import { type Activity, type ChatImage, type ChatStep, type Failure, type Permis
 import { SpaceError } from "./check.ts";
 import type { SSEMessage } from "./sse.ts";
 import { escapeSegment } from "./url.ts";
+import { type ShownCard, actionBody, actionOutcome, cardsBase, decodeCards, mergeStates, shownCard, stateBody, stateItems } from "./cards.ts";
 import { historySteps, type HistoryStep } from "../../../../src/web/chat-steps.ts";
 
 /**
@@ -30,6 +31,8 @@ export type ChatMessage = {
   stopped?: boolean;
   /** Restored from a stored session: its runs of tool calls fold to one line. */
   historic: boolean;
+  /** What the agent's tools did this turn (docs/chat-cards.md); a restored reply's have no token. */
+  cards?: ShownCard[];
 };
 
 export type SessionInfo = { sid: string; title: string; ts: number; runtime?: string | null; model?: string | null };
@@ -41,6 +44,8 @@ export interface ChatApi {
   events(method: "GET" | "POST", path: string, body?: Record<string, unknown>): Promise<{ runId?: string; messages: AsyncIterable<SSEMessage>; close(): void }>;
   send(method: string, path: string, body: Record<string, unknown>): Promise<unknown>;
   get(path: string): Promise<unknown>;
+  /** The bare answer of a write, whatever its status (a card action's 409 `{ readOnly: true }`). Throws only when nothing answered. */
+  answer(method: string, path: string, opts: { json: unknown }): Promise<{ status: number; body: string }>;
 }
 
 export type ConversationOptions = {
@@ -52,7 +57,7 @@ export type ConversationOptions = {
   onChange: () => void;
   /** A turn may install or change apps, even when it fails or is stopped. */
   onTurnEnded?: () => void;
-  text: { stopped: string; signIn: string; lost: string; grantMessage: string; noTurn: string; answerFailed: (why: string) => string };
+  text: { stopped: string; signIn: string; lost: string; grantMessage: string; noTurn: string; answerFailed: (why: string) => string; cardReadOnly: string };
 };
 
 type Source = { kind: "new"; turn: TurnRequest } | { kind: "attach"; runId: string };
@@ -202,6 +207,56 @@ export class Conversation {
     void this.api.send("POST", `${this.agent.base}/runs/${escapeSegment(runId)}/stop`, {}).catch(() => {});
   }
 
+  // Chat cards (docs/chat-cards.md)
+
+  /**
+   * A reply's cards can act while it is the conversation's latest: no message of the person after
+   * it (src/web/Chat.tsx). ai-space ends the token when the next turn starts anyway.
+   */
+  cardsActionable(message: ChatMessage): boolean {
+    const at = this.messages.indexOf(message);
+    return at >= 0 && !this.messages.slice(at + 1).some((m) => m.role === "user");
+  }
+
+  /** Reads every card's current state again: a card always says the current state when it is shown. */
+  refreshCards(): void {
+    for (const m of this.messages) for (const c of m.cards ?? []) void this.loadCardState(c);
+  }
+
+  private async loadCardState(shown: ShownCard): Promise<void> {
+    if (!shown.card.state) return;
+    try {
+      const items = stateItems(await this.api.send("POST", `${cardsBase(this.agent.base)}/state`, stateBody(this.agent.id, shown)));
+      if (!items.length) return;
+      mergeStates(shown, items);
+      this.o.onChange();
+    } catch {
+      // The card shows what was printed.
+    }
+  }
+
+  /** Undoes the given items of a card (the header's Undo: every one still open); the answer's states replace the shown ones. */
+  async undoCard(shown: ShownCard, ids: string[]): Promise<void> {
+    if (!shown.token || shown.busy || !ids.length) return;
+    shown.busy = true;
+    delete shown.note;
+    this.o.onChange();
+    try {
+      const a = await this.api.answer("POST", `${cardsBase(this.agent.base)}/action`, { json: actionBody(shown.token, shown.index, ids) });
+      const out = actionOutcome(a.status, a.body);
+      if (out.kind === "readOnly") {
+        shown.readOnly = true;
+        shown.note = this.o.text.cardReadOnly;
+      } else if (out.kind === "error") shown.note = out.note;
+      else mergeStates(shown, out.items);
+    } catch (e) {
+      shown.note = (e as Error).message;
+    } finally {
+      shown.busy = false;
+      this.o.onChange();
+    }
+  }
+
   async loadSessions(): Promise<void> {
     try {
       const body = (await this.api.get(`${this.agent.base}/sessions`)) as { sessions?: SessionInfo[] };
@@ -214,13 +269,16 @@ export class Conversation {
   async open(session: SessionInfo): Promise<void> {
     if (this.busy) return;
     try {
-      const body = (await this.api.get(`${this.agent.base}/sessions/${escapeSegment(session.sid)}`)) as { messages?: { role: string; text?: string; tools?: { name: string }[]; steps?: HistoryStep[] }[] };
+      const body = (await this.api.get(`${this.agent.base}/sessions/${escapeSegment(session.sid)}`)) as { messages?: { role: string; text?: string; tools?: { name: string }[]; steps?: HistoryStep[]; cards?: unknown }[] };
       this.messages = (body.messages ?? []).flatMap((m) => {
         const user = m.role === "user";
         const steps = user ? [] : historySteps((m.steps ?? []).filter((s) => s && (s.kind === "text" || s.kind === "tool")));
-        if (!m.text && !steps.length) return [];
-        return [this.message(user ? "user" : "agent", m.text ?? "", { tools: (m.tools ?? []).map((t) => t.name), steps, historic: !user })];
+        // A restored card has no token: it shows its items' state, read-only (docs/chat-cards.md).
+        const cards = user ? [] : decodeCards(m.cards).map(shownCard);
+        if (!m.text && !steps.length && !cards.length) return [];
+        return [this.message(user ? "user" : "agent", m.text ?? "", { tools: (m.tools ?? []).map((t) => t.name), steps, historic: !user, ...(cards.length ? { cards } : {}) })];
       });
+      this.refreshCards();
       this.sessionId = session.sid;
       this.thread++;
       this.error = undefined;
@@ -342,6 +400,13 @@ export class Conversation {
     if (reply.activity) target.activity = reply.activity;
     else delete target.activity;
     if (reply.failure !== undefined) target.failure = classifyFailure(reply.failure);
+    // New cards join the reply with their state still to read; the ones already shown keep theirs.
+    const have = target.cards?.length ?? 0;
+    if (reply.cards.length > have) {
+      const added = reply.cards.slice(have).map(shownCard);
+      target.cards = [...(target.cards ?? []), ...added];
+      for (const c of added) void this.loadCardState(c);
+    }
     this.o.onChange();
   }
 

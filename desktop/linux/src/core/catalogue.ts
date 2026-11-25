@@ -28,7 +28,8 @@ export type EntryKind = "app" | "agent" | "widget";
 /** Whether an entry can be expected to answer (the iPhone's `Reach`). */
 export type Reach = "up" | "down" | "unknown" | "link" | "peer-offline" | "paused";
 
-export type Agent = { id: string; app: string; name: string; title: string; description?: string; i18n?: I18n; avatar?: string; peer?: string; runtime?: string; stale?: boolean };
+/** `appIcon`: the icon of the agent's app (the icon pack's over the manifest's), heading its chat cards. */
+export type Agent = { id: string; app: string; name: string; title: string; description?: string; i18n?: I18n; avatar?: string; appIcon?: string; peer?: string; runtime?: string; stale?: boolean };
 
 export type Widget = {
   id: string;
@@ -140,7 +141,7 @@ export function decodeCatalogue(raw: { apps: unknown; agents: unknown; widgets: 
     if (!id || !app || !name || title === undefined) continue;
     const peer = str(a.peer);
     const stale = a.stale === true || Boolean(peer && offline.has(peer));
-    agentInfo.push({ id, app, name, title, description: str(a.description), i18n: i18nOf(a.i18n), avatar: str(a.avatar), peer, runtime: str(a.runtime), ...(stale ? { stale } : {}) });
+    agentInfo.push({ id, app, name, title, description: str(a.description), i18n: i18nOf(a.i18n), avatar: str(a.avatar), ...(str(a.appIcon) ? { appIcon: str(a.appIcon) } : {}), peer, runtime: str(a.runtime), ...(stale ? { stale } : {}) });
   }
   // The same agent on several machines is one entry (agents.ts); the chat picks the machine.
   const agentGroups = groupAgents(agentInfo);
@@ -214,6 +215,17 @@ export function pageUrl(link: string | undefined, space: string, lang: string): 
   if (!link) return undefined;
   const url = resolveUrl(link.replace(/\{lang\}/g, lang).replace(/\{accent\}|%7Baccent%7D/g, ""), space);
   return url && /^https?:\/\//i.test(url) ? url : undefined;
+}
+
+/**
+ * The icon and name heading an agent's chat cards (web `cardApp`): the agent's `appIcon` over its
+ * app's icon, and the title of its app on the same machine. An app the client has no entry for
+ * (the Space's own agents) gets no name.
+ */
+export function cardApp(c: Pick<Catalogue, "apps"> | undefined, agent: Pick<Agent, "app" | "peer" | "appIcon">, lang: string): { icon?: string; name?: string } {
+  const app = c?.apps.find((e) => (e.peer ?? "") === (agent.peer ?? "") && (e.ref === agent.app || e.ref === `${agent.peer}/${agent.app}`));
+  const icon = agent.appIcon || app?.icon;
+  return { ...(icon ? { icon } : {}), ...(app ? { name: pickText(app.title, app.i18n, "title", lang) } : {}) };
 }
 
 /** The route base of an agent's chat: local, or forwarded to the peer that owns it. */

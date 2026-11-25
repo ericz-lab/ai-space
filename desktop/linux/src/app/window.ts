@@ -276,10 +276,15 @@ export class MainWindow {
     // Back from the Space's pages, where the App Store installs apps: look now, not at the next
     // turn of the clock, so what was installed is on the home screen when it shows.
     if (view === "home" && this.lastView === "pages" && space) void this.model.refresh(space);
+    const before = this.lastView;
     this.lastView = view;
     if (view === "inbox") this.inbox.show(space);
     if (view === "terminal") this.terminal.show(space);
-    if (view === "chat") this.chat.view.focus();
+    if (view === "chat") {
+      this.chat.view.focus();
+      // Back to the chat: its cards read their items' current state again.
+      if (before !== "chat") this.chat.view.conversation?.refreshCards();
+    }
     this.pet.setActive(this.petSeen());
   }
 
