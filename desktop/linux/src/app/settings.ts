@@ -5,7 +5,10 @@ import { type Appearance, type Detail, type Section, APPEARANCES, SECTION_LABEL,
 import type { Connection } from "../core/connections.ts";
 import { type Entry, entryKey, pickText } from "../core/catalogue.ts";
 import { EMPTY_SLOT, FALLBACK_TITLE, SECTIONS, type Section as BallSection, refFor, setting, slot } from "../core/floating-ball.ts";
+import { Dictation } from "./dictation.ts";
 import { FloatingBall } from "./floating-ball.ts";
+import { loadGst } from "./voice.ts";
+import { VOICE_LANGUAGES, voiceSetting } from "../core/voice.ts";
 import { desktopPetAvailable } from "./pet.ts";
 import { LANGS } from "../../../../src/web/messages.ts";
 import { APP_ID, APP_ROOT, exists, lang, logError, path, prefs, savePrefs, t, tw, writeText } from "./env.ts";
@@ -268,7 +271,7 @@ function commandRow(command: string, toast: (title: string) => void): any {
 
 /**
  * General: the panel's rows that mean something here (Widgets, Language), then this app's own: the
- * saved Spaces, adding one, how the app runs, the Quick Chat command, and WebKit's sandbox.
+ * saved Spaces, adding one, how the app runs, the Quick Chat command, voice input, and WebKit's sandbox.
  */
 function general(page: any, ctx: Ctx, model: AppModel, toast: (title: string) => void): void {
   const panel = new Adw.PreferencesGroup();
@@ -366,6 +369,7 @@ function general(page: any, ctx: Ctx, model: AppModel, toast: (title: string) =>
   const quick = new Adw.PreferencesGroup({ title: t("quickChat"), description: t("quickChatHint") });
   quick.add(commandRow(`${launcher()} --quick-chat`, toast));
   page.add(quick);
+  page.add(voiceGroup(model, toast));
   page.add(floatingBallGroup(ctx, model));
   page.add(deskPetGroup(ctx));
 
@@ -382,6 +386,45 @@ function general(page: any, ctx: Ctx, model: AppModel, toast: (title: string) =>
   aboutRow.connect("activated", () => ctx.dialog.get_root()?.get_application()?.lookup_action("about")?.activate(null));
   about.add(aboutRow);
   page.add(about);
+}
+
+/**
+ * Voice input: the command to bind for talking into any app (`--dictate`), the Space it sends
+ * speech to when several are saved, and the language spoken (the Mac's rows in its General settings).
+ */
+function voiceGroup(model: AppModel, toast: (title: string) => void): any {
+  const hint = !loadGst() ? t("voiceNoGst") : Dictation.available() ? t("voiceInputHint") : `${t("voiceInputHint")}\n\n${t("voiceNeedsX11")}`;
+  const group = new Adw.PreferencesGroup({ title: t("voiceInput"), description: hint });
+  group.add(commandRow(`${launcher()} --dictate`, toast));
+  const spaces = model.list.connections;
+  if (spaces.length > 1) {
+    const pinned = spaces.some((c) => c.id === prefs.voiceSpace) ? prefs.voiceSpace! : "";
+    const row = choiceRow(
+      t("transcribeWith"),
+      [{ value: "", label: t("transcribeWithSelected") }, ...spaces.map((c) => ({ value: c.id, label: c.name }))],
+      pinned,
+      (value) => {
+        if (value) prefs.voiceSpace = value;
+        else delete prefs.voiceSpace;
+        savePrefs();
+      },
+      t("transcribeWithHint"),
+    );
+    group.add(row.row);
+  }
+  const language = choiceRow(
+    tw("settings.voiceLanguage"),
+    [{ value: "", label: tw("settings.voiceLanguage.same") }, { value: "auto", label: tw("settings.voiceLanguage.auto") }, ...VOICE_LANGUAGES.map((l) => ({ value: l.code, label: l.label }))],
+    voiceSetting(prefs.voiceLanguage),
+    (value) => {
+      if (value) prefs.voiceLanguage = value;
+      else delete prefs.voiceLanguage;
+      savePrefs();
+    },
+    t("voiceLanguageHint"),
+  );
+  group.add(language.row);
+  return group;
 }
 
 /**
