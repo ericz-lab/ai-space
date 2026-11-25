@@ -1,4 +1,5 @@
 import { ChatSteps, type ChatStep } from "../../../../src/web/chat-steps.ts";
+import { type ReceivedCard, cardsEvent } from "./cards.ts";
 
 /**
  * One chat turn's reply, built from the run's events the way the web panel (`src/web/Chat.tsx`,
@@ -71,6 +72,8 @@ export class TurnReply {
   denied: string[] = [];
   /** One per `steer` event: the messages added during the turn that the agent has read. */
   consumedSteers: string[] = [];
+  /** What the agent's tools did, from the `cards` events in order (docs/chat-cards.md), each with its event's token. */
+  cards: ReceivedCard[] = [];
   private readonly work = new ChatSteps();
   private readonly toolNames = new Map<string, string>();
 
@@ -106,6 +109,9 @@ export class TurnReply {
         break;
       case "steer":
         this.consumedSteers.push(typeof ev.text === "string" ? ev.text : "");
+        break;
+      case "cards":
+        this.cards.push(...cardsEvent(ev));
         break;
       case "system":
         if (ev.subtype === "init") {

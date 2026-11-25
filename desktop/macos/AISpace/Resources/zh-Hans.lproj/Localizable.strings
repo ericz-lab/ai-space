@@ -804,3 +804,13 @@
 "The App Store has %lld apps for this Space. Install the ones you want there." = "应用商店里有 %lld 个应用可以装到这个 Space，去那里挑想要的安装。";
 "Open the App Store" = "打开应用商店";
 "Not now" = "以后再说";
+
+/* Chat cards (the web's chat.card.*) */
+"chat.card.undo" = "撤回";
+"chat.card.undoAll" = "全部撤回";
+"chat.card.undoRest" = "撤回其余 %lld 条";
+"chat.card.undoItem" = "撤回：%@";
+"chat.card.undone" = "已撤回";
+"chat.card.done" = "已完成";
+"chat.card.changed" = "已在别处修改";
+"Read-only now: the conversation has moved on." = "对话已继续，这张卡片现在只读。";

@@ -152,6 +152,8 @@ import dev.aispace.android.live.ChatImages
 import dev.aispace.android.live.ChatStore
 import dev.aispace.android.live.IconImages
 import dev.aispace.android.ui.common.EntryIcon
+import dev.aispace.android.ui.common.VoiceButton
+import dev.aispace.android.ui.common.rememberVoice
 import dev.aispace.android.ui.theme.AiTheme
 import dev.aispace.android.ui.theme.ThemeTokens
 import kotlinx.coroutines.CancellationException
@@ -198,6 +200,7 @@ internal fun AgentChat(
                 onSwitch(m)
             }
         },
+        voiceLanguage = { model.voiceLanguageCode },
     )
     return true
 }
@@ -265,12 +268,17 @@ internal fun ChatPage(
     machines: List<CatalogueEntry> = listOf(agent),
     machineClis: (CatalogueEntry) -> List<String> = { emptyList() },
     onMachine: (CatalogueEntry) -> Unit = {},
+    /** The code voice input sends (VoiceLanguage), read when a recording starts. */
+    voiceLanguage: () -> String = { "" },
 ) {
     // A machine that does not answer is shown, and nothing is sent there.
     val offline = AgentGroups.isOffline(agent)
     val scope = rememberCoroutineScope()
     val t = AiTheme.tokens
     val draft by store.draft.collectAsState()
+    // Voice fills the field and sends nothing; switching machine or conversation ends a recording.
+    val voice = rememberVoice(store.api)
+    LaunchedEffect(store) { voice.cancel() }
     val bubbles = store.bubbles
     val running = store.isRunning
     val listState = rememberLazyListState()
@@ -400,6 +408,7 @@ internal fun ChatPage(
             BasicTextField(
                 value = draft,
                 onValueChange = { store.draft.value = it },
+                readOnly = voice.busy,
                 maxLines = 6,
                 textStyle = MaterialTheme.typography.bodyLarge.copy(color = t.text),
                 cursorBrush = SolidColor(t.accent),
@@ -419,8 +428,20 @@ internal fun ChatPage(
                     }
                 },
             )
+            if (voice.available || voice.busy) {
+                Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
+                    VoiceButton(
+                        voice, store.api,
+                        prefix = { store.draft.value },
+                        language = voiceLanguage,
+                        deliver = { store.draft.value = it },
+                        tint = t.secondaryText,
+                        size = 22.dp,
+                    )
+                }
+            }
             // A message written during a turn joins it, so Send stays while the turn runs; Stop is in the head.
-            val canSend = store.canSend && reading == 0 && !offline
+            val canSend = store.canSend && reading == 0 && !offline && !voice.busy
             SendButton(enabled = canSend) { store.send() }
         }
     }

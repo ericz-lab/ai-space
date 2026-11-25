@@ -26,6 +26,8 @@ import dev.aispace.android.core.ScreenStore
 import dev.aispace.android.core.Screens
 import dev.aispace.android.core.SpaceHosts
 import dev.aispace.android.core.SpaceState
+import dev.aispace.android.core.Lang
+import dev.aispace.android.core.VoiceLanguage
 import dev.aispace.android.live.AppPaths
 import dev.aispace.android.live.BackdropStore
 import dev.aispace.android.live.CatalogueLoader
@@ -169,6 +171,20 @@ class AppModel(private val context: Context) {
         showsWidgets = value
         prefs.edit().putBoolean("hidesWidgets", !value).apply()
     }
+
+    /**
+     * What voice input is transcribed in (VoiceLanguage): "" the app's language, "auto" detect, or
+     * a code. Settings › General › Voice language.
+     */
+    var voiceLanguage by mutableStateOf(VoiceLanguage.setting(prefs.getString(VoiceLanguage.PREFERENCE, null)))
+        private set
+    fun updateVoiceLanguage(value: String) {
+        voiceLanguage = VoiceLanguage.setting(value)
+        prefs.edit().putString(VoiceLanguage.PREFERENCE, voiceLanguage).apply()
+    }
+
+    /** The `language` a recording starting now sends; empty lets the provider detect it. */
+    val voiceLanguageCode: String get() = VoiceLanguage.code(voiceLanguage, Lang.current)
 
     /** The actions on the screens, asked for by a long press on a screen. */
     var showingScreenMenu by mutableStateOf(false)

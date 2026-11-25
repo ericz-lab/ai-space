@@ -17,6 +17,8 @@ struct ChatMessage: Identifiable, Equatable {
     var failure: ChatFailure?
     /// Restored from a past session's transcript: its runs of tool calls fold to one line.
     var historic = false
+    /// What the turn's tools did, as chat cards (docs/chat-cards.md); live ones carry their token.
+    var cards: [ShownChatCard] = []
 }
 
 /// One native conversation with an agent; an agent's conversations are held by `AgentChats`, and
@@ -65,9 +67,19 @@ final class ChatController: ObservableObject, Identifiable {
     /// Stop was asked for: a message written now must not be added to the turn being stopped.
     private var stopRequested = false
 
+    /// The state and undo of the conversation's chat cards.
+    let cardStores: ChatCardStores
+
     init(agent: AgentInfo, api: SpaceAPI) {
         self.agent = agent
         self.api = api
+        cardStores = ChatCardStores(api: api, base: agent.base)
+    }
+
+    /// Whether a reply's cards may act: no message of the person after it (src/web/Chat.tsx).
+    func cardsActionable(_ message: ChatMessage) -> Bool {
+        guard let index = messages.firstIndex(where: { $0.id == message.id }) else { return false }
+        return ChatCardRules.actionable(isUser: messages.map { $0.role == .user }, at: index)
     }
 
     /// Something was said in it: what New Conversation leaves behind.
@@ -227,19 +239,33 @@ final class ChatController: ObservableObject, Identifiable {
     func load(_ session: ChatSessionInfo) async {
         guard !busy, pendingImageImports == 0 else { return }
         do {
-            let stored = try Hub.rows(ChatHistoryMessage.self, "messages", from: try await api.data("\(agent.base)/sessions/\(SpacePath.escape(session.sid))"))
-            // The agent's text and tool calls come back in order, drawn like a finished live turn.
-            messages = stored.compactMap { m in
+            let stored = try Hub.rows(StoredMessage.self, "messages", from: try await api.data("\(agent.base)/sessions/\(SpacePath.escape(session.sid))"))
+            // The agent's text and tool calls come back in order, drawn like a finished live turn;
+            // its cards come back without a token, read-only.
+            messages = stored.compactMap { row in
+                let m = row.message
                 let steps = m.isUser ? [] : m.chatSteps
-                guard !(m.text ?? "").isEmpty || !steps.isEmpty else { return nil }
+                let cards = m.isUser ? [] : ShownChatCard.restored(row.cards)
+                guard !(m.text ?? "").isEmpty || !steps.isEmpty || !cards.isEmpty else { return nil }
                 return ChatMessage(role: m.isUser ? .user : .agent, text: m.text ?? "",
-                                   tools: (m.tools ?? []).map(\.name), steps: steps, historic: !m.isUser)
+                                   tools: (m.tools ?? []).map(\.name), steps: steps, historic: !m.isUser, cards: cards)
             }
             sessionID = session.sid
             conversation = UUID()
             error = nil
         } catch {
             self.error = HubStore.message(error)
+        }
+    }
+
+    /// A stored message with its cards, read in one pass so the two cannot fall out of step.
+    private struct StoredMessage: Decodable {
+        let message: ChatHistoryMessage
+        let cards: [ChatCard]
+
+        init(from decoder: Decoder) throws {
+            message = try ChatHistoryMessage(from: decoder)
+            cards = (try? ChatStored(from: decoder))?.cards ?? []
         }
     }
 
@@ -273,6 +299,7 @@ final class ChatController: ObservableObject, Identifiable {
         Task { [weak self] in
             guard let self else { return }
             var reply = initial
+            var cards: [ShownChatCard] = []
             var lastSeq = 0
             var failures = 0
             while !reply.finished && !Task.isCancelled {
@@ -292,6 +319,10 @@ final class ChatController: ObservableObject, Identifiable {
                             lastSeq = id
                         }
                         reply.apply(message.data)
+                        if let more = ShownChatCard.event(message.data), messages.indices.contains(index) {
+                            cards += more
+                            messages[index].cards = cards
+                        }
                         failures = 0
                         update(index, reply)
                     }

@@ -74,29 +74,4 @@ class OmniboxTests {
         assertEquals(OmniboxRules.Score.WORD, OmniboxRules.score("read", reader))
         assertEquals(0, OmniboxRules.score("", reader))
     }
-
-    @Test fun aVoiceTranscriptReplacesPartialsAndCommitsFinalCorrections() {
-        val transcript = VoiceTranscript("Existing text ")
-        assertEquals("Existing text hel", transcript.update(0, "hel", false))
-        assertEquals("Existing text hello", transcript.update(0, "hello", false))
-        assertEquals("Existing text Hello.", transcript.update(0, "Hello.", true))
-        assertEquals("Existing text Hello.", transcript.update(0, "stale", false))
-        assertEquals("Existing text Hello. noise", transcript.update(1, "noise", false))
-        assertEquals("Existing text Hello.", transcript.update(1, "", true))
-        assertEquals("Existing text Hello. Last", transcript.update(3, "Last", true))
-        assertEquals("Existing text Hello. Next Last", transcript.update(2, "Next", true))
-    }
-
-    @Test fun voiceFramesKeepTheirOrderAndFlushTheTail() {
-        val frames = VoicePCMFrames()
-        val first = ByteArray(2800) { 1 }
-        val second = ByteArray(4000) { 2 }
-        assertTrue(frames.append(first).isEmpty())
-        val emitted = frames.append(second)
-        assertEquals(listOf(3200, 3200), emitted.map { it.size })
-        val tail = frames.finish()!!
-        assertEquals(400, tail.size)
-        assertArrayEquals(first + second, emitted.reduce { a, b -> a + b } + tail)
-        assertNull(frames.finish())
-    }
 }

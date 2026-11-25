@@ -42,6 +42,8 @@ function harness() {
   const feeds: Feed[] = [];
   const failSends = new Set<string>();
   let openError: Error | undefined;
+  /** What the card routes answer: the state call's body, and the action's status and body in turn. */
+  const cards = { state: { ok: true, items: [] } as unknown, actions: [] as { status: number; body: string }[], session: undefined as unknown };
   const api: ChatApi = {
     async events(method, path, body) {
       calls.push({ method, path, ...(body ? { body } : {}) });
@@ -57,11 +59,17 @@ function harness() {
     async send(method, path, body) {
       calls.push({ method, path, body });
       if ([...failSends].some((s) => path.endsWith(s))) throw new SpaceError("http", "turn ended", 409);
+      if (path.endsWith("/cards/state")) return cards.state;
       return { ok: true };
+    },
+    async answer(method, path, opts) {
+      calls.push({ method, path, body: opts.json as Record<string, unknown> });
+      return cards.actions.shift() ?? { status: 200, body: JSON.stringify({ ok: true, items: [] }) };
     },
     async get(path) {
       calls.push({ method: "GET", path });
       if (path.endsWith("/sessions")) return { ok: true, sessions: [{ sid: "s1", title: "Earlier", ts: 1 }] };
+      if (cards.session) return cards.session;
       return { ok: true, messages: [{ role: "user", text: "hi" }, { role: "assistant", text: "hello", steps: [{ kind: "tool", name: "Bash", input: "ls", output: "a", failed: false }, { kind: "text", text: "hello" }] }] };
     },
   };
@@ -74,10 +82,10 @@ function harness() {
     sleep: async () => {},
     newId: () => `m${++n}`,
     onChange: () => changes++,
-    text: { stopped: "(stopped)", signIn: "Sign in first", lost: "lost", grantMessage: "I granted more", noTurn: "no turn", answerFailed: (w) => `failed: ${w}` },
+    text: { stopped: "(stopped)", signIn: "Sign in first", lost: "lost", grantMessage: "I granted more", noTurn: "no turn", answerFailed: (w) => `failed: ${w}`, cardReadOnly: "read-only now" },
   });
   const tick = () => new Promise((r) => setTimeout(r, 5));
-  return { conv, calls, feeds, failSends, setOpenError: (e: Error) => (openError = e), permission: () => permission, tick, changes: () => changes };
+  return { conv, calls, feeds, failSends, cards, setOpenError: (e: Error) => (openError = e), permission: () => permission, tick, changes: () => changes };
 }
 
 const init = { type: "system", subtype: "init", session_id: "sess-1", model: "opus" };
@@ -223,5 +231,81 @@ describe("a conversation", () => {
     await fresh.tick();
     expect(fresh.calls[0]).toEqual({ method: "GET", path: "/api/agents/space/assistant/runs/r7/events?after=0" });
     expect(fresh.conv.messages[1]!.activity).toEqual({ kind: "reconnecting" });
+  });
+});
+
+describe("chat cards in a conversation", () => {
+  const receipt = { v: 1, kind: "receipt", title: "Added 2", items: [{ id: "72", title: "Meeting", detail: "Thu 08:00", url: "https://todo.example/?todo=72", version: 1 }, { id: 73, title: "Expenses", version: 2 }], state: "card-state", actions: { undo: "card-undo" } };
+
+  test("a live cards event joins the reply with its token, reads its state, and undoes through the action route", async () => {
+    const h = harness();
+    h.cards.state = { ok: true, items: [{ id: "73", status: "done" }] };
+    h.conv.send("plan my week");
+    await h.tick();
+    h.feeds[0]!.event(1, init);
+    h.feeds[0]!.event(2, { type: "cards", cards: [{ v: 2 }, receipt], token: "tok" });
+    await h.tick();
+    const reply = h.conv.messages[1]!;
+    expect(reply.cards).toHaveLength(1);
+    expect(reply.cards![0]).toMatchObject({ index: 1, token: "tok", busy: false, readOnly: false });
+    // The state call sends the card as received, for ai-space to check again.
+    expect(h.calls.find((c) => c.path.endsWith("/cards/state"))).toEqual({ method: "POST", path: "/api/agents/cards/state", body: { agent: "space/assistant", card: receipt } });
+    expect(reply.cards![0]!.states["73"]).toEqual({ id: "73", status: "done" });
+    expect(h.conv.cardsActionable(reply)).toBe(true);
+
+    h.cards.actions.push({ status: 200, body: JSON.stringify({ ok: true, items: [{ id: "72", status: "removed" }] }) });
+    await h.conv.undoCard(reply.cards![0]!, ["72"]);
+    expect(h.calls.at(-1)).toEqual({ method: "POST", path: "/api/agents/cards/action", body: { token: "tok", card: 1, action: "undo", items: ["72"] } });
+    expect(reply.cards![0]!.states["72"]!.status).toBe("removed");
+
+    // The state already read survives the next events of the turn.
+    h.feeds[0]!.event(3, text("Done."));
+    h.feeds[0]!.event(4, { type: "done" });
+    await h.tick();
+    expect(reply.cards![0]!.states["72"]!.status).toBe("removed");
+    h.conv.send("thanks");
+    await h.tick();
+    expect(h.conv.cardsActionable(reply)).toBe(false);
+  });
+
+  test("a refused token makes the card read-only; another failure is a note", async () => {
+    const h = harness();
+    h.conv.send("go");
+    await h.tick();
+    h.feeds[0]!.event(1, { type: "cards", cards: [receipt], token: "tok" });
+    await h.tick();
+    const shown = h.conv.messages[1]!.cards![0]!;
+    h.cards.actions.push({ status: 500, body: JSON.stringify({ ok: false, error: "app down" }) });
+    await h.conv.undoCard(shown, ["72"]);
+    expect(shown).toMatchObject({ note: "app down", readOnly: false, busy: false });
+    h.cards.actions.push({ status: 409, body: JSON.stringify({ ok: false, error: "this card is read-only now", readOnly: true }) });
+    await h.conv.undoCard(shown, ["72"]);
+    expect(shown).toMatchObject({ note: "read-only now", readOnly: true });
+  });
+
+  test("a peer's agent uses the peer's card routes", async () => {
+    const h = harness();
+    const peer = new Conversation({ id: "todo/planner", base: "/api/peers/mac/agents/todo/planner" }, (h.conv as unknown as { api: ChatApi }).api, (h.conv as unknown as { o: ConstructorParameters<typeof Conversation>[2] }).o);
+    peer.send("go");
+    await h.tick();
+    h.feeds[0]!.event(1, { type: "cards", cards: [receipt], token: "tok" });
+    await h.tick();
+    expect(h.calls.some((c) => c.path === "/api/peers/mac/agents/cards/state" && (c.body as { agent?: string }).agent === "todo/planner")).toBe(true);
+    await peer.undoCard(peer.messages[1]!.cards![0]!, ["72"]);
+    expect(h.calls.at(-1)!.path).toBe("/api/peers/mac/agents/cards/action");
+  });
+
+  test("a restored session's cards have no token, read their state and cannot act", async () => {
+    const h = harness();
+    h.cards.session = { ok: true, messages: [{ role: "user", text: "plan" }, { role: "ai", text: "", steps: [], cards: [receipt] }] };
+    await h.conv.open({ sid: "s1", title: "Earlier", ts: 1 });
+    const reply = h.conv.messages[1]!;
+    expect(reply.cards).toHaveLength(1);
+    expect(reply.cards![0]!.token).toBeUndefined();
+    await h.tick();
+    expect(h.calls.some((c) => c.path === "/api/agents/cards/state")).toBe(true);
+    // Without a token nothing is sent.
+    await h.conv.undoCard(reply.cards![0]!, ["72"]);
+    expect(h.calls.some((c) => c.path.endsWith("/cards/action"))).toBe(false);
   });
 });

@@ -13,7 +13,10 @@
     <string name="settings_dark">深色</string>
     <string name="settings_widgets">小组件</string>
     <string name="settings_language">语言</string>
-    <string name="settings_display_footer">这些选项只属于这台手机，就像面板上的同类选项只属于各自的浏览器。主题取自面板的主题。语言跟随系统设置里这个应用的语言，或手机的语言。</string>
+    <string name="settings_voice_language">语音输入语言</string>
+    <string name="settings_voice_same_as_app">与 AI Space 相同</string>
+    <string name="settings_voice_detect">自动识别</string>
+    <string name="settings_display_footer">这些选项只属于这台手机，就像面板上的同类选项只属于各自的浏览器。主题取自面板的主题。语言跟随系统设置里这个应用的语言，或手机的语言。语音输入也按这个语言转写，除非“语音输入语言”另选了一种。</string>
 
     <string name="settings_services">服务</string>
     <string name="settings_peers">对等节点</string>
