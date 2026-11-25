@@ -7,7 +7,7 @@ import { RUNTIMES_FILE, parseRuntimesYaml } from "../runtimes/config.ts";
 import type { RuntimeRegistry } from "../runtimes/registry.ts";
 import type { RuntimeSpec } from "../runtimes/types.ts";
 import { readWorkspaceEnv } from "../workspace.ts";
-import { GATEWAY_FILE, GATEWAY_PRESETS, parseGatewayYaml, setGatewayTiersText, splitModelId, tierProblem } from "./config.ts";
+import { GATEWAY_FILE, GATEWAY_PRESETS, parseGatewayYaml, runtimeClash, setGatewayTiersText, splitModelId, tierProblem } from "./config.ts";
 import { GatewayEditError, PAGE_KEY_PREFIX, type ProviderEntry, editProblem, pageKeyVar, removeEnvKeysText, setEnvKeyText, setGroupsText, setProviderText } from "./edit.ts";
 import type { ModelGateway } from "./service.ts";
 import { GATEWAY_AUTH, GATEWAY_KINDS, type GatewayKind, GATEWAY_MODEL_PATTERN, GATEWAY_NAME_PATTERN, GATEWAY_TIERS, type GatewayAuth, type GatewayConfig, type GatewayProvider, type GatewayTier, type GatewayTiers } from "./types.ts";
@@ -32,7 +32,7 @@ import { VENDORS, customList, fetchModelList, presetList, redact, testProvider }
  *   POST   /api/model/gateway/models                   {provider} or {preset|messages|openai, auth?, key?}: the vendor's model list
  *   PUT    /api/model/gateway/groups                   {groups: {name: [provider/model, …]}}
  *   PUT    /api/model/gateway/tiers                    {tiers}
- *   POST   /api/model/gateway/runtimes                 {kind: claude-code | anthropic-api}: a runtime through it, in runtimes.yaml
+ *   POST   /api/model/gateway/runtimes                 {kind: claude-code}: Claude Code through it, in runtimes.yaml
  *
  * Keys: a key typed in the page goes to the workspace `.env` (mode kept, 0600 when created) under
  * `SPACE_GATEWAY_<NAME>_KEY`, and into the running environment, the way a hub's token is stored
@@ -86,6 +86,8 @@ export function createGatewaySettingsRoutes(o: GatewaySettingsOptions) {
     return undefined;
   }
 
+  const runtimeNames = () => o.runtimes.list().map((r) => r.name);
+
   const read = async (): Promise<string | undefined> => {
     const f = Bun.file(file);
     return (await f.exists()) ? await f.text() : undefined;
@@ -104,6 +106,8 @@ export function createGatewaySettingsRoutes(o: GatewaySettingsOptions) {
 
   /** Write gateway.yaml (its mode kept) and have the running gateway read it again. */
   async function apply(text: string): Promise<void> {
+    // A provider named like a runtime could never be called (an app's name/model goes to the runtime).
+    parseGatewayYaml(text, o.env, { runtimes: runtimeNames() });
     let mode: number | undefined;
     try {
       mode = (await stat(file)).mode & 0o777;
@@ -116,7 +120,7 @@ export function createGatewaySettingsRoutes(o: GatewaySettingsOptions) {
   function reload(text: string | undefined): void {
     if (text === undefined) return o.gateway.reload({});
     try {
-      const loaded = parseGatewayYaml(text, o.env);
+      const loaded = parseGatewayYaml(text, o.env, { runtimes: runtimeNames() });
       o.gateway.reload({ config: loaded.config });
       for (const w of loaded.warnings) log(w);
     } catch (e) {
@@ -282,6 +286,7 @@ export function createGatewaySettingsRoutes(o: GatewaySettingsOptions) {
     if (!body) return json({ ok: false, error: "the body must be JSON" }, 400);
     const name = str(body.name) ?? "";
     if (!GATEWAY_NAME_PATTERN.test(name)) return json({ ok: false, error: "name: lowercase letters, digits and -, starting with a letter" }, 400);
+    if (runtimeNames().includes(name)) return json({ ok: false, error: runtimeClash(name) }, 400);
     const preset = str(body.preset) || undefined;
     if (preset && !GATEWAY_PRESETS[preset]) return json({ ok: false, error: `preset must be one of ${Object.keys(GATEWAY_PRESETS).join(", ")}` }, 400);
     const auth = str(body.auth) || undefined;
@@ -504,12 +509,17 @@ export function createGatewaySettingsRoutes(o: GatewaySettingsOptions) {
 
   async function saveTiers(req: Request): Promise<Response> {
     const body = (await req.json().catch(() => null)) as { tiers?: unknown } | null;
-    if (!body?.tiers || typeof body.tiers !== "object" || Array.isArray(body.tiers)) return json({ ok: false, error: "tiers must map basic, junior, intermediate, advanced and image to a model or a group" }, 400);
+    if (!body?.tiers || typeof body.tiers !== "object" || Array.isArray(body.tiers)) return json({ ok: false, error: "tiers must map basic, junior, intermediate and advanced to a model or a group" }, 400);
     const f = await editable();
     if (f instanceof Response) return f;
     const tiers: GatewayTiers = {};
     for (const [tier, raw] of Object.entries(body.tiers as Record<string, unknown>)) {
       if (!(GATEWAY_TIERS as readonly string[]).includes(tier)) return json({ ok: false, error: `unknown tier ${tier}` }, 400);
+      // The picture tier is gone: an old one stays in the file as it is (ignored), and none is set here.
+      if (tier === "image") {
+        if (raw !== "" && raw !== null && raw !== undefined && raw !== f.config.tiers.image) return json({ ok: false, error: "image is not a tier any more: an app's picture call names its picture model (provider/model)" }, 400);
+        continue;
+      }
       if (raw === "" || raw === null || raw === undefined) continue;
       const value = typeof raw === "string" ? raw.trim() : raw;
       if (typeof value !== "string" || !GATEWAY_MODEL_PATTERN.test(value)) return json({ ok: false, error: `${tier}: not a model id` }, 400);
@@ -519,6 +529,7 @@ export function createGatewaySettingsRoutes(o: GatewaySettingsOptions) {
       }
       tiers[tier as GatewayTier] = value;
     }
+    if (f.config.tiers.image) tiers.image = f.config.tiers.image;
     try {
       await apply(setGatewayTiersText(f.text, tiers, o.env));
     } catch (e) {
@@ -530,11 +541,13 @@ export function createGatewaySettingsRoutes(o: GatewaySettingsOptions) {
   async function addRuntime(req: Request): Promise<Response> {
     const body = (await req.json().catch(() => null)) as { kind?: unknown } | null;
     const kind = body?.kind;
-    if (kind !== "claude-code" && kind !== "anthropic-api") return json({ ok: false, error: "kind must be claude-code or anthropic-api" }, 400);
+    // An app calls the gateway's models directly now: the Messages API runtime is no longer offered (docs/runtimes.md#anthropic-api).
+    if (kind === "anthropic-api") return json({ ok: false, error: "the Messages API runtime is no longer added here: an app names a gateway model (provider/model) and the call goes to the gateway directly" }, 400);
+    if (kind !== "claude-code") return json({ ok: false, error: "kind must be claude-code" }, 400);
     if (o.unavailable) return json({ ok: false, error: o.unavailable }, 409);
     // Only what this space found itself: the path never comes from the request.
-    const claude = kind === "claude-code" ? o.claude() : undefined;
-    if (kind === "claude-code" && !claude) return json({ ok: false, error: "Claude Code was not found on this machine; install it, then check again in Settings → Models" }, 409);
+    const claude = o.claude();
+    if (!claude) return json({ ok: false, error: "Claude Code was not found on this machine; install it, then check again in Settings → Models" }, 409);
     const f = Bun.file(runtimesFile);
     const current = (await f.exists()) ? await f.text() : undefined;
     // One of each kind through the gateway is enough: a second answers exactly as the first does.
@@ -542,7 +555,7 @@ export function createGatewaySettingsRoutes(o: GatewaySettingsOptions) {
     if (have) return json({ ok: false, error: `runtime ${have.name} already answers through the gateway`, runtime: have.name }, 409);
     let next: { text: string; name: string };
     try {
-      next = addGatewayRuntimeText(current, { kind, ...(claude ? { claude } : {}) }, o.env);
+      next = addGatewayRuntimeText(current, { kind, claude }, o.env);
     } catch (e) {
       return json({ ok: false, error: (e as Error).message }, 409);
     }
@@ -573,6 +586,11 @@ export function createGatewaySettingsRoutes(o: GatewaySettingsOptions) {
   };
 }
 
+/**
+ * A runtime that answers through the gateway, as the page lists it: Claude Code with `gateway: space`.
+ * An `anthropic-api` runtime with `gateway: space` still loads and answers, deprecated, and is not
+ * listed: an app names a gateway model instead (docs/model.md#models).
+ */
 function throughSpace(spec: RuntimeSpec): boolean {
-  return (spec.kind === "claude-code" || spec.kind === "anthropic-api") && spec.gateway === "space";
+  return spec.kind === "claude-code" && spec.gateway === "space";
 }

@@ -490,7 +490,9 @@ describe("the Image group", () => {
     const view = (await call("GET", "/api/model/gateway")).json;
     expect(view.imageModels).toEqual(["oa/gpt-image-1"]);
     expect(view.providers.find((p: { name: string }) => p.name === "ds").serves.image).toBe("the vendor documents none");
-    const r = (await call("POST", "/api/model/gateway/image/test", {})).json;
+    // The test names its picture model: the old tiers.image is not read.
+    expect((await call("POST", "/api/model/gateway/image/test", {})).json).toMatchObject({ ok: false, error: "pick the picture model to test" });
+    const r = (await call("POST", "/api/model/gateway/image/test", { model: "oa/gpt-image-1" })).json;
     expect(r).toMatchObject({ ok: true, type: "image/png", bytes: PNG.length, served: "oa/gpt-image-1" });
     expect(v.seen.at(-1)).toMatchObject({ path: "/v1/images/generations", json: { model: "gpt-image-1", n: 1 } });
     expect((await call("POST", "/api/model/gateway/image/test", { model: "ds/x" })).json).toMatchObject({ ok: true, failed: true });

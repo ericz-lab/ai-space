@@ -192,6 +192,8 @@ function link(p: Partial<GatewayProvider> | undefined, price?: (m: string) => Re
     has: () => true,
     problem: () => undefined,
     tiers: () => ({}),
+    kindsOf: () => undefined,
+    choices: () => ({ text: [], image: [] }),
   };
 }
 

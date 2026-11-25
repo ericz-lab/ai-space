@@ -120,4 +120,12 @@ export type GatewayLink = {
   problem(): string | undefined;
   /** The gateway's tier table as it is now (Settings may change it while ai-space runs). */
   tiers(): GatewayTiers;
+  /**
+   * What a gateway model id is for (docs/model.md#models): `provider/model` with a provider of
+   * gateway.yaml gives that model's kind, a group gives its members' kinds; anything else
+   * (a runtime's model, an unknown provider, no gateway.yaml) gives undefined.
+   */
+  kindsOf(id: string): GatewayKind[] | undefined;
+  /** The ids an app may name: text models and groups for answers, picture models and groups for pictures. */
+  choices(): { text: string[]; image: string[] };
 };

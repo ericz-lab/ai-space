@@ -140,7 +140,27 @@ export class ModelGateway {
     has: (base) => Boolean(this.config?.providers.some((p) => p[base] && !this.config!.off[p.name])),
     problem: () => this.problem(),
     tiers: () => ({ ...this.tierTable }),
+    kindsOf: (id) => this.kindsOf(id),
+    choices: () => {
+      const v = this.view();
+      return { text: v.textModels, image: v.imageModels };
+    },
   };
+
+  /** See `GatewayLink.kindsOf`. */
+  kindsOf(id: string): GatewayKind[] | undefined {
+    const config = this.config;
+    if (!config) return undefined;
+    const one = (member: string): GatewayKind | undefined => {
+      const split = splitModelId(member);
+      const p = split && config.providers.find((x) => x.name === split.provider);
+      return p ? kindOf(p, split!.model) : undefined;
+    };
+    const members = config.groups[id];
+    if (members) return [...new Set(members.map(one).filter((k): k is GatewayKind => Boolean(k)))];
+    const k = one(id);
+    return k ? [k] : undefined;
+  }
 
   /** The price of `provider/model` now; null when that provider is not in gateway.yaml (or there are no prices). */
   priceOf(served: string): Price | undefined | null {

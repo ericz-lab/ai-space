@@ -1,5 +1,5 @@
 export * from "./types.ts";
-export { GATEWAY_FILE, GATEWAY_PRESETS, loadGateway, parseGatewayYaml, setGatewayTiersText, splitModelId, tierProblem, type LoadedGateway } from "./config.ts";
+export { GATEWAY_FILE, GATEWAY_PRESETS, loadGateway, parseGatewayYaml, runtimeClash, setGatewayTiersText, splitModelId, tierProblem, type LoadedGateway } from "./config.ts";
 export { GATEWAY_TOKEN_PREFIX, GatewayTokens } from "./tokens.ts";
 export { TraceStore } from "./trace.ts";
 export { PriceBook, PRICES_FILE, costOf, parsePricesYaml, type Price, type PriceLookup } from "./prices.ts";

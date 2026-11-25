@@ -318,8 +318,9 @@ export function createGatewayMediaRoutes(o: MediaOptions, guarded: (h: (req: Req
   async function testImage(req: Request): Promise<Response> {
     const body = (await req.json().catch(() => ({}))) as { model?: unknown };
     const g = await gatewayConfig();
-    const model = typeof body.model === "string" && body.model.trim() ? body.model.trim() : g?.tiers.image;
-    if (!model || !GATEWAY_MODEL_PATTERN.test(model)) return json({ ok: false, error: "pick the image model first" }, 400);
+    // The test names the picture model it draws with: the gateway has no picture tier.
+    const model = typeof body.model === "string" && body.model.trim() ? body.model.trim() : undefined;
+    if (!model || !GATEWAY_MODEL_PATTERN.test(model)) return json({ ok: false, error: "pick the picture model to test" }, 400);
     const base = o.gateway.link.base();
     if (!base) return json({ ok: false, error: `the built-in model gateway is off: ${o.gateway.link.problem() ?? ""}` }, 409);
     const split = splitModelId(model);

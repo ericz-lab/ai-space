@@ -100,6 +100,50 @@ export function createAnthropicApi(spec: AnthropicApiSpec, deps: { fetch?: typeo
 }
 
 /**
+ * The built-in model gateway called directly (docs/model.md#models): an app's text call or picture
+ * call that names a gateway model (`<provider>/<model>`) goes here, with no runtime. Text goes out
+ * as Anthropic Messages to the gateway's loopback route, pictures as OpenAI Images; each call
+ * carries a token issued for it, and what answered, its cost and the answers to price again come
+ * from that token's trace. Failover is the gateway's own (its rests); there is no runtime fallback.
+ *
+ * Not a runtime: it is not in runtimes.yaml, not listed, never a default. The model service holds
+ * it under the name `gateway` and writes its rows with no runtime and backend `gateway`.
+ */
+export function createGatewayModels(deps: { gateway: GatewayLink; fetch?: typeof fetch; vendorImage?: VendorImageDeps }): RuntimeAdapter {
+  const doFetch = deps.fetch ?? fetch;
+  const backend: Backend = "gateway";
+  const off = () => `the built-in model gateway is off: ${deps.gateway.problem() ?? "it does not listen yet"}`;
+  return {
+    name: "gateway",
+    // The shape of the calls it makes; the service never shows it as a runtime.
+    kind: "anthropic-api",
+    backend,
+    capabilities: { complete: true, agent: false, chat: false, image: true },
+    complete: async (input, signal) => {
+      const base = deps.gateway.base();
+      if (!base) return { ok: false, error: off(), backend };
+      const grant = deps.gateway.issue();
+      const outcome = await runApi(input, { apiKey: grant.token, apiUrl: `${base}/v1/messages`, fetch: doFetch, signal });
+      const { costUsd: _, ...rest } = outcome;
+      return gatewayFigures({ ...rest, backend } as CompleteOutcome, deps.gateway.trace(grant.run));
+    },
+    image: async (input, signal) => {
+      const base = deps.gateway.base();
+      if (!base) return { ok: false, error: off(), backend };
+      const grant = deps.gateway.issue();
+      const outcome = await gatewayImage(input, { base: `${base}/v1`, token: grant.token, fetch: doFetch, signal, ...(deps.vendorImage ? { vendorImage: deps.vendorImage } : {}) });
+      const trace = deps.gateway.trace(grant.run);
+      const priced = { ...outcome, backend, ...(trace?.costUsd !== undefined ? { costUsd: trace.costUsd } : {}), ...(trace?.priceBasis ? { priceBasis: trace.priceBasis } : {}) } as ImageOutcome;
+      return priced.ok && trace?.served ? { ...priced, text: `${priced.text} by ${trace.served}` } : priced;
+    },
+    runAgent: () => Promise.reject(new Unsupported("gateway", "agent runs")),
+    chat: () => {
+      throw new Unsupported("gateway", "chat");
+    },
+  };
+}
+
+/**
  * The user message: the prompt alone, or, with files, each image as a base64 block after a text
  * block naming it (the prompt refers to files by name, `img1.png`), then the prompt.
  */
