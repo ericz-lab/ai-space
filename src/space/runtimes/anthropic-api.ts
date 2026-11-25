@@ -1,3 +1,4 @@
+import { activePrices, costOf, pricedAnswer } from "../prices/index.ts";
 import { fetchVendorImage, type VendorImageDeps } from "../model/vendor-image.ts";
 import type { GatewayLink } from "../gateway/types.ts";
 import { gatewayFigures } from "../gateway/trace.ts";
@@ -12,8 +13,8 @@ import { FILE_NAME_PATTERN, Unsupported } from "./types.ts";
  * request that asks for them is refused rather than quietly served without),
  * no agent runs or chats. Files (images an app or the chat service sends) go
  * in the user message as base64 image blocks. Aliases the CLI understands are mapped to model ids;
- * anything else is passed to the API as is. Cost is computed from the list
- * prices below for the models listed, and left unknown otherwise.
+ * anything else is passed to the API as is. Cost is computed from Anthropic's
+ * list prices in the price book (docs/prices.md), and left unknown without one.
  *
  * `url` may point at a gateway that speaks the same API, such as magpie on this machine
  * (docs/model-gateway.md#magpie): its `provider/model` ids come from the runtime's `models:` pins, and
@@ -33,18 +34,10 @@ export const API_MODELS: Record<string, string> = {
   opus: "claude-opus-5",
 };
 
-/** API list prices in USD per million tokens: input, cache write, cache read, output. */
-const PRICES: Record<string, [number, number, number, number]> = {
-  "claude-haiku-4-5": [1, 1.25, 0.1, 5],
-  "claude-sonnet-5": [2, 2.5, 0.2, 10],
-  "claude-opus-5": [5, 6.25, 0.5, 25],
-};
-
-/** Cost of one API call from its usage, for the models whose prices are listed. */
+/** Cost of one API call from its usage at Anthropic's list price (docs/prices.md); undefined when the model has none. */
 export function apiCost(model: string, u: Usage): number | undefined {
-  const p = PRICES[model];
-  if (!p) return undefined;
-  return (u.inputTokens * p[0] + u.cacheWriteTokens * p[1] + u.cacheReadTokens * p[2] + u.outputTokens * p[3]) / 1e6;
+  const found = activePrices().forVendor("anthropic", model);
+  return found ? costOf(found.price, pricedAnswer(`anthropic/${model}`, u)) : undefined;
 }
 
 export function createAnthropicApi(spec: AnthropicApiSpec, deps: { fetch?: typeof fetch; gateway?: GatewayLink; vendorImage?: VendorImageDeps } = {}): RuntimeAdapter {

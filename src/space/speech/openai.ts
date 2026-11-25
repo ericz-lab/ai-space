@@ -1,4 +1,4 @@
-import { costOf as gatewayCost, pricedAnswer } from "../gateway/prices.ts";
+import { costOf as gatewayCost, pricedAnswer } from "../prices/price.ts";
 import type { GatewayLink } from "../gateway/types.ts";
 import { costOf, priceFor } from "./prices.ts";
 import { ProviderError, type OpenAiSpec, type Price, type ProviderState, type SpeakInput, type SpeakResult, type SpeechAdapter, type SpeechCapability, type GatewayPriced, type TranscribeInput, type TranscribeResult } from "./types.ts";
@@ -27,14 +27,14 @@ export class OpenAiAdapter implements SpeechAdapter {
   readonly kind = "openai-compatible" as const;
   readonly capabilities: ReadonlySet<SpeechCapability> = new Set<SpeechCapability>(["transcribe", "speak"]);
   readonly limits = OPENAI_LIMITS;
-  private readonly price: Price | undefined;
+  constructor(readonly spec: OpenAiSpec, private readonly deps: { fetch?: typeof fetch; gateway?: GatewayLink } = {}) {}
 
-  constructor(readonly spec: OpenAiSpec, private readonly deps: { fetch?: typeof fetch; gateway?: GatewayLink } = {}) {
-    // Through a gateway, OpenAI's list prices apply when its provider is OpenAI's own host.
-    const via = spec.gateway;
-    const bare = (m: string) => (via ? m.slice(via.provider.length + 1) : m);
-    const url = via?.via === "space" ? deps.gateway?.provider(via.provider)?.openai ?? "" : via ? "" : spec.url;
-    this.price = priceFor({ ...spec, url, asrModel: bare(spec.asrModel), ttsModel: bare(spec.ttsModel) });
+  /** The list price at the call's time: a vendor's when the provider (or the gateway provider behind it) is its own host. */
+  private get price(): Price | undefined {
+    const via = this.spec.gateway;
+    const bare = (m: string) => (via ? m.slice(via.provider.length + 1) : m).replace(/-\d{4}-\d{2}-\d{2}$/, "");
+    const url = via?.via === "space" ? this.deps.gateway?.provider(via.provider)?.openai ?? "" : via ? "" : this.spec.url;
+    return priceFor({ ...this.spec, url, asrModel: bare(this.spec.asrModel), ttsModel: bare(this.spec.ttsModel) });
   }
 
   /** Where a call goes and with which key: the spec's, or the built-in gateway's with a token for this call. */

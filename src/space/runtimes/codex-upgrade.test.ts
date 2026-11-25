@@ -119,6 +119,6 @@ describe("codexUpgrade", () => {
     logs.length = 0;
     const after = await codexUpgrade({ home, dryRun: true, log: (l) => logs.push(l), run: fake().run });
     expect(after.unpriced).toEqual(["gpt-9-terra"]);
-    expect(logs).toContain("gpt-9-nova is priced from models.dev 2026-11-24; add it to src/space/model/gpt-prices.json for its Fast multiplier or to pin the price");
+    expect(logs).toContain("gpt-9-nova is priced from models.dev 2026-11-24; add it to src/space/prices/tables/openai.json for its Fast multiplier or to pin the price");
   }));
 });

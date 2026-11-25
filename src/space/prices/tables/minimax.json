@@ -1,0 +1,16 @@
+{
+  "name": "MiniMax",
+  "asOf": "2026-11-24",
+  "source": "https://platform.minimax.io/docs/pricing/overview.md",
+  "hosts": ["api.minimax.io"],
+  "note": "MiniMax's pay-as-you-go list prices on its international site (api.minimax.io): Speech-to-Text $0.38 per hour, T2A per million billable characters (MiniMax counts a Chinese character as 2; the adapter prices extra_info.usage_characters). The China site (api.minimaxi.com) lists prices in CNY only (https://platform.minimaxi.com/docs/pricing/overview.md: ASR 2.50 CNY/hour, T2A 3.50 / 2.00 CNY per 10,000 characters), so it is left unpriced: no exchange rate is guessed. A price: in providers.yaml or gateway-prices.yaml wins.",
+  "models": {
+    "asr-1.0": {"perMinute":0.0063333},
+    "speech-2.8-hd": {"perMillionChars":100},
+    "speech-2.8-turbo": {"perMillionChars":60},
+    "speech-2.6-hd": {"perMillionChars":100},
+    "speech-2.6-turbo": {"perMillionChars":60},
+    "speech-02-hd": {"perMillionChars":100},
+    "speech-02-turbo": {"perMillionChars":60}
+  }
+}

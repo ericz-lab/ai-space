@@ -22,6 +22,7 @@
     "package-check-edge": "test -n \"$SPACE_TEST_CADDY\" && bun test src/space/packages/gateway.test.ts",
     "set-version": "bun src/space/version.ts",
     "sync-prices": "bun scripts/sync-model-watch-prices.ts",
+    "prices": "bun scripts/prices.ts",
     "release:server": "bun release/server.ts",
     "release:smoke": "bun release/smoke.ts",
     "release:client": "desktop/macos/scripts/package.sh",

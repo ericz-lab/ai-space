@@ -1,5 +1,5 @@
 import type { PriceBasis, Usage } from "../runtimes/types.ts";
-import type { Price } from "./prices.ts";
+import type { Price } from "../prices/price.ts";
 
 /**
  * The built-in model gateway (docs/model-gateway.md): it sits between an AI runtime (Claude Code)

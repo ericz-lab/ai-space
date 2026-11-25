@@ -1,3 +1,4 @@
+import { activePrices, costOf, pricedAnswer } from "../prices/index.ts";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -27,7 +28,7 @@ import { SSH_HOST_PATTERN, type AgentOutcome, type Backend, type ChatCallbacks, 
  * `tool_result` as steps commit; `status` with `phase: step_end` carrying the
  * step's usage; `status turn_end` with the reason; `final` with the answer;
  * `error` when the runner failed outside a turn. Exit 1 on failure. Usage is
- * summed over the steps; cost is computed from DeepSeek's list prices below.
+ * summed over the steps; cost is computed from DeepSeek's list prices (docs/prices.md).
  *
  * The harness must have been prepared on its machine: the CLI installed, the
  * profile initialised, and session log upload and telemetry turned off
@@ -39,21 +40,10 @@ import { SSH_HOST_PATTERN, type AgentOutcome, type Backend, type ChatCallbacks, 
 export const DEFAULT_PROFILE = "headless";
 const DEFAULT_PROVIDER = "deepseek-official";
 
-/**
- * DeepSeek list prices, USD per million tokens at peak: input (cache miss),
- * cache write (same as input: the API charges no extra for writing), cache
- * hit, output. Off-peak (all but 01:00–04:00 and 06:00–10:00 UTC on weekdays)
- * is half; the ledger takes the peak figure and so overstates off-peak calls.
- */
-const PRICES: Record<string, [number, number, number, number]> = {
-  "deepseek-flash": [0.3, 0.3, 0.006, 1.2],
-  "deepseek-v4-pro": [1.32, 1.32, 0.044, 3.96],
-};
-
+/** Cost at DeepSeek's list price, peak (docs/prices.md: tables/deepseek.json); undefined when the model has none. */
 export function dshCost(model: string, u: Usage): number | undefined {
-  const p = PRICES[model];
-  if (!p) return undefined;
-  return (u.inputTokens * p[0] + u.cacheWriteTokens * p[1] + u.cacheReadTokens * p[2] + u.outputTokens * p[3]) / 1e6;
+  const found = activePrices().forVendor("deepseek", model);
+  return found ? costOf(found.price, pricedAnswer(`deepseek/${model}`, u)) : undefined;
 }
 
 /** Tool rows of the base bundle that a lean answer switches off. `tool-web` stays when web tools were asked for. */

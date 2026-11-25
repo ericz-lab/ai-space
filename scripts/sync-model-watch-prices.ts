@@ -1,18 +1,19 @@
 /**
- * Copy Model Watch's prices into ai-space (docs/model-gateway.md#from-model-watch).
+ * Copy Model Watch's prices into ai-space (docs/prices.md#model-watch).
  *
  *   bun run sync-prices [path/to/model-watch/main.db]
  *
  * Reads Model Watch's database read-only (default ~/.ai-space/data/model-watch/main.db; the app
- * need not be running) and writes src/space/gateway/model-watch-prices.json in a stable order, so a
- * diff shows only what changed on the vendors' pages. Commit the file and deploy to publish it.
+ * need not be running) and writes src/space/prices/tables/model-watch.json in a stable order, so a
+ * diff shows only what changed on the vendors' pages. Commit it in a pull request (`bun run prices check` reports what moved);
+ * merged to main, the price catalogue is published and every Space has it within a day (docs/prices.md#publishing).
  */
 import { Database } from "bun:sqlite";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { WatchFile, WatchRow, WatchSource } from "../src/space/gateway/model-watch.ts";
+import type { WatchFile, WatchRow, WatchSource } from "../src/space/prices/model-watch.ts";
 
-export const PRICES_OUT = join(import.meta.dir, "..", "src", "space", "gateway", "model-watch-prices.json");
+export const PRICES_OUT = join(import.meta.dir, "..", "src", "space", "prices", "tables", "model-watch.json");
 
 const host = (url: string | null) => {
   try {

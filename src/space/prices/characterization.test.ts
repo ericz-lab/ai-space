@@ -8,11 +8,10 @@ import { dshCost } from "../runtimes/deepseek-harness.ts";
 import { OpenAiAdapter } from "../speech/openai.ts";
 import { MinimaxAdapter } from "../speech/minimax.ts";
 import { ModelStore } from "../model/store.ts";
-import { gptPricing, useModelsDev } from "../model/pricing.ts";
 import { GATEWAY_PRESETS } from "../gateway/config.ts";
-import { ModelWatchPrices, type WatchFile } from "../gateway/model-watch.ts";
-import { costOf, MODELS_DEV_CACHE, PriceBook, PRICES_FILE, pricedAnswer, trimModelsDev } from "../gateway/prices.ts";
-import watchFixture from "../gateway/fixtures/model-watch-prices.json";
+import { activePrices, gptPricing, ModelWatchPrices, costOf, MODELS_DEV_CACHE, PriceBook, PRICES_FILE, pricedAnswer, trimModelsDev } from "./index.ts";
+import type { WatchFile } from "./model-watch.ts";
+import watchFixture from "./fixtures/model-watch-prices.json";
 
 /**
  * Characterization: what a spread of real calls costs, pinned before the price module was unified
@@ -38,13 +37,13 @@ const book = async (env: Record<string, string | undefined> = {}, own = "") => {
   const h = await home();
   if (own) await writeFile(join(h, PRICES_FILE), own);
   await Bun.write(join(h, MODELS_DEV_CACHE), JSON.stringify(trimModelsDev(MODELS_DEV, new Date())));
-  const b = new PriceBook({ home: h, modelWatch: new ModelWatchPrices({ env, data: watchFixture as unknown as WatchFile }), fetch: (async () => { throw new Error("offline"); }) as unknown as typeof fetch, log: () => {} });
+  const b = new PriceBook({ home: h, modelWatch: new ModelWatchPrices({ env, data: watchFixture as unknown as WatchFile }), fetch: (async () => { throw new Error("offline"); }) as unknown as typeof fetch, log: () => {}, offline: true });
   await b.load();
   return b;
 };
 const gw = (b: PriceBook, p: { name: string; preset?: string; messages?: string; openai?: string }, model: string, a: ReturnType<typeof usage> | Record<string, number> = {}) => {
   const found = b.lookupSync(p, model);
-  return found ? { source: found.source, usd: costOf(found.price, { m: `${p.name}/${model}`, ...("inputTokens" in a ? pricedAnswer("x", a as ReturnType<typeof usage>) : a), m: `${p.name}/${model}` }) } : undefined;
+  return found ? { source: found.source, usd: costOf(found.price, { ...("inputTokens" in a ? pricedAnswer("x", a as ReturnType<typeof usage>) : a), m: `${p.name}/${model}` }) } : undefined;
 };
 
 test("Codex ledger rows: GPT list prices, long context and cache reads, read-time estimate", async () => {
@@ -59,11 +58,11 @@ test("Codex ledger rows: GPT list prices, long context and cache reads, read-tim
   expect(row("gpt-6-luna-2026-09-01", usage(1000, 1000))).toBeCloseTo((1000 * 0.1 + 1000 * 0.5) / M, 12);
   expect(row("gpt-5.3-codex", usage(1000, 1000, 0, 10))).toBeUndefined();
   expect(row("gpt-9-nova", usage(1000, 1000))).toBeUndefined();
-  useModelsDev(trimModelsDev(MODELS_DEV, new Date("2026-11-24T00:00:00Z")));
+  activePrices().useCatalog(trimModelsDev(MODELS_DEV, new Date("2026-11-24T00:00:00Z")));
   try {
     expect(row("gpt-9-nova", usage(1000, 1000, 1000))).toBeCloseTo((1000 * 3 + 1000 * 0.3 + 1000 * 12) / M, 12);
   } finally {
-    useModelsDev(undefined);
+    activePrices().useCatalog(undefined);
     store.close();
   }
 });
@@ -121,4 +120,21 @@ test("runtimes: anthropic-api and deepseek-harness at their list prices (DeepSee
   expect(dshCost("deepseek-flash", usage(M, M, M, M))).toBeCloseTo(0.3 + 1.2 + 0.006 + 0.3, 9);
   expect(dshCost("deepseek-v4-pro", usage(M, M))).toBeCloseTo(1.32 + 3.96, 9);
   expect(dshCost("deepseek-unknown", usage(M, M))).toBeUndefined();
+});
+
+test("changed on purpose: one list price per vendor whatever the path (old figure beside the new)", async () => {
+  // A gateway provider on DeepSeek's own host with no CNY rate set: was models.dev's figure
+  // (0.15 / 0.6 per million, $0.75 here), now DeepSeek's peak list price, as deepseek-harness pays.
+  const b = await book();
+  const ds = { name: "ds", preset: "deepseek", ...GATEWAY_PRESETS.deepseek! };
+  expect(gw(b, ds, "deepseek-flash", usage(M, M))).toEqual({ source: "ai-space deepseek 2026-11-24", usd: 1.5 });
+  // deepseek-v4-flash through deepseek-harness: was unpriced, now the flash peak price.
+  expect(dshCost("deepseek-v4-flash", usage(M, M))).toBeCloseTo(1.5, 9);
+  // anthropic-api naming a model outside its three: was unpriced, now models.dev's list price.
+  activePrices().useCatalog(trimModelsDev(MODELS_DEV, new Date("2026-11-24T00:00:00Z")));
+  try {
+    expect(apiCost("claude-opus-5-5", usage(M, M))).toBeCloseTo(24, 9);
+  } finally {
+    activePrices().useCatalog(undefined);
+  }
 });

@@ -4,7 +4,7 @@ import { parseGatewayYaml } from "../gateway/config.ts";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { PriceBook, PRICES_FILE } from "../gateway/prices.ts";
+import { PriceBook, PRICES_FILE } from "../prices/index.ts";
 import { ModelGateway } from "../gateway/service.ts";
 import { checkGatewayProviders, parseProvidersYaml } from "./config.ts";
 import { OpenAiAdapter } from "./openai.ts";

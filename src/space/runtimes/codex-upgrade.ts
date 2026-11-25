@@ -1,6 +1,5 @@
 import { join } from "node:path";
-import { MODELS_DEV_CACHE, type PriceCatalog } from "../gateway/prices.ts";
-import { mergeGptPricing } from "../model/pricing.ts";
+import { PriceBook, pricingFrom } from "../prices/index.ts";
 import { RUNTIMES_FILE, parseRuntimesYaml } from "./config.ts";
 import { spawnCollect } from "./process.ts";
 import type { RuntimeRegistry } from "./registry.ts";
@@ -197,13 +196,14 @@ export async function codexUpgrade(opts: UpgradeOptions): Promise<UpgradeResult>
     for (const p of stalePins(spec.models, tiers)) log(`${spec.name}/${p.tier}: the pin ${p.pinned} keeps an older model than ${p.latest}; remove the line in ${RUNTIMES_FILE} to follow the catalogue`);
   }
 
-  // The prices the running Space uses: gpt-prices.json, then models.dev's catalogue it keeps in run/.
-  const dev = await Bun.file(join(opts.home, MODELS_DEV_CACHE)).json().then((c) => c as PriceCatalog, () => undefined);
-  const pricing = mergeGptPricing(dev);
+  // The prices the running Space uses (docs/prices.md): the owner's file, the catalogue, models.dev, from their copies in the workspace.
+  const book = new PriceBook({ home: opts.home, offline: true, log: () => {} });
+  await book.load();
+  const pricing = pricingFrom(book);
   const tierModels = [...new Set(Object.values(result.tiers).flatMap((t) => Object.values(t)))].filter((m): m is string => !!m);
   result.unpriced = tierModels.filter((m) => !pricing.models[m]);
-  for (const m of tierModels.filter((m) => pricing.filled[m])) log(`${m} is priced from ${pricing.filled[m]}; add it to src/space/model/gpt-prices.json for its Fast multiplier or to pin the price`);
-  for (const m of result.unpriced) log(`${m} has no price in src/space/model/gpt-prices.json nor in models.dev's catalogue${dev ? "" : " (none cached yet)"}; its ledger rows show no cost until it is priced`);
+  for (const m of tierModels.filter((m) => pricing.filled[m])) log(`${m} is priced from ${pricing.filled[m]}; add it to src/space/prices/tables/openai.json for its Fast multiplier or to pin the price`);
+  for (const m of result.unpriced) log(`${m} has no price in gateway-prices.yaml, ai-space's price catalogue or models.dev's${book.catalogue() ? "" : " (none cached yet)"}; its ledger rows show no cost until it is priced`);
 
   if (opts.dryRun) return result;
   if (opts.restart) {

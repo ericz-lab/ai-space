@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { basisCost, costOf, MODELS_DEV_CACHE, parsePricesYaml, PriceBook, PRICES_FILE, priceFromModelsDev, pricedAnswer, repriceBasis, trimModelsDev } from "./prices.ts";
+import { basisCost, costOf, MODELS_DEV_CACHE, parsePricesYaml, PriceBook, PRICES_FILE, priceFromModelsDev, pricedAnswer, repriceBasis, trimModelsDev } from "./index.ts";
 
 const usage = (inputTokens: number, outputTokens: number, cacheReadTokens = 0, cacheWriteTokens = 0) => pricedAnswer("p/m", { inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens });
 
@@ -106,7 +106,7 @@ test("lookup order: the file's model, the file's provider/*, then models.dev for
   await Bun.write(join(home, MODELS_DEV_CACHE), JSON.stringify(trimModelsDev(MODELS_DEV, new Date())));
   await Bun.write(join(home, PRICES_FILE), "mm/special: [9, 9]\nrelay/*: [0.1, 0.2]\n");
   let fetched = 0;
-  const book = new PriceBook({ home, fetch: (async () => (fetched++, new Response("{}"))) as unknown as typeof fetch, log: () => {} });
+  const book = new PriceBook({ home, fetch: (async (url: string) => (String(url).includes("models.dev") && fetched++, new Response("{}"))) as unknown as typeof fetch, log: () => {} });
   await book.load();
   expect(fetched).toBe(0); // the cache is fresh
   const intl = { name: "mm", preset: "minimax", messages: "https://api.minimax.io/anthropic" };

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { readCatalog } from "../runtimes/magpie.ts";
 import { GATEWAY_PREFIX, createGatewayRoutes, gatewayBase } from "./api.ts";
 import { IMAGE_TIER_IGNORED, parseGatewayYaml, setGatewayTiersText } from "./config.ts";
-import { PriceBook, PRICES_FILE } from "./prices.ts";
+import { PriceBook, PRICES_FILE } from "../prices/index.ts";
 import { ModelGateway } from "./service.ts";
 import { GatewayTokens } from "./tokens.ts";
 import { TraceStore } from "./trace.ts";
