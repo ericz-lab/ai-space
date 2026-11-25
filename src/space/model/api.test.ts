@@ -244,12 +244,30 @@ describe("reads", () => {
 });
 
 test("pricing endpoint exposes the same versioned catalogue used by the ledger", async () => {
-  const { GPT_PRICING } = await import("./pricing.ts");
+  const { gptPricing } = await import("./pricing.ts");
   const res = await fetch(`${base}/api/model/pricing`);
   expect(res.status).toBe(200);
-  expect(await res.json()).toEqual({ ok: true, ...GPT_PRICING });
-  const p = GPT_PRICING.models["gpt-6-luna"];
+  expect(await res.json()).toEqual({ ok: true, ...gptPricing() });
+  const pricing = gptPricing();
+  const p = pricing.models["gpt-6-luna"]!;
   const c = store.add({ app: "news", tag: "translate", model: "gpt-6-luna", backend: "local", origin: "run", status: "ok", startedAt: Date.now(), durationMs: 1, promptChars: 1,
     usage: { inputTokens: 1000, cacheWriteTokens: 2000, cacheReadTokens: 3000, outputTokens: 4000 } });
-  expect(c.costUsd).toBeCloseTo((1000 * p.input + 2000 * p.cacheWrite + 3000 * p.cacheRead + 4000 * p.output) / GPT_PRICING.unitTokens, 10);
+  expect(c.costUsd).toBeCloseTo((1000 * p.input + 2000 * p.cacheWrite! + 3000 * p.cacheRead + 4000 * p.output) / pricing.unitTokens, 10);
+});
+
+test("a GPT model only models.dev knows is priced on the ledger and served, earlier rows included", async () => {
+  const { useModelsDev } = await import("./pricing.ts");
+  const usage = { inputTokens: 1000, cacheWriteTokens: 0, cacheReadTokens: 3000, outputTokens: 4000 };
+  const c = store.add({ app: "news", tag: "translate", model: "gpt-9-nova", backend: "local", origin: "run", status: "ok", startedAt: Date.now(), durationMs: 1, promptChars: 1, usage });
+  expect(c.costUsd).toBeUndefined();
+  try {
+    expect(useModelsDev({ fetchedAt: "2026-11-24T00:00:00.000Z", providers: { openai: { models: { "gpt-9-nova": { input: 3, output: 12, cacheRead: 0.3 } } } } })).toEqual(["gpt-9-nova"]);
+    expect(store.get(c.id)!.costUsd).toBeCloseTo((1000 * 3 + 3000 * 0.3 + 4000 * 12) / 1e6, 10);
+    const body = (await (await fetch(`${base}/api/model/pricing`)).json()) as { models: Record<string, unknown>; filled: Record<string, string> };
+    expect(body.models["gpt-9-nova"]).toEqual({ input: 3, cacheWrite: null, cacheRead: 0.3, output: 12, longContext: null, fastMultiplier: null });
+    expect(body.filled).toEqual({ "gpt-9-nova": "models.dev 2026-11-24" });
+  } finally {
+    useModelsDev(undefined);
+  }
+  expect(store.get(c.id)!.costUsd).toBeUndefined();
 });

@@ -7,6 +7,7 @@ import { AppRegistry, HealthProbe, IconPacks, LayoutStore, PetFeed, SpaceMood, W
 import { ConnectionPeers, PeerHub, PeerLedgers, PeerStore, createAdoptHandler, createConnectionPeerServe, createMigrateRoutes, createPeerRoutes, createPeerServeHandlers, createPeerServeRoutes, loadPeers, peerRuntimes, renamePeer } from "./space/peers/index.ts";
 import { ModelService, ModelStore, RuntimeHealth, createModelRoutes, createPeerModelRoutes, createPeerUsageRoutes, recordAgentRun } from "./space/model/index.ts";
 import { probeTargets, statusTable } from "./space/model/machines.ts";
+import { useModelsDev } from "./space/model/pricing.ts";
 import { availabilityOf, probeRuntime } from "./space/model/health.ts";
 import { ModelGateway, PriceBook, createGatewayRoutes, gatewayBase, loadGateway } from "./space/gateway/index.ts";
 import { createInventoryRoutes, machineRow, peerRow } from "./space/model/inventory.ts";
@@ -187,6 +188,13 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   // What its calls cost: gateway-prices.yaml, then models.dev's catalogue, cached in run/ and refreshed daily.
   const gatewayPrices = new PriceBook({ home: ws.home });
   await gatewayPrices.load();
+  // The ledger's GPT list prices (gpt-prices.json) take the models only models.dev knows, and follow its refreshes.
+  let gptFilled = useModelsDev(gatewayPrices.catalogue()).join(",");
+  gatewayPrices.onChange(() => {
+    const filled = useModelsDev(gatewayPrices.catalogue()).join(",");
+    if (filled !== gptFilled) console.log(`[model] GPT prices from models.dev: ${filled || "none"}`);
+    gptFilled = filled;
+  });
   const modelGateway = new ModelGateway({ ...(gatewayLoaded.loaded ? { config: gatewayLoaded.loaded.config } : {}), ...(gatewayLoaded.error ? { error: gatewayLoaded.error } : {}), prices: gatewayPrices });
   const loaded = await loadRuntimes(ws.home, env);
   for (const w of loaded.warnings) console.warn(`[runtimes] ${w}`);
