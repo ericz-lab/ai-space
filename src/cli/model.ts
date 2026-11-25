@@ -1,5 +1,5 @@
 import { ModelStore, importCalls } from "../space/model/index.ts";
-import { need, noMore, parseArgs, parseCount } from "./args.ts";
+import { need, noMore, parseArgs, parseCount, parseDuration } from "./args.ts";
 import { appOf } from "./common.ts";
 import { ago, duration, tokens, usd, when } from "./output.ts";
 import { type Ctx, type Noun, UsageError } from "./types.ts";
@@ -102,7 +102,7 @@ const run = async (ctx: Ctx, argv: string[]) => {
   const asApp = Boolean(c.target.appToken) && !flags.app;
   const app = asApp ? undefined : appOf(ctx, flags.app);
   if (flags.mode && flags.mode !== "slim" && flags.mode !== "full") throw new UsageError("--mode must be slim or full");
-  const body = { prompt, ...(flags.mode ? { mode: flags.mode } : {}), ...(app ? { app } : {}), ...(flags.model ? { model: flags.model } : {}), ...(flags.tag ? { tag: flags.tag } : {}), ...(flags.system ? { system: flags.system } : {}), ...(flags.timeout ? { timeoutMs: Number(flags.timeout) } : {}) };
+  const body = { prompt, ...(flags.mode ? { mode: flags.mode } : {}), ...(app ? { app } : {}), ...(flags.model ? { model: flags.model } : {}), ...(flags.tag ? { tag: flags.tag } : {}), ...(flags.system ? { system: flags.system } : {}), ...(flags.timeout ? { timeoutMs: parseDuration(flags.timeout, "--timeout") } : {}) };
   if (ctx.flags.json) {
     const res = await c.json("POST", "/api/model/run", body, { asApp, timeoutMs: 15 * 60_000, accept: [502] });
     ctx.print.data(res);
@@ -145,7 +145,7 @@ export const modelNoun: Noun = {
     usage: { usage: "[--window 5h|24h|7d|30d] [--app APP] [--by app|tag|model|runtime]", summary: "the ledger's sums, the panel's Model usage numbers", run: usage },
     calls: { usage: "[--app APP] [--tag TAG] [-n 30]", summary: "recent calls, newest first", run: calls },
     status: { usage: "", summary: "runtimes, concurrency, calls in flight", run: status },
-    run: { usage: "[--app APP] [--model M] [--tag T] [--mode slim|full] [--system S] PROMPT…|-", summary: "one call, the answer streamed to stdout (PROMPT - reads stdin)", run: run },
+    run: { usage: "[--app APP] [--model M] [--tag T] [--mode slim|full] [--system S] [--timeout 10m] PROMPT…|-", summary: "one call, the answer streamed to stdout (PROMPT - reads stdin)", run: run },
     import: { usage: "APP FILE.jsonl", summary: "add an app's own call history to the ledger (offline, on this machine)", run: importCmd },
   },
 };

@@ -4,7 +4,7 @@ import { localNoun } from "./local.ts";
 import { readOperatorToken } from "../space/auth/operator-token.ts";
 import { type Workspace, ensureWorkspace, loadWorkspaceEnv, readWorkspaceEnv, resolveHome, workspacePaths } from "../space/workspace.ts";
 import { parseArgs } from "./args.ts";
-import { Client, resolveTarget } from "./client.ts";
+import { Client, resolveTarget, unreachableHint } from "./client.ts";
 import { Printer } from "./output.ts";
 import { ApiError, type Ctx, EXIT, type GlobalFlags, type Io, type Noun, Unreachable, UsageError } from "./types.ts";
 import { apiNoun } from "./api.ts";
@@ -107,7 +107,7 @@ export async function run(argv: string[], options: RunOptions = {}): Promise<num
     const nounName = words[1];
     const noun = nounName ? NOUNS.find((n) => n.name === nounName) : undefined;
     if (nounName && !noun) {
-      io.err(`space: unknown command: ${nounName}`);
+      io.err(`space: unknown command: ${nounName}${didYouMean(nounName, NOUNS.map((n) => n.name), (w) => `space help ${w}`)}`);
       return EXIT.usage;
     }
     for (const l of noun ? nounHelp(noun) : help()) io.out(l);
@@ -115,7 +115,7 @@ export async function run(argv: string[], options: RunOptions = {}): Promise<num
   }
   const noun = NOUNS.find((n) => n.name === first);
   if (!noun) {
-    io.err(`space: unknown command: ${first} (space help lists them)`);
+    io.err(`space: unknown command: ${first}${didYouMean(first, [...NOUNS.map((n) => n.name), ...Object.keys(ALIASES)], (w) => `space ${w}`) || " (space help lists them)"}`);
     return EXIT.usage;
   }
   let verbName = words[1];
@@ -132,7 +132,7 @@ export async function run(argv: string[], options: RunOptions = {}): Promise<num
   }
   const verb = noun.verbs[verbName];
   if (!verb) {
-    io.err(`space: unknown verb: ${noun.name} ${verbName} (space ${noun.name} help lists them)`);
+    io.err(`space: unknown verb: ${noun.name} ${verbName}${didYouMean(verbName, Object.keys(noun.verbs), (w) => `space ${noun.name} ${w}`) || ` (space ${noun.name} help lists them)`}`);
     return EXIT.usage;
   }
   try {
@@ -145,6 +145,7 @@ export async function run(argv: string[], options: RunOptions = {}): Promise<num
     }
     if (e instanceof Unreachable) {
       io.err(`space: ${e.message}`);
+      io.err(`space: ${unreachableHint(e.url)}`);
       return EXIT.unreachable;
     }
     if (e instanceof ApiError) {
@@ -154,6 +155,28 @@ export async function run(argv: string[], options: RunOptions = {}): Promise<num
     io.err(`space: ${noun.name} ${verbName}: ${(e as Error).message ?? String(e)}`);
     return EXIT.failed;
   }
+}
+
+/** `; did you mean: space status?` for the nearest word at edit distance 2 or less; empty when none is that close. */
+export function didYouMean(word: string, words: string[], spell: (w: string) => string): string {
+  let best: string | undefined;
+  let bestDistance = 3;
+  for (const w of words) {
+    const d = editDistance(word, w);
+    if (d < bestDistance) [best, bestDistance] = [w, d];
+  }
+  return best === undefined ? "" : `; did you mean: ${spell(best)}?`;
+}
+
+/** Levenshtein distance: insertions, deletions and substitutions. */
+export function editDistance(a: string, b: string): number {
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const row = [i];
+    for (let j = 1; j <= b.length; j++) row[j] = Math.min(prev[j]! + 1, row[j - 1]! + 1, prev[j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1));
+    prev = row;
+  }
+  return prev[b.length]!;
 }
 
 /** `backup x` → `backup run x`; a word that is already a noun is left alone. */

@@ -49,7 +49,9 @@ describe("Client", () => {
     const e = await c.get("/api/x").catch((x) => x);
     expect(e).toBeInstanceOf(ApiError);
     expect(e.status).toBe(401);
-    expect(e.message).toBe("401: unauthorized");
+    expect(e.message).toBe("401: unauthorized (pass the operator token with --token or SPACE_API_TOKEN)");
+    s.reply({ status: 404, body: { ok: false, error: "no such app" } });
+    expect((await c.get("/api/y").catch((x) => x)).message).toBe("404: no such app");
   });
 
   test("an accepted status is not an error", async () => {

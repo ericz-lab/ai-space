@@ -121,3 +121,85 @@ test("release builds packages from a checkout without a Space", async () => {
     expect((await runCli(["app", "keygen", "--out", "signing.pem"], undefined, { cwd: dir })).code).not.toBe(0);
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
+
+test("connection verbs say what they did in one sentence, and the route's answer under --json", async () => {
+  const connection = { id: "c1", remoteSpaceId: "r", direction: "incoming", apps: [], enabled: true };
+  const created = await runCli(["connection", "create", "incoming", "0d8ce940-9bc8-4082-bab2-0ccb7e5dbd87"], (t) => t.scripted.reply({ status: 200, body: { ok: true, connection, token: "sct_once" } }));
+  expect(created.out).toEqual(["incoming connection c1 created", "token (shown only now; store it on the other Space): sct_once"]);
+  const ok = (t: Parameters<NonNullable<Parameters<typeof runCli>[1]>>[0]) => t.scripted.reply({ status: 200, body: { ok: true, connection } });
+  expect((await runCli(["connection", "grant", "c1", "--apps", "notes,mail"], ok)).out).toEqual(["connection c1 now shares notes, mail"]);
+  expect((await runCli(["connection", "grant", "c1", "--apps", ""], ok)).out).toEqual(["connection c1 now shares no apps"]);
+  expect((await runCli(["connection", "scopes", "c1", "--scopes", "panel"], ok)).out).toEqual(["connection c1 scopes updated"]);
+  expect((await runCli(["connection", "alias", "c1", "office"], ok)).out).toEqual(["connection c1 is now called office"]);
+  expect((await runCli(["connection", "disable", "c1"], ok)).out).toEqual(["connection c1 disabled"]);
+  expect((await runCli(["connection", "enable", "c1"], ok)).out).toEqual(["connection c1 enabled"]);
+  // -y is --yes, as for task rm.
+  const removed = await runCli(["connection", "rm", "c1", "-y"], ok);
+  expect(removed.code).toBe(0);
+  expect(removed.out).toEqual(["connection c1 removed"]);
+  expect((await runCli(["connection", "scopes", "c1", "--full-trust", "on", "-y"], ok)).calls[0]?.body).toEqual({ fullTrust: true });
+  expect((await runCli(["connection", "create", "incoming", "0d8ce940-9bc8-4082-bab2-0ccb7e5dbd87", "--full-trust", "-y"], ok)).calls).toHaveLength(1);
+  const json = await runCli(["connection", "enable", "c1", "--json"], ok);
+  expect(JSON.parse(json.out.join("\n"))).toEqual({ ok: true, connection });
+});
+
+test("connection and package usage mistakes exit 2 with the usage line", async () => {
+  const direction = await runCli(["connection", "create", "sideways", "x"]);
+  expect(direction.code).toBe(2);
+  expect(direction.err).toEqual(["space: direction must be incoming or outgoing", expect.stringContaining("usage: space connection create")]);
+  expect((await runCli(["connection", "grant", "c1"])).code).toBe(2);
+  expect((await runCli(["app", "install", "notes", "--source", "--package"])).code).toBe(2);
+  expect((await runCli(["app", "pack", "app", "--output", "x.spaceapp", "--target", "a/b/c"])).code).toBe(2);
+});
+
+test("a question answered no does nothing and says so; questions name what they affect", async () => {
+  const no = await runCli(["connection", "rm", "c1"], undefined, { isTTY: true, prompt: async () => "n" });
+  expect(no.code).toBe(1);
+  expect(no.calls).toHaveLength(0);
+  expect(no.err).toEqual(["nothing done"]);
+  let asked = "";
+  await runCli(["app", "remove-package", "notes"], undefined, { isTTY: true, prompt: async (q) => ((asked = q), "n") });
+  expect(asked).toStartWith("Remove package notes?");
+  await runCli(["connection", "scopes", "c1", "--full-trust", "on"], undefined, { isTTY: true, prompt: async (q) => ((asked = q), "n") });
+  expect(asked).toStartWith("Grant full trust to c1?");
+});
+
+test("packages is a table, install and package changes say what was done", async () => {
+  const operations = [{ id: "op-1", app: "notes", version: "1.2.0", state: "installed", error: null, digest: "d", createdAt: "2026-11-25T00:00:00.000Z", updatedAt: "2026-11-25T00:00:00.000Z" }];
+  const listed = await runCli(["app", "packages"], (t) => t.scripted.reply({ status: 200, body: { ok: true, spaceId: "me", operations } }));
+  expect(listed.out[0]).toBe("this Space: me");
+  expect(listed.out[1]).toMatch(/^APP\s+VERSION\s+STATE\s+OPERATION/);
+  expect(listed.out[2]).toMatch(/^notes\s+1\.2\.0\s+installed\s+op-1/);
+  const json = await runCli(["app", "packages", "--json"], (t) => t.scripted.reply({ status: 200, body: { ok: true, spaceId: "me", operations } }));
+  expect(JSON.parse(json.out.join("\n"))).toMatchObject({ spaceId: "me", operations: [{ id: "op-1" }] });
+  const removed = await runCli(["app", "remove-package", "notes", "-y"], (t) => t.scripted.reply({ status: 200, body: { ok: true, change: { app: "notes", kind: "uninstall", state: "done" }, data: "retained" } }));
+  expect(removed.code).toBe(0);
+  expect(removed.out).toEqual(["notes removed; its data is kept"]);
+  const back = await runCli(["app", "rollback", "notes", "op-0", "--yes"], (t) => t.scripted.reply({ status: 200, body: { ok: true, change: { app: "notes", kind: "rollback", state: "done" } } }));
+  expect(back.out).toEqual(["notes rolled back to operation op-0"]);
+});
+
+test("a package file install says what was installed", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "space-package-cli-"));
+  try {
+    await Bun.write(join(dir, "app/space.yaml"), "spec: 2\nname: task-app\nversion: 1.0.0\nrequires: { spaceApi: 1 }\noffline: { features: [], online: [] }\n");
+    expect((await runCli(["app", "pack", "app", "--output", "task.spaceapp"], undefined, { cwd: dir })).code).toBe(0);
+    const operation = { id: "op-1", app: "task-app", version: "1.0.0", state: "installed", error: null };
+    const r = await runCli(["app", "install", "task.spaceapp", "--allow-unsigned"], (t) => t.scripted.reply({ status: 200, body: { ok: true, operation } }), { cwd: dir });
+    expect(r.code).toBe(0);
+    expect(r.out).toEqual(["task-app 1.0.0 installed"]);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test("long operations announce themselves on stderr before the request", async () => {
+  const result = { app: "notes", version: "1.0.0", action: "installed", from: "source", ref: "main" };
+  const source = await runCli(["app", "install", "notes", "--source", "--json"], (t) => t.scripted.reply({ status: 200, body: { ok: true, result } }));
+  expect(source.err).toEqual(["installing notes from source; building can take a few minutes..."]);
+  expect(JSON.parse(source.out.join("\n"))).toMatchObject({ result });
+  const build = { app: "notes", version: "1.0.1", action: "upgraded" };
+  const created = await runCli(["app", "create", "notes"], (t) => t.scripted.reply({ status: 200, body: { ok: true, dir: "/ws/app-src/notes", build } }));
+  expect(created.err).toEqual(["creating notes: making its source, packing and installing it..."]);
+  const built = await runCli(["app", "build", "notes"], (t) => t.scripted.reply({ status: 200, body: { ok: true, build } }));
+  expect(built.err).toEqual(["building notes: packing and installing it..."]);
+  expect(built.out).toEqual(["notes 1.0.1 upgraded"]);
+});

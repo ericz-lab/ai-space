@@ -1,5 +1,5 @@
 import { ago, span, until } from "./output.ts";
-import { type Noun } from "./types.ts";
+import { ApiError, type Noun } from "./types.ts";
 import { type TaskView, taskRef } from "./common.ts";
 
 /**
@@ -25,14 +25,20 @@ export const statusNoun: Noun = {
       run: async (ctx) => {
         const c = await ctx.client();
         const health = await c.get<{ ok: boolean }>("/healthz");
+        // A part that fails stays away from the screen, except a 401: without the operator token every
+        // part fails, and an empty screen would read as an empty machine.
+        const part = (e: unknown) => {
+          if (e instanceof ApiError && e.status === 401) throw e;
+          return undefined;
+        };
         const [services, tasks, backups, model, peers, up] = await Promise.all([
-          c.get<Services>("/api/services").catch(() => undefined),
-          c.get<{ tasks: TaskView[] }>("/api/tasks").catch(() => undefined),
-          c.get<Backups>("/api/backups").catch(() => undefined),
-          c.get<Model>("/api/model/status").catch(() => undefined),
-          c.get<Peers>("/api/peers").catch(() => undefined),
+          c.get<Services>("/api/services").catch(part),
+          c.get<{ tasks: TaskView[] }>("/api/tasks").catch(part),
+          c.get<Backups>("/api/backups").catch(part),
+          c.get<Model>("/api/model/status").catch(part),
+          c.get<Peers>("/api/peers").catch(part),
           // An older Space has no uptime route; the line then stays away.
-          c.get<Uptime>("/api/space/uptime").catch(() => undefined),
+          c.get<Uptime>("/api/space/uptime").catch(part),
         ]);
         const now = Date.now();
         const failing = (tasks?.tasks ?? []).filter((t) => t.enabled && !t.orphaned && t.state.lastStatus === "error");

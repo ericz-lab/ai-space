@@ -38,7 +38,14 @@ export async function resolveTarget(
   return { url: url.replace(/\/+$/, ""), token, appToken: env.SPACE_APP_TOKEN?.trim() ?? "", app: env.SPACE_APP?.trim() || undefined };
 }
 
-function isLoopback(url: string): boolean {
+/** The next step when nothing answers: the service on this machine, or the address used for another one. */
+export function unreachableHint(url: string): string {
+  return isLoopback(url)
+    ? "is it running? `space service status` shows it, `space service start` starts it"
+    : "check the address: --url or SPACE_API_URL names the Space to talk to";
+}
+
+export function isLoopback(url: string): boolean {
   try {
     return ["127.0.0.1", "localhost", "[::1]"].includes(new URL(url).hostname);
   } catch {
@@ -192,5 +199,7 @@ export async function* chunks(stream: ReadableStream<Uint8Array>): AsyncGenerato
 function describe(status: number, body: unknown): string {
   const b = body as { error?: unknown; raw?: unknown } | null;
   const msg = b && typeof b === "object" ? (typeof b.error === "string" ? b.error : typeof b.raw === "string" ? b.raw.slice(0, 200) : "") : "";
-  return msg ? `${status}: ${msg}` : `${status}`;
+  const text = msg ? `${status}: ${msg}` : `${status}`;
+  // An operator route without the operator token: name where the token comes from.
+  return status === 401 ? `${text} (pass the operator token with --token or SPACE_API_TOKEN)` : text;
 }
