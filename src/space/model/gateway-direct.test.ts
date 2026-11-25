@@ -11,6 +11,7 @@ import { createModelRoutes } from "./api.ts";
 import { gatewayModelOptions } from "./app-models.ts";
 import { ModelService } from "./service.ts";
 import { ModelStore } from "./store.ts";
+import { parseImageInput } from "./spec.ts";
 
 /**
  * An app's call that names a gateway model (docs/model.md#models): it goes to the built-in model
@@ -119,6 +120,19 @@ describe("a gateway model, called directly", () => {
     expect(call).toMatchObject({ app: "cards", tag: "image", model: "oa/gpt-image-1", backend: "gateway", status: "ok" });
     expect(call.runtime).toBeUndefined();
     expect((await service.image("cards", picture("draw"))).outcome.ok).toBe(true);
+  });
+
+  test("pictures: the vendor gets only the caller's prompt, and its system when it sent one, never the route's default", async () => {
+    const v = vendor();
+    const service = new ModelService({ store, runtimes: claudeOnly(fakeModelBin()), log: () => {}, gateway: { link: gatewayOver(v.url).link } });
+    // What /api/model/image makes of a body without a system: the default, meant for an agent with an image tool.
+    const parsed = parseImageInput({ prompt: "a red circle", model: "oa/gpt-image-1" });
+    expect(parsed.system.length).toBeGreaterThan(0);
+    expect((await service.image("cards", { ...parsed, files: [] })).outcome.ok).toBe(true);
+    expect(v.seen[0]).toMatchObject({ path: "/v1/images/generations", body: { model: "gpt-image-1", prompt: "a red circle" } });
+    const sent = parseImageInput({ prompt: "a red circle", system: "Flat style.", model: "oa/gpt-image-1" });
+    expect((await service.image("cards", { ...sent, files: [] })).outcome.ok).toBe(true);
+    expect(v.seen[1]).toMatchObject({ body: { prompt: "Flat style.\n\na red circle" } });
   });
 
   test("a model of another kind is refused with the route it belongs to; tools and full mode are refused", async () => {

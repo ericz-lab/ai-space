@@ -2,6 +2,7 @@ import { fetchVendorImage, type VendorImageDeps } from "../model/vendor-image.ts
 import type { GatewayLink } from "../gateway/types.ts";
 import { gatewayFigures } from "../gateway/trace.ts";
 import { sniffImage } from "../model/images.ts";
+import { DEFAULT_IMAGE_SYSTEM } from "../model/types.ts";
 import { readUsage } from "../gateway/forward.ts";
 import type { AnthropicApiSpec, Backend, CompleteInput, CompleteOutcome, GeneratedImage, ImageInput, ImageOutcome, RuntimeAdapter, Usage } from "./types.ts";
 import { FILE_NAME_PATTERN, Unsupported } from "./types.ts";
@@ -131,7 +132,10 @@ export function createGatewayModels(deps: { gateway: GatewayLink; fetch?: typeof
       const base = deps.gateway.base();
       if (!base) return { ok: false, error: off(), backend };
       const grant = deps.gateway.issue();
-      const outcome = await gatewayImage(input, { base: `${base}/v1`, token: grant.token, fetch: doFetch, signal, ...(deps.vendorImage ? { vendorImage: deps.vendorImage } : {}) });
+      // The image route's default system is an instruction to an agent with an image tool: a picture
+      // model gets only what the caller sent (its prompt, and its system when it sent one).
+      const sent = input.system === DEFAULT_IMAGE_SYSTEM ? { ...input, system: "" } : input;
+      const outcome = await gatewayImage(sent, { base: `${base}/v1`, token: grant.token, fetch: doFetch, signal, ...(deps.vendorImage ? { vendorImage: deps.vendorImage } : {}) });
       const trace = deps.gateway.trace(grant.run);
       const priced = { ...outcome, backend, ...(trace?.costUsd !== undefined ? { costUsd: trace.costUsd } : {}), ...(trace?.priceBasis ? { priceBasis: trace.priceBasis } : {}) } as ImageOutcome;
       return priced.ok && trace?.served ? { ...priced, text: `${priced.text} by ${trace.served}` } : priced;
