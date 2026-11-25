@@ -312,8 +312,11 @@ describe("a runtime through it", () => {
     expect(target.model).toBe("ds/chat-a");
     const out = await target.runtime.complete({ prompt: "hi", system: "", model: target.model, tag: "t", tools: [], timeoutMs: 10_000, maxTokens: 5 });
     expect(out).toMatchObject({ ok: true, text: "ok from chat-a", served: "ds/chat-a" });
-    expect((await call("POST", "/api/model/gateway/runtimes", { kind: "anthropic-api" })).json.runtime).toBe("gateway-api-2");
-    expect((await call("GET", "/api/model/gateway")).json.runtimes.map((x: { runtime: string }) => x.runtime)).toEqual(["gateway-api-2", "gateway-api"]);
+    // A second of the same kind would answer exactly as the first: refused, and the file is unchanged.
+    const again = await call("POST", "/api/model/gateway/runtimes", { kind: "anthropic-api" });
+    expect([again.status, again.json.runtime]).toEqual([409, "gateway-api"]);
+    expect(await Bun.file(join(home, "runtimes.yaml")).text()).toBe(text);
+    expect((await call("GET", "/api/model/gateway")).json.runtimes.map((x: { runtime: string }) => x.runtime)).toEqual(["gateway-api"]);
   });
 
   test("Claude Code needs the CLI found here; the path never comes from the request; refused when the gateway cannot exist", async () => {

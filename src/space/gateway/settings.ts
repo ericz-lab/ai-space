@@ -536,9 +536,13 @@ export function createGatewaySettingsRoutes(o: GatewaySettingsOptions) {
     const claude = kind === "claude-code" ? o.claude() : undefined;
     if (kind === "claude-code" && !claude) return json({ ok: false, error: "Claude Code was not found on this machine; install it, then check again in Settings → Models" }, 409);
     const f = Bun.file(runtimesFile);
+    const current = (await f.exists()) ? await f.text() : undefined;
+    // One of each kind through the gateway is enough: a second answers exactly as the first does.
+    const have = current === undefined ? undefined : parseRuntimesYaml(current, o.env).config.runtimes.find((r) => r.kind === kind && throughSpace(r));
+    if (have) return json({ ok: false, error: `runtime ${have.name} already answers through the gateway`, runtime: have.name }, 409);
     let next: { text: string; name: string };
     try {
-      next = addGatewayRuntimeText((await f.exists()) ? await f.text() : undefined, { kind, ...(claude ? { claude } : {}) }, o.env);
+      next = addGatewayRuntimeText(current, { kind, ...(claude ? { claude } : {}) }, o.env);
     } catch (e) {
       return json({ ok: false, error: (e as Error).message }, 409);
     }

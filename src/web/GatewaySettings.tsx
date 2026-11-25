@@ -151,8 +151,9 @@ export default function GatewaySettings() {
           <p className="setnote">{g.runtimes.length ? t("gateway.used", { names: g.runtimes.map((r) => (r.loaded ? r.runtime : `${r.runtime} (${t("magpie.pending")})`)).join(", ") }) : t("gateway.unused")}</p>
           <div className="setbtns">
             <span className="setbtns-gap" />
-            {g.offer.claude && <button className="btn2" disabled={busy || !!g.unavailable} onClick={() => void addRuntime("claude-code")}>{t("gateway.addClaude")}</button>}
-            <button className="btn2" disabled={busy || !!g.unavailable} onClick={() => void addRuntime("anthropic-api")}>{t("gateway.addApi")}</button>
+            {/* One runtime of each kind through the gateway: once there, its button goes. */}
+            {g.offer.claude && !g.runtimes.some((r) => r.kind === "claude-code") && <button className="btn2" disabled={busy || !!g.unavailable} onClick={() => void addRuntime("claude-code")}>{t("gateway.addClaude")}</button>}
+            {!g.runtimes.some((r) => r.kind === "anthropic-api") && <button className="btn2" disabled={busy || !!g.unavailable} onClick={() => void addRuntime("anthropic-api")}>{t("gateway.addApi")}</button>}
           </div>
           <p className="setnote">{t(g.offer.claude ? "gateway.runtimeHelp" : "gateway.runtimeHelpNoClaude")}</p>
           {messages("runtimes")}
