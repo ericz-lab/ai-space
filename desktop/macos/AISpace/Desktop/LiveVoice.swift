@@ -9,7 +9,7 @@ import os
 /// about 15 s) is held and sent first. `stop` flushes, waits for `done` and hands the text over
 /// once. When the live route is refused or drops before it was ready, the same recording goes up
 /// as a WAV clip to `POST /api/voice/transcribe` instead: a Space whose transcriber has no live
-/// socket (an API provider) still answers.
+/// socket (an API provider) still answers. Both routes are told the language (VoiceLanguage).
 @MainActor
 final class LiveVoice: ObservableObject {
     enum State: Equatable {
@@ -57,6 +57,8 @@ final class LiveVoice: ObservableObject {
     private var clipOnly = false
     private var transcript = VoiceTranscript(prefix: "")
     private var deliver: ((String) -> Void)?
+    /// What this recording is transcribed in (VoiceLanguage), read once when it starts.
+    private var language = ""
 
     /// Records until `stop`, 90 seconds, or 50 seconds held for a transcriber that is not ready.
     /// `deliver` gets the final text once, never an empty one.
@@ -67,6 +69,7 @@ final class LiveVoice: ObservableObject {
         state = .starting
         self.api = api
         self.deliver = deliver
+        language = VoiceLanguage.current
         transcript = VoiceTranscript(prefix: "")
         let generation = generation
         receiver = Task {
@@ -117,7 +120,7 @@ final class LiveVoice: ObservableObject {
         self.socket = socket
         socket.resume()
         do {
-            try await socket.send(.string("{\"type\":\"start\",\"format\":\"pcm_s16le\",\"sample_rate\":16000,\"channels\":1,\"language\":\"\"}"))
+            try await socket.send(.string(VoiceLanguage.startMessage(language: language)))
             while !Task.isCancelled {
                 let message = try await socket.receive()
                 guard generation == self.generation else { return }
@@ -257,7 +260,7 @@ final class LiveVoice: ObservableObject {
         receiver = Task {
             do {
                 let data = try await api.upload("/api/voice/transcribe", field: "file", filename: "voice.wav", mimeType: "audio/wav",
-                                                data: DictationRules.wav(pcm: pcm))
+                                                data: DictationRules.wav(pcm: pcm), fields: VoiceLanguage.uploadFields(language: language))
                 guard generation == self.generation else { return }
                 finish(((try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["text"] as? String) ?? "")
             } catch {

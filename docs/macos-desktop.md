@@ -385,6 +385,8 @@ macOS acts on the Globe key itself (System Settings › Keyboard › "Press 🌐
 
 **Which Space.** The selected Space, or the first other connected one, whose `GET /api/voice` says it can transcribe. That answer is about files: the live route also needs a provider with a live socket (`voice-studio`; the `openai-compatible` adapter has none), and the Space refuses the socket with a 503 otherwise. Until the live route is `ready` the whole recording is also kept, so when the socket is refused, fails or never gets ready, it goes up on release as a WAV clip to `POST /api/voice/transcribe` and that text goes in instead; the capsule then shows no live text.
 
+**Which language.** Both routes are told the language spoken (`language` in the live `start`, a `language` field on the clip; [speech.md](speech.md#languages)), as is the microphone beside a field: Settings › General › Voice language (语音输入语言), by default Same as AI Space, which is the app's language (`Lang.current`, what Settings › Language shows) when it is Chinese, English, Japanese or Korean and otherwise lets the Space's provider detect it; Detect automatically sends none; or one of those four. The rule is `VoiceLanguage` in `Services/SpaceModels.swift`, shared with the iPhone client and covered by `AISpaceTests/VoiceLanguageTests.swift`; the choice is read once when a recording starts.
+
 **How the text goes in** (`DictationRules`):
 
 - **A window of this app has the keyboard** (the main window, or Quick Chat over another app): the transcript is pasted through the app's own responder chain (`paste:`), which needs no permission and reaches text fields, the chat field, pages in web views and the terminal.

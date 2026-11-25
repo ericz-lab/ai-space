@@ -27,6 +27,15 @@ struct GeneralSettings: View {
                 Text("macOS acts on this key too. Set System Settings → Keyboard → “Press 🌐 key to” to “Do Nothing”, or letting go of fn may also open the emoji picker, change the input source or start Dictation.")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
+            Picker("Voice language", selection: $prefs.voiceLanguage) {
+                Text("Same as AI Space").tag(VoiceLanguage.sameAsApp)
+                Text("Detect automatically").tag(VoiceLanguage.detect)
+                ForEach(VoiceLanguage.codes, id: \.self) { code in
+                    Text(verbatim: Locale.current.localizedString(forLanguageCode: code) ?? code).tag(code)
+                }
+            }
+            Text("The language you speak, for holding fn and for the microphone beside a field. Naming it makes the transcript faster and more accurate; by default it is the language AI Space is shown in.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Toggle("Show the floating ball", isOn: $prefs.floatingBall)
             Text("A small ball over every app. Drop a picture on it to keep the picture in an app of the Space; drag the ball to move it, click it for Pending Shares. Space → Floating Ball shows or hides it too.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)

@@ -3,7 +3,8 @@ import SwiftUI
 
 /// Voice input for a text field (docs/panel.md#omnibox): a click records from the microphone, a
 /// second click (or 90 seconds) ends the clip, the Space transcribes it through
-/// `POST /api/voice/transcribe` (voice-studio, here or on a peer), and the text is handed back to
+/// `POST /api/voice/transcribe` (voice-studio, here or on a peer) in the language VoiceLanguage
+/// names, and the text is handed back to
 /// go into the field. Nothing is sent by itself. The button shows only when the Space says a
 /// transcriber answers (`GET /api/voice`).
 @MainActor
@@ -87,7 +88,8 @@ final class VoiceInput: NSObject, ObservableObject, AVAudioRecorderDelegate {
         state = .transcribing
         defer { state = .idle }
         do {
-            let data = try await api.upload("/api/voice/transcribe", field: "file", filename: "voice.m4a", mimeType: "audio/mp4", data: clip)
+            let data = try await api.upload("/api/voice/transcribe", field: "file", filename: "voice.m4a", mimeType: "audio/mp4", data: clip,
+                                            fields: VoiceLanguage.uploadFields(language: VoiceLanguage.current))
             let text = ((try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["text"] as? String)?
                 .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             if !text.isEmpty { deliver?(text) }

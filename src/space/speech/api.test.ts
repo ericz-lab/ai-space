@@ -48,6 +48,7 @@ beforeAll(() => {
         if (typeof m !== "string") return void ws.send(JSON.stringify({ type: "partial", segment_id: 0, text: `got ${m.byteLength}`, language: "zh" }));
         const msg = JSON.parse(m) as { type: string; language?: string };
         if (msg.type === "start") {
+          seen.push({ path: "/api/asr/realtime", caller: null, body: msg.language ?? "" });
           ws.send(JSON.stringify({ type: "loading" }));
           ws.send(JSON.stringify({ type: "ready", sample_rate: 16000, max_seconds: 2700, max_frame_bytes: 3200 }));
         } else if (msg.type === "stop") {
@@ -150,6 +151,22 @@ describe("the panel's voice input, through the speech layer", () => {
       // The bus keeps its row, as before; the speech ledger adds its own.
       expect(s.busStore.listCalls({}).map((c) => [c.caller, c.app, c.capability, c.status])).toEqual([["space", "voice-studio", "transcribe", 200]]);
       expect(s.store.recent()[0]).toMatchObject({ app: "space", tag: "voice-input", capability: "transcribe", provider: "voice-studio", kind: "voice-studio", status: "ok", audioSeconds: 1.5, chars: 11, inputBytes: 5 });
+    } finally {
+      s.stop();
+    }
+  });
+
+  test("a locale tag reaches the provider as its primary language code", async () => {
+    const s = space({ at: "local" });
+    try {
+      const r = await fetch(`${s.url}/api/voice/transcribe`, { method: "POST", body: audio("hello", { language: "zh-Hans" }) });
+      expect(r.status).toBe(200);
+      expect(seen.at(-1)).toEqual({ path: "/api/asr", caller: "space", body: "zh|" });
+      await session(`${s.ws}/api/voice/realtime`, dictate("en-US"));
+      expect(seen.filter((x) => x.path === "/api/asr/realtime").at(-1)?.body).toBe("en");
+      // Empty stays empty: the provider detects the language.
+      await session(`${s.ws}/api/voice/realtime`, dictate(""));
+      expect(seen.filter((x) => x.path === "/api/asr/realtime").at(-1)?.body).toBe("");
     } finally {
       s.stop();
     }

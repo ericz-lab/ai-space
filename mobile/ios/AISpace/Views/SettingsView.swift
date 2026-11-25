@@ -165,6 +165,18 @@ struct SettingsSectionPage: View {
                     }
                 }
                 .buttonStyle(SettingsRowStyle())
+                CardDivider()
+                LabeledContent("Voice language") {
+                    Picker("Voice language", selection: $model.voiceLanguage) {
+                        Text("Same as AI Space").tag(VoiceLanguage.sameAsApp)
+                        Text("Detect automatically").tag(VoiceLanguage.detect)
+                        ForEach(VoiceLanguage.codes, id: \.self) { code in
+                            Text(verbatim: Locale.current.localizedString(forLanguageCode: code) ?? code).tag(code)
+                        }
+                    }
+                    .labelsHidden()
+                }
+                .settingsRow(vertical: 6)
                 #if !targetEnvironment(macCatalyst)
                 CardDivider()
                 Button {
@@ -199,7 +211,7 @@ struct SettingsSectionPage: View {
                 CardDivider()
                 pageRow("Terminal", "terminal", .terminal)
             }
-            SettingsNote("These belong to this iPhone, as the same choices on the panel belong to each browser. The language follows the app's language in iOS Settings.")
+            SettingsNote("These belong to this iPhone, as the same choices on the panel belong to each browser. The language follows the app's language in iOS Settings. Voice input is transcribed in that language too, unless Voice Language names another.")
         }
     }
 
