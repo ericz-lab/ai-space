@@ -67,6 +67,8 @@ targets:
         group: Shared
       - path: ../../mobile/ios/AISpace/Live/TerminalStore.swift
         group: Shared
+      - path: ../../mobile/ios/AISpace/Core/OmniboxModels.swift
+        group: Shared
       - path: ../../mobile/ios/AISpace/Core/ScreenshotRules.swift
         group: Shared
       - path: ../../mobile/ios/AISpace/Core/SharedCaptureStore.swift

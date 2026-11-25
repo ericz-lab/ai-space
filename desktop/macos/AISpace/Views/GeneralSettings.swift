@@ -1,3 +1,4 @@
+import ApplicationServices
 import SwiftUI
 
 /// Settings > General: the desktop conveniences, each optional.
@@ -11,6 +12,21 @@ struct GeneralSettings: View {
             }
             Text("Opens a chat with an agent over any app. Services > Ask ai-space sends selected text to it, and Shortcuts can open aispace://chat?agent=<app>/<agent>&text=… — a message is never sent without you.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Toggle("Hold fn to talk", isOn: $prefs.voiceInput)
+                .onChange(of: prefs.voiceInput) { _, on in
+                    // The system's own prompt, which opens Privacy & Security → Accessibility.
+                    if on, !AXIsProcessTrusted() { AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": true] as CFDictionary) }
+                }
+            Text("Hold the fn (🌐) key in any app and talk: the words show at the bottom of the screen as you speak, and when you let go the text goes into the field you are typing in. Seeing fn in other apps and typing into them needs AI Space allowed in System Settings → Privacy & Security → Accessibility.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            if prefs.voiceInput, !AXIsProcessTrusted() {
+                Text("AI Space is not allowed under Accessibility yet, so fn is seen only while AI Space is in front.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            if prefs.voiceInput, FnKey.systemActsOnGlobeKey {
+                Text("macOS acts on this key too. Set System Settings → Keyboard → “Press 🌐 key to” to “Do Nothing”, or letting go of fn may also open the emoji picker, change the input source or start Dictation.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
             Toggle("Show the floating ball", isOn: $prefs.floatingBall)
             Text("A small ball over every app. Drop a picture on it to keep the picture in an app of the Space; drag the ball to move it, click it for Pending Shares. Space → Floating Ball shows or hides it too.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)

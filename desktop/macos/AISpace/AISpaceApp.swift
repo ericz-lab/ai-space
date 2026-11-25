@@ -38,6 +38,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var window: NSWindow?
     private lazy var quickChat = QuickChat(model: model)
     private lazy var hotKey = HotKey { [weak self] in self?.quickChat.toggle() }
+    private lazy var dictation = Dictation(model: model)
+    private lazy var fnKey = FnKey(began: { [weak self] in self?.dictation.begin() }, ended: { [weak self] in self?.dictation.end() })
     private lazy var floatingBall = FloatingBall(model: model) { [weak self] agent, text, near in self?.quickChat.show(agent: agent, text: text, near: near) }
     private lazy var deskPet = DeskPet(model: model)
     private var watchers: Set<AnyCancellable> = []
@@ -76,6 +78,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 NSLog("ai-space: the Quick Chat shortcut \(shortcut.label) is taken by another app")
             }
         }.store(in: &watchers)
+        Preferences.shared.$voiceInput.sink { [weak self] on in self?.fnKey.set(enabled: on) }.store(in: &watchers)
         Preferences.shared.$floatingBall.sink { [weak self] on in self?.floatingBall.set(visible: on) }.store(in: &watchers)
         // The desk pet over every app; in the window, LauncherPet draws it instead.
         Publishers.CombineLatest3(Preferences.shared.$pet, Preferences.shared.$petPlace, Preferences.shared.$petSize)
