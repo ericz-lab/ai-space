@@ -64,13 +64,16 @@ struct ConnectionSettings: View {
                 Toggle("Also remove its saved sign-in", isOn: $ui.clearSignIn)
                 HStack {
                     Spacer()
-                    Button("Cancel", role: .cancel) { ui.removing = nil }.keyboardShortcut(.cancelAction)
+                    // Return keeps the Space: removing it takes a click. Esc cancels too.
+                    Button("Cancel", role: .cancel) { ui.removing = nil }.keyboardShortcut(.defaultAction)
                     Button("Remove", role: .destructive) {
                         let clear = ui.clearSignIn
                         ui.removing = nil
                         Task { await model.remove(c.id, clearSignIn: clear) }
                     }
-                    .keyboardShortcut(.defaultAction)
+                }
+                .background {
+                    Button("Cancel") { ui.removing = nil }.keyboardShortcut(.cancelAction).hidden().accessibilityHidden(true)
                 }
             }
             .padding(20).frame(width: 400)

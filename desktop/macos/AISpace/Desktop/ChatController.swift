@@ -32,6 +32,8 @@ final class ChatController: ObservableObject, Identifiable {
     let api: SpaceAPI
     @Published private(set) var messages: [ChatMessage] = []
     @Published private(set) var busy = false
+    /// Stop was pressed and the turn has not ended yet.
+    @Published private(set) var stopping = false
     @Published var draft = ""
     @Published var images: [ChatImage] = []
     @Published var imageError: String?
@@ -225,14 +227,26 @@ final class ChatController: ObservableObject, Identifiable {
     /// Stops the run on the Space; its stream then ends by itself. Before the Space has named the
     /// new run, the stop is sent as soon as it does: dropping the stream instead would leave the
     /// run going on the Space, unseen, still writing to this conversation.
+    /// Stop shows as Stopping… until the turn ends; a stop the Space did not take says why and
+    /// leaves Stop to press again.
     func stop() {
         stopRequested = true
+        stopping = true
         guard let runID else { return }
         sendStop(runID)
     }
 
     private func sendStop(_ runID: String) {
-        Task { try? await api.send("POST", "\(agent.base)/runs/\(SpacePath.escape(runID))/stop", json: [:]) }
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                _ = try await api.send("POST", "\(agent.base)/runs/\(SpacePath.escape(runID))/stop", json: [:])
+            } catch {
+                guard busy, self.runID == runID else { return }
+                stopping = false
+                self.error = String(localized: "Could not stop the reply: \(HubStore.message(error))")
+            }
+        }
     }
 
     /// Loads a stored conversation; the next message continues it.
@@ -278,6 +292,7 @@ final class ChatController: ObservableObject, Identifiable {
         busy = true
         error = nil
         stopRequested = false
+        stopping = false
         pending = []
         steersSeen = 0
         var first = ChatReply()
@@ -354,6 +369,7 @@ final class ChatController: ObservableObject, Identifiable {
             } else {
                 pending = []
                 stopRequested = false
+                stopping = false
                 busy = false
             }
         }

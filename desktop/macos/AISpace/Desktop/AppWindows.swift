@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 import WebKit
 
@@ -12,6 +13,8 @@ final class AppWindows: NSObject, NSWindowDelegate {
         let session: PanelSession
         let app: AppInfo
         let connection: Connection
+        /// Redraws Back and Forward as the page's history changes.
+        let history: AnyCancellable
     }
 
     private var windows: [String: Entry] = [:]
@@ -69,7 +72,10 @@ final class AppWindows: NSObject, NSWindowDelegate {
         window.identifier = NSUserInterfaceItemIdentifier(key)
         window.setFrameAutosaveName("App-\(app.id)")
         if !window.setFrameUsingName("App-\(app.id)") { window.center() }
-        windows[key] = Entry(window: window, session: session, app: app, connection: connection)
+        let history = session.$canGoBack.combineLatest(session.$canGoForward)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak toolbar] _ in toolbar?.validateVisibleItems() }
+        windows[key] = Entry(window: window, session: session, app: app, connection: connection, history: history)
         onChange()
         if session.webView.url == nil { session.load() }
         window.makeKeyAndOrderFront(nil)
@@ -81,6 +87,9 @@ final class AppWindows: NSObject, NSWindowDelegate {
         guard let id = NSApp.keyWindow?.identifier?.rawValue, windows[id] != nil else { return nil }
         return id
     }
+
+    /// The front app window's page, for the menu commands that act on what is in front.
+    var keyWindowSession: PanelSession? { keyWindowApp.flatMap { windows[$0]?.session } }
 
     func moveBack(_ key: String) {
         guard let entry = windows.removeValue(forKey: key) else { return }
@@ -132,28 +141,70 @@ struct AppPageView: View {
     }
 }
 
-extension AppWindows: NSToolbarDelegate {
+extension AppWindows: NSToolbarDelegate, NSToolbarItemValidation {
     private static let moveBackItem = NSToolbarItem.Identifier("moveBack")
+    private static let backItem = NSToolbarItem.Identifier("back")
+    private static let forwardItem = NSToolbarItem.Identifier("forward")
+    private static let reloadItem = NSToolbarItem.Identifier("reload")
 
-    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { [.flexibleSpace, Self.moveBackItem] }
+    /// The page's controls first, as on the main window's tab (AppTabView), then Move to Main Window.
+    private static let items: [NSToolbarItem.Identifier] = [backItem, forwardItem, reloadItem, .flexibleSpace, moveBackItem]
 
-    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { [.flexibleSpace, Self.moveBackItem] }
+    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { Self.items }
+
+    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { Self.items }
 
     func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier id: NSToolbarItem.Identifier, willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
-        guard id == Self.moveBackItem else { return nil }
+        switch id {
+        case Self.moveBackItem:
+            return item(id, title: String(localized: "Move to Main Window"), help: String(localized: "Move to Main Window (⌥⌘T)"),
+                        symbol: "rectangle.stack", action: #selector(moveBackFromToolbar(_:)))
+        case Self.backItem:
+            return item(id, title: String(localized: "Back"), help: String(localized: "Back"), symbol: "chevron.left", action: #selector(goBack(_:)))
+        case Self.forwardItem:
+            return item(id, title: String(localized: "Forward"), help: String(localized: "Forward"), symbol: "chevron.right", action: #selector(goForward(_:)))
+        case Self.reloadItem:
+            return item(id, title: String(localized: "Reload"), help: String(localized: "Reload"), symbol: "arrow.clockwise", action: #selector(reloadPage(_:)))
+        default:
+            return nil
+        }
+    }
+
+    private func item(_ id: NSToolbarItem.Identifier, title: String, help: String, symbol: String, action: Selector) -> NSToolbarItem {
         let item = NSToolbarItem(itemIdentifier: id)
-        let title = String(localized: "Move to Main Window")
         item.label = title
-        item.toolTip = String(localized: "Move to Main Window (⌥⌘T)")
-        item.image = NSImage(systemSymbolName: "rectangle.stack", accessibilityDescription: title)
+        item.toolTip = help
+        item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: title)
         item.isBordered = true
         item.target = self
-        item.action = #selector(moveBackFromToolbar(_:))
+        item.action = action
         return item
     }
 
+    /// Back and Forward follow the page's history.
+    func validateToolbarItem(_ item: NSToolbarItem) -> Bool {
+        guard let entry = entry(of: item) else { return false }
+        switch item.itemIdentifier {
+        case Self.backItem: return entry.session.webView.canGoBack
+        case Self.forwardItem: return entry.session.webView.canGoForward
+        default: return true
+        }
+    }
+
+    private func key(of item: NSToolbarItem) -> String? {
+        item.toolbar.flatMap { toolbar in windows.first { $0.value.window.toolbar === toolbar }?.key }
+    }
+
+    private func entry(of item: NSToolbarItem) -> Entry? { key(of: item).flatMap { windows[$0] } }
+
     @objc private func moveBackFromToolbar(_ sender: NSToolbarItem) {
-        guard let key = sender.toolbar.flatMap({ toolbar in windows.first { $0.value.window.toolbar === toolbar }?.key }) else { return }
+        guard let key = key(of: sender) else { return }
         moveBack(key)
     }
+
+    @objc private func goBack(_ sender: NSToolbarItem) { entry(of: sender)?.session.webView.goBack() }
+
+    @objc private func goForward(_ sender: NSToolbarItem) { entry(of: sender)?.session.webView.goForward() }
+
+    @objc private func reloadPage(_ sender: NSToolbarItem) { entry(of: sender)?.session.reload() }
 }

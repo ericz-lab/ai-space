@@ -165,7 +165,7 @@
 "%lld unread · %lld open" = "%lld 条未读 · %lld 条待处理";
 "%lld widgets" = "%lld 个小组件";
 "About" = "关于";
-"Add to Panel" = "添加到面板";
+"Add to Screen" = "添加到屏幕";
 "Address" = "地址";
 "All" = "全部";
 "All calls" = "全部调用";
@@ -255,7 +255,7 @@
 "Recent calls" = "最近调用";
 "Recent events" = "最近事件";
 "Recent sessions" = "最近的会话";
-"Remove from Panel" = "从面板移除";
+"Remove from Screen" = "从屏幕移除";
 "Remove from This Screen" = "从这个屏幕移除";
 "Reopen" = "重新打开";
 "Replace" = "替换";
@@ -387,7 +387,7 @@
 "Reload (⌘R)" = "重新载入（⌘R）";
 "Removing a Space forgets its address, sign-in and screens on this Mac. Nothing changes on the server." = "移除 Space 会让这台 Mac 忘记它的地址、登录状态和屏幕布局，服务器上不会有任何改变。";
 "Replace this Mac's screens?" = "替换这台 Mac 上的屏幕？";
-"Right-click an app, agent or widget on Home and choose Add to Panel. Right-click here for the screen's own actions." = "在主页上右键点按应用、智能体或小组件，选择“添加到面板”。在这里右键点按可以新建、编辑或删除屏幕。";
+"Right-click an app, agent or widget on Home and choose Add to Screen. Right-click here for the screen's own actions." = "在主页上右键点按应用、智能体或小组件，选择“添加到屏幕”。在这里右键点按可以新建、编辑或删除屏幕。";
 "Screens and More" = "屏幕与更多";
 "Search Apps, Agents and Widgets" = "搜索应用、智能体和小组件";
 "Settings of the Space" = "Space 设置";
@@ -814,3 +814,19 @@
 "chat.card.done" = "已完成";
 "chat.card.changed" = "已在别处修改";
 "Read-only now: the conversation has moved on." = "对话已继续，这张卡片现在只读。";
+
+/* UX fixes: chat history, Home box questions, Quick Chat shortcut, Stop, menu bar. */
+"Couldn't load earlier chats" = "无法载入更早的对话";
+"Sign in to this Space to ask Space Assistant." = "先登录这个 Space，才能交给空间助手。";
+"This Space cannot be reached, so Space Assistant cannot answer. Try again when it is back." = "连不上这个 Space，空间助手暂时无法回答。等它恢复后再试。";
+"This Space has no Space Assistant." = "这个 Space 没有空间助手。";
+"Space Assistant is not ready yet. Try again in a moment." = "空间助手还没准备好，请稍后再试。";
+"Another app already uses this shortcut, so it does nothing here. Pick another one." = "其他应用已占用这个快捷键，它在这里不起作用。请换一个。";
+"Could not stop the reply: %@" = "无法停止回复：%@";
+"Add Connection…" = "添加连接…";
+"Below is what this Space had %@. It may have changed." = "以下是这个 Space %@的内容，现在可能已有变化。";
+"Updated %@" = "%@更新";
+"Shared by %@" = "由 %@ 共享";
+"Connection to %@" = "与 %@ 的连接";
+"%lld times since %@" = "自 %2$@ 起共 %1$lld 次";
+"Back to %@" = "返回%@";

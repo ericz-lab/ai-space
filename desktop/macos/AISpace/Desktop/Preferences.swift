@@ -41,6 +41,8 @@ final class Preferences: ObservableObject {
     @Published var menuBar: Bool { didSet { defaults.set(menuBar, forKey: "menuBar") } }
     @Published var notifications: Bool { didSet { defaults.set(notifications, forKey: "notifications") } }
     @Published var quickChat: Shortcut { didSet { defaults.set(quickChat.rawValue, forKey: "quickChat") } }
+    /// Another app holds the Quick Chat shortcut, so it was not registered; not stored.
+    @Published var quickChatTaken = false
     /// Voice input in any app while fn is held (Dictation.swift): it watches every key press and
     /// wants Accessibility, so it is off until the operator turns it on.
     @Published var voiceInput: Bool { didSet { defaults.set(voiceInput, forKey: "voiceInputFn") } }

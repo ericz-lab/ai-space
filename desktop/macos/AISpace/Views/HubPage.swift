@@ -213,7 +213,8 @@ struct ChatSidebar: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(Theme.text)
                 .disabled(chats.current.blank)
-                .help("New Conversation")
+                .keyboardShortcut("n")
+                .help("New Conversation (⌘N)")
                 // One entry per agent whatever its machines; the menu above the chat picks the machine.
                 if groups.count > 1 {
                     heading("Agents")
@@ -232,8 +233,17 @@ struct ChatSidebar: View {
                     }
                 }
                 heading("Recent")
-                if rows.isEmpty {
+                switch ChatRoster.historyNote(rows: rows.count, loadFailed: chats.sessionsFailed) {
+                case .failed:
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Couldn't load earlier chats").font(.callout).foregroundStyle(.secondary)
+                        Button("Retry") { Task { await chats.loadSessions() } }.controlSize(.small)
+                    }
+                    .padding(.horizontal, 8)
+                case .empty:
                     Text("No earlier chats").font(.callout).foregroundStyle(.secondary).padding(.horizontal, 8)
+                case nil:
+                    EmptyView()
                 }
                 ForEach(rows.prefix(30)) { row in
                     let title = row.title ?? (row.sid == nil ? String(localized: "New Conversation") : String(localized: "Untitled"))

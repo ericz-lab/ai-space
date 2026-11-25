@@ -19,4 +19,12 @@ struct ChatImageTests {
         #expect(ChatImage.validate([large, large]))
         #expect(!ChatImage.validate([large, large, image]))
     }
+
+    @Test func aDropThatWouldPassFourPicturesIsRefused() {
+        #expect(ChatImage.fits(adding: 4, attached: 0, pending: 0))
+        #expect(!ChatImage.fits(adding: 5, attached: 0, pending: 0))
+        #expect(ChatImage.fits(adding: 1, attached: 2, pending: 1))
+        // Pictures still being read count as attached.
+        #expect(!ChatImage.fits(adding: 2, attached: 2, pending: 1))
+    }
 }

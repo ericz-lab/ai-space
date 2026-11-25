@@ -74,9 +74,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         Preferences.shared.$quickChat.sink { [weak self] shortcut in
             guard let self else { return }
-            if !hotKey.register(shortcut) {
-                NSLog("ai-space: the Quick Chat shortcut \(shortcut.label) is taken by another app")
-            }
+            let taken = !hotKey.register(shortcut)
+            if taken { NSLog("ai-space: the Quick Chat shortcut \(shortcut.label) is taken by another app") }
+            if Preferences.shared.quickChatTaken != taken { Preferences.shared.quickChatTaken = taken }
         }.store(in: &watchers)
         Preferences.shared.$voiceInput.sink { [weak self] on in self?.fnKey.set(enabled: on) }.store(in: &watchers)
         Preferences.shared.$floatingBall.sink { [weak self] on in self?.floatingBall.set(visible: on) }.store(in: &watchers)
@@ -198,7 +198,7 @@ struct SpaceCommands: Commands {
         CommandGroup(after: .textEditing) {
             Button("Search Apps, Agents and Widgets") { model.search(); showWindow() }
                 .keyboardShortcut("f")
-                .disabled(model.selected == nil || model.destination != .launcher)
+                .disabled(model.selected == nil)
         }
         CommandMenu("Space") {
             Button("Share Picture…") { model.pictureSharing.choose() }

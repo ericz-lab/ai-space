@@ -30,6 +30,14 @@ struct ChatRosterTests {
         #expect(ChatRoster.blankConversation([item(a, busy: true)], current: a) == nil)
     }
 
+    @Test func aQuestionFromHomeLeavesADraftAlone() {
+        // The one on show holds an unsent draft: the question needs a conversation of its own.
+        #expect(ChatRoster.blankConversation([item(a, messages: false, composing: true)], current: a, untouched: true) == nil)
+        let items = [item(a, messages: false, composing: true, shown: 5), item(b, messages: false, shown: 1)]
+        #expect(ChatRoster.blankConversation(items, current: a, untouched: true) == b)
+        #expect(ChatRoster.blankConversation(items, current: a) == a)
+    }
+
     @Test func newConversationGoesToAnEmptyOneAlreadyOpen() {
         let items = [item(a), item(b, messages: false, shown: 1), item(c, messages: false, shown: 3)]
         #expect(ChatRoster.blankConversation(items, current: a) == c)
@@ -83,8 +91,10 @@ struct ChatRosterTests {
 
     @Test func theOneOnShowBusyOnesAndUnsentTextStay() {
         let items = [item(a, messages: false), item(b, busy: true), item(c, composing: true, shown: 0), item(d, messages: false, composing: true)]
-        // An empty conversation goes even with a draft: New Conversation would have reused it.
-        #expect(ChatRoster.pruned(items, current: a, keep: 0) == [d])
+        // An empty conversation with a draft stays too (New Conversation shows it again); one
+        // with nothing in it goes.
+        #expect(ChatRoster.pruned(items, current: a, keep: 0).isEmpty)
+        #expect(ChatRoster.pruned(items + [item(e, messages: false)], current: a, keep: 0) == [e])
     }
 
     @Test func onlyTheIdleConversationsShownLastStay() {
@@ -93,6 +103,13 @@ struct ChatRosterTests {
     }
 
     // MARK: The sidebar
+
+    @Test func aFailedHistoryLoadIsNotShownAsNoChats() {
+        #expect(ChatRoster.historyNote(rows: 0, loadFailed: false) == .empty)
+        #expect(ChatRoster.historyNote(rows: 0, loadFailed: true) == .failed)
+        #expect(ChatRoster.historyNote(rows: 3, loadFailed: true) == .failed)
+        #expect(ChatRoster.historyNote(rows: 3, loadFailed: false) == nil)
+    }
 
     @Test func openConversationsNotStoredYetComeFirstThenTheHistory() {
         let items = [

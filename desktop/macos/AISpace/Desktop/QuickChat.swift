@@ -358,19 +358,7 @@ private struct FloatingChatBody: View {
             .padding(.bottom, 10)
         }
         .onDrop(of: [UTType.image.identifier, UTType.fileURL.identifier], isTargeted: nil) { providers in
-            for provider in providers.prefix(4) {
-                if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
-                    _ = provider.loadDataRepresentation(forTypeIdentifier: UTType.fileURL.identifier) { data, _ in
-                        guard let data, let url = URL(dataRepresentation: data, relativeTo: nil), let bytes = try? PictureImport.read(url) else { return }
-                        Task { @MainActor in chat.attach(bytes, name: url.lastPathComponent) }
-                    }
-                } else if let type = provider.registeredTypeIdentifiers.first(where: { UTType($0)?.conforms(to: .image) == true }) {
-                    _ = provider.loadDataRepresentation(forTypeIdentifier: type) { data, _ in
-                        guard let data else { return }
-                        Task { @MainActor in chat.attach(data, name: "Image") }
-                    }
-                }
-            }
+            chat.importImages(providers)
             return true
         }
     }
@@ -413,9 +401,13 @@ private struct FloatingChatBody: View {
                     }
                 }
             if chat.busy {
-                Button { chat.stop() } label: { Image(systemName: "stop.circle.fill").font(.system(size: 16)) }
+                Button { chat.stop() } label: {
+                    if chat.stopping { ProgressView().controlSize(.mini).frame(width: 16, height: 16) }
+                    else { Image(systemName: "stop.circle.fill").font(.system(size: 16)) }
+                }
                     .buttonStyle(.plain).foregroundStyle(Theme.danger)
-                    .help("Stop").accessibilityLabel(Text("Stop"))
+                    .disabled(chat.stopping)
+                    .help(chat.stopping ? Text("Stopping…") : Text("Stop")).accessibilityLabel(chat.stopping ? Text("Stopping…") : Text("Stop"))
             } else {
                 Text("↩ Send").font(.system(size: 11)).foregroundStyle(empty ? .tertiary : .secondary)
                     .padding(.bottom, 1)
