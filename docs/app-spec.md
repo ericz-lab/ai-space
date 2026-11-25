@@ -751,7 +751,7 @@ notify:
 | `agents`, chat route | Implemented (`src/space/agents/`) on every chat runtime; `skills` listed in the agent's prompt per turn; `memory` parsed but not applied yet; an app reaches its own agents with its token, and every app's when the operator lists it in `SPACE_AGENT_CALLERS` ([panel.md](panel.md#apps-and-their-agents)) |
 | Model service, `/api/model/run` | Implemented (`src/space/model/`) |
 | Built-in model gateway, `/api/model-gateway/*` | Implemented (`src/space/gateway/`): passthrough of Anthropic Messages, OpenAI audio and OpenAI Images for ai-space's own runtimes and speech, never for apps ([model-gateway.md](model-gateway.md)) |
-| Speech service, `/api/speech/*`, `speech` | Implemented (`src/space/speech/`): `voice-studio` and `openai-compatible` providers; `dashscope`, live through an API and `clone` later ([speech.md](speech.md#later)) |
+| Speech service, `/api/speech/*`, `speech` | Implemented (`src/space/speech/`): `voice-studio`, `speech-server`, `openai-compatible` and `minimax` providers; `dashscope`, live through an API and `clone` later ([speech.md](speech.md#later)) |
 | Chat service, `/api/chat/*`, the widget | Implemented (`src/space/chat/`, `src/web/chat-widget/`) |
 | `widgets`, `/api/widgets` | Implemented (`src/space/panel/`) |
 | `pets`, `/api/pets` | Implemented (`src/space/panel/pet-spec.ts`, `src/space/panel/pets.ts`, `src/web/Pet.tsx`); this space only, not across peers; not in package manifests |

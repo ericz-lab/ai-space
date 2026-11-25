@@ -4,6 +4,7 @@ export { parseAppSpeechSpec, type AppSpeechSpec } from "./spec.ts";
 export { SpeechStore, SPEECH_WINDOWS, type SpeechUsage, type SpeechWindow } from "./store.ts";
 export { SpeechService, buildAdapters, MAX_SPEAK_CHARS, type LiveSession, type SpeechCell, type SpeechServiceOptions } from "./service.ts";
 export { VoiceStudioAdapter, type StudioPeer, type StudioPeers, type VoiceStudioDeps } from "./voice-studio.ts";
+export { SpeechServerAdapter, identityProof, type SpeechServerDeps } from "./speech-server.ts";
 export { OpenAiAdapter } from "./openai.ts";
 export { liveAttachment, type Connect } from "./live.ts";
 export { createSpeechRoutes, type SpeechApiOptions } from "./api.ts";

@@ -1,6 +1,6 @@
 # Speech: one capability, several providers
 
-Status: implemented in `src/space/speech/` for file transcription, speech synthesis and live dictation, with two provider kinds: `voice-studio` (the self-hosted app, here or on a peer) and `openai-compatible` (OpenAI's audio API or any server that speaks it). `dashscope` is named in the configuration but not built yet ([Later](#later)).
+Status: implemented in `src/space/speech/` for file transcription, speech synthesis and live dictation, with the provider kinds `voice-studio` (the self-hosted app, here or on a peer), `speech-server` (a server that speaks the [speech-server interface](#speech-server), reached at its own addresses), `openai-compatible` (OpenAI's audio API or any server that speaks it) and `minimax` (MiniMax's own API). `dashscope` is named in the configuration but not built yet ([Later](#later)).
 
 It follows the model layer's shape ([runtimes.md](runtimes.md), [model.md](model.md), [model-machines.md](model-machines.md)): a Space contract that names no provider, providers registered by kind in a file, one adapter per kind that declares what it can do, a fallback list for account and link failures only, a ledger and a status table.
 
@@ -53,6 +53,10 @@ speech:
     gpu:
       kind: voice-studio                       # self-hosted: the app, here or on a peer
       machine: gpu-box                         # optional: the peer it runs on; default: here, else the one peer that has it
+    studio:
+      kind: speech-server                      # self-hosted: a speech server at its own address (see Speech server)
+      url: http://192.168.3.48:8920            # or urls: [...], the first preferred
+      apiKeyEnv: SPEECH_SERVER_TOKEN           # the variable that holds the server's token
     openai:
       kind: openai-compatible
       url: https://api.openai.com/v1           # optional: default shown; /audio/transcriptions and /audio/speech under it
@@ -76,7 +80,7 @@ Without the file, or without its `speech:` section, the space has the one provid
 
 ### From Settings
 
-Settings → Gateway → **Speech** ([model-gateway.md](model-gateway.md#speech-group)) shows every speech provider in one list: the built-in model gateway's providers that can transcribe or speak, and every other provider of this file, marked **custom** with what it serves (ASR, TTS, live) and, for a `voice-studio` one, where it is (this machine, a peer, or not found). For ASR and for TTS it edits an order: the first answers (`default`), the rest are its `fallback`, in order. A gateway provider joins an order with its model and, for TTS, a default voice; a custom one can be moved within an order or taken out of it, and its own definition is never rewritten. Live is shown read-only, only when a provider can do it, and never changes here. The running service reloads the file at once, no restart. Each provider has a TTS test that plays in the page and an ASR test that transcribes that clip, on click only.
+Settings → Gateway → **Speech** ([model-gateway.md](model-gateway.md#speech-group)) shows every speech provider in one list: the built-in model gateway's providers that can transcribe or speak, and every other provider of this file, marked **custom** with what it serves (ASR, TTS, live) and where it is: for a `voice-studio` one this machine, a peer, or not found; for a `speech-server` one the host of its address in use, or of its first address before a call chose one. For ASR and for TTS it edits an order: the first answers (`default`), the rest are its `fallback`, in order. A gateway provider joins an order with its model and, for TTS, a default voice; a custom one can be moved within an order or taken out of it, and its own definition is never rewritten. Live is shown read-only, only when a provider can do it, and never changes here. The running service reloads the file at once, no restart. Each provider has a TTS test that plays in the page and an ASR test that transcribes that clip, on click only.
 
 **Nothing changes unless the owner changes an order.** An upgrade writes nothing. Saving the orders as they are writes nothing either, and a save rewrites only what changed: an untouched `default:` or `fallback:`, or an untouched provider, keeps its lines and comments.
 
@@ -86,11 +90,12 @@ The entries the page writes are named `gateway-<provider>` with `kind: openai-co
 
 ## Kinds
 
-Each kind is one adapter (`src/space/speech/voice-studio.ts`, `openai.ts`, `minimax.ts`) and declares its capabilities: `transcribe` (a file), `live` (a microphone), `speak` (text to WAV), `clone` (a new voice from a sample; no adapter offers it through the Space yet). A call for a capability the chosen provider lacks is a 400 that names the provider and the capability, never a quiet move to another one.
+Each kind is one adapter (`src/space/speech/voice-studio.ts`, `speech-server.ts`, `openai.ts`, `minimax.ts`) and declares its capabilities: `transcribe` (a file), `live` (a microphone), `speak` (text to WAV), `clone` (a new voice from a sample; no adapter offers it through the Space yet). A call for a capability the chosen provider lacks is a 400 that names the provider and the capability, never a quiet move to another one.
 
 | kind | capabilities | where it runs | limits |
 | --- | --- | --- | --- |
 | `voice-studio` | transcribe, live, speak | the `voice-studio` app on this machine, else on `machine:`, else the one peer that provides it; reached through the bus (`/api/call`, `/api/peer/call`) and, for live, the peer's WebSocket bridge to the app ([peers.md](peers.md)). Self-hosted. | 4 MB per file (the bus's call limit), at most 4 voices per script |
+| `speech-server` | transcribe, live, speak | a server that speaks the [speech-server interface](#speech-server) at its own `url:` or one of its `urls:` (the first that proves it is the server), over HTTP and its WebSocket with its token. The `voice-studio` app is the implementation that exists. Self-hosted. | 25 MB per file, at most 4 voices per script |
 | `openai-compatible` | transcribe, speak | `POST {url}/audio/transcriptions` (multipart: `file`, `model`, `language`, `prompt` from `context`, `response_format`) and `POST {url}/audio/speech` (`model`, `input`, `voice`, `response_format: wav`) with the key as a bearer. A cloud API unless `selfHosted: true` (a server the operator runs, such as a Whisper server on the LAN). | 25 MB per file, 4,096 characters per text, one voice |
 | `minimax` | transcribe, speak | MiniMax's own API, which is not OpenAI's shape: `POST {root}/v1/speech_to_text` (multipart: `model`, `file`, `response_format: verbose_json`; the language as a `language` header) and `POST {root}/v1/t2a_v2` (JSON: `model`, `text`, `voice_setting.voice_id`, `audio_setting.format: wav`, `output_format: hex`; the audio comes back hex-encoded inside JSON and is decoded here). A cloud API. | 50 MB per request and 500 s per file: a longer WAV is cut into pieces of 480 s, another format is refused by MiniMax (a 400); 9,999 characters per text, one voice |
 | `dashscope` | — | not built yet: the provider loads as off with a warning ([Later](#later)) | |
@@ -114,6 +119,57 @@ Each kind is one adapter (`src/space/speech/voice-studio.ts`, `openai.ts`, `mini
 ```
 
 The models are MiniMax's own ids, never `<provider>/<model>`: through `gateway: space` the call still goes straight to MiniMax, because the gateway forwards without translating; only the key and the host are the gateway provider's, read when the call is made, so a key changed in Settings applies at once. A voice id is MiniMax's (`Chinese (Mandarin)_News_Anchor`, a cloned one); without a `voices:` list MiniMax refuses an unknown one itself. What does not map onto the contract: MiniMax has no prompt, so `context` is not sent; it does not say which language it heard, so `language` answers the hint (sent only when it is one MiniMax documents: zh, yue, en, ja, ko, th, vi, id, ms, fil, ar, tr, fr, de, es, it, pt, pl, ru, uk; otherwise it recognises mixed languages); its segments carry a speaker (`S1`), which the contract drops. Its errors carry a code: in `base_resp.status_code` under HTTP 200 for `t2a_v2`, at the end of `error.message` (`… (1004)`) with the real HTTP status for `speech_to_text`. Codes 1004 and 2049 are `auth`, 1008 and 2053 `credit`, 2056 and 2067 `quota`, 1002, 1039, 1041, 1045, 2045–2047, 2062 and 2064 `rate`, 1000, 1001, 1024, 1033, 2066 and 2160 `transport`; any other code ends the call as a refusal (422 for flagged content, else 400) ([errorcode.md](https://platform.minimax.io/docs/api-reference/errorcode.md)).
+
+### Speech server
+
+`kind: speech-server` points a Space at a speech server by its address, instead of finding the `voice-studio` app on this machine or a peer. A Space with no voice-studio and no peer can use one, and a laptop's dictation goes straight to the GPU machine instead of through a hub. The kind names the interface below, not a product: the `voice-studio` app is one implementation (with `HOST` and `VOICE_STUDIO_TOKEN` set: it then listens beyond loopback and answers the identity probe and the bearer), and any other server that implements it can be used the same way.
+
+**Home and away.** With several addresses, the first that proves it is the server is used, so a laptop uses the LAN address at home and the tunnel hostname elsewhere, with nothing to switch:
+
+```yaml
+speech:
+  providers:
+    gpu:
+      kind: speech-server
+      urls:
+        - http://192.168.3.48:8920                                     # home: the LAN address, tried first
+        - { url: https://voice.example.com, headersEnv: VOICE_ACCESS }  # away: the tunnel, behind Cloudflare Access
+      apiKeyEnv: SPEECH_SERVER_TOKEN                                    # the server's token; never the token itself
+```
+
+```sh
+# <workspace>/.env
+SPEECH_SERVER_TOKEN=…                                    # the same value as the server's own token (VOICE_STUDIO_TOKEN for voice-studio)
+VOICE_ACCESS=CF-Access-Client-Id: …; CF-Access-Client-Secret: …
+```
+
+- **Keys**: `url:` (one address) or `urls:` (a list, the first preferred), `apiKeyEnv` (required; an empty variable turns the provider off, as for an API provider), and per address `headersEnv`. `machine:` and `app:` belong to `kind: voice-studio`, and the parser says so when it finds them here; `url`, `urls` and `apiKeyEnv` on a `voice-studio` provider point at this kind the same way.
+- **Addresses**: each is an `http://` or `https://` base URL, optionally with a path prefix (`https://example.com/voice`, for a server behind a reverse proxy at a path), with no credentials, query or fragment; a trailing slash is dropped. Plain `http://` is allowed only to a host written as a loopback, private-range or link-local address or a local name: IPv4 127/8, 10/8, 172.16/12, 192.168/16 and 169.254/16; IPv6 `::1`, fe80::/10 and fc00::/7; `localhost`, `*.local` and `*.home.arpa`. The name is not resolved, and 100.64/10 (carrier-grade NAT) and a bare name like `david` do not count. Any other host must be `https://`, since the token travels in a header. **Plain HTTP on a LAN sends the token and the audio unencrypted**: anyone on that network who can watch the traffic can read both. Use it on a network you trust, or give an https address.
+- **An access layer** in front of an address, such as Cloudflare Access on a tunnel hostname (which otherwise answers a redirect to its login page), takes its service token as headers: `headersEnv:` names a variable holding `Name: value; Name: value`, the same form as a peer's `SPACE_PEER_<NAME>_HEADERS` and a connection's `--headers-env` ([peers.md](peers.md)). An address with `headersEnv` must be `https://`, and its headers go to that address only, the identity probe included (it cannot pass Access without them). They may not set `Authorization`, `Host`, `Cookie` or the other headers the adapter writes itself. An address whose variable is empty is skipped, with the reason in the status cell; with every address skipped the provider is off.
+
+#### The interface
+
+What a server implements to be a speech server, under its base URL `B`:
+
+| Route | Request | Answer |
+| --- | --- | --- |
+| `GET B/api/identity?nonce=<hex>` | no auth; `nonce` is 32 to 128 lowercase hex characters (the Space sends 64, from a CSPRNG, new each time) | `200 { "ok": true, "app": "<the implementation's name>", "proof": "<hex>" }`, where `proof` is the lowercase hex HMAC-SHA256 keyed by the token (its UTF-8 bytes) over the UTF-8 message `voice-studio-identity:` followed by the nonce. 404 when the server has no token configured. Never a redirect. |
+| `POST B/api/asr` | multipart: `file` (the audio), optional `language` (`zh`, `en`; empty or absent: detect it), optional `context` (terms the speech may contain) | `200 { "text", "language", "segments": [{ "start", "end", "text" }] }`, times in seconds; `segments` may be empty |
+| `POST B/api/tts` | JSON `{ "text", "voices": [names] }`; `voices` empty means the server's default; several voices read a `Speaker N:` script (the Space sends at most 4) | `200` a WAV (`audio/wav`) |
+| `GET B/api/voices` | | `200 { "voices": [names] }` |
+| `WS B/api/asr/realtime` | the [live protocol](#live-protocol), version 1, from the client's `start` on | the same; the Space passes the frames through untouched |
+
+- **Auth**: every route but the identity probe requires `Authorization: Bearer <token>`, the WebSocket handshake too, and answers 401 or 403 without it. The `app` field names the implementation (voice-studio answers `"voice-studio"`); the Space does not check it: the proof is what authenticates. The message prefix `voice-studio-identity:` is part of the interface whatever the server is called.
+- **Errors**: a refusal of the request is a 400, 413 or 422 with `{ "detail" }` or `{ "error" }`, and the Space answers the caller with that status; a busy GPU is a 503 (the call moves to a fallback provider), any other failure a 5xx. A live session reports `{"type":"error","code":"busy"}` and closes with 1013 when it cannot take one now.
+- Test vector for the proof: token `test-token`, nonce `ab` repeated 32 times, proof `9049ac1554066be5b4837b5656acec363b4868fdfe2d2147b241997bdfdb69ec`.
+
+#### Which address
+
+The LAN address is a private IP, and on someone else's network another machine may answer at it. So before an address gets the token, a file or any text, it must pass the identity probe, sent without the token; the proof is compared in constant time. A redirect (never followed), an HTML page, another status, `ok` not true, a wrong proof or no answer in time means "this address is not it". The probes start together, and the earliest address in list order that passes is used: a later one that passed is not taken while an earlier one is still being probed, and once an earlier one passed the later ones are not waited for. A probe may take 1.5 s for a local address (on the LAN it answers in milliseconds or not at all) and 6 s for any other, which crosses the internet and an access layer.
+
+The address chosen is remembered. A call that cannot reach it (refused, reset, unresolved, a redirect: not a 4xx or 5xx from the server itself) forgets it, chooses again and is sent once more on the new address when another one passed, before anything was answered to the caller; a live socket that never opened is rerouted the same way, before anything reached the client. While a later address is in use, the earlier ones are probed again on the first call after 5 minutes, in the background of that call, so a laptop that came home moves back to the LAN address on the next call. Nothing probes on a timer or while speech is unused. When no address passes, the call is a link failure (`unreachable: no address answered as the speech server (…)`) and the [fallback](#choosing-a-provider) providers take over as for a peer that is off.
+
+Status, the ledger's `machine` and Settings show the host of the address in use (`192.168.3.48:8920`), or of the first address before any call has chosen one.
 
 ## Choosing a provider
 
@@ -159,7 +215,7 @@ A browser socket must come from the panel's origin, as for `/api/voice/realtime`
 | field | meaning |
 | --- | --- |
 | `app`, `tag`, `capability` | who, why, which capability (`transcribe`, `speak`, `live`) |
-| `provider`, `kind`, `machine` | what answered, and the peer it ran on (empty for this machine and for an API) |
+| `provider`, `kind`, `machine` | what answered, and the peer it ran on (empty for this machine and for an API; the address's host for a `speech-server`) |
 | `status`, `error` | `ok` or `error` with the reason |
 | `startedAt`, `durationMs` | wall clock of the whole call, every try included |
 | `inputBytes` | the size of the file (transcribe) |
@@ -179,7 +235,7 @@ A `minimax` provider is priced the same way (its `price:`, else the gateway's pr
 
 ## Status
 
-`GET /api/speech` has one cell per provider: kind, capabilities, where it runs (this machine, a peer, or the API's host), `selfHosted`, `off` with the reason, `reachable` (for `voice-studio`: the app is here with a service, or on a peer whose snapshot is fresh), `signedIn` (an API provider's key is set), the rest after a failure (`limitedUntil`, `restKind`: the same causes and rests as a runtime's cell, [model-machines.md](model-machines.md#status), kept by the same `RuntimeHealth` class), `lastError`, `lastOkAt` (seeded from the ledger at boot), `used` (a default or in a fallback list) and `problem` (used and off, unreachable, not signed in or resting). Nothing is probed with a paid call: the cells learn from the calls.
+`GET /api/speech` has one cell per provider: kind, capabilities, where it runs (this machine, a peer, or the API's host), `selfHosted`, `off` with the reason, `reachable` (for `voice-studio`: the app is here with a service, or on a peer whose snapshot is fresh; for `speech-server`: an address passed the identity probe and has not failed since, false after a choice found none, absent before any call), `signedIn` (an API provider's key is set), the rest after a failure (`limitedUntil`, `restKind`: the same causes and rests as a runtime's cell, [model-machines.md](model-machines.md#status), kept by the same `RuntimeHealth` class), `lastError`, `lastOkAt` (seeded from the ledger at boot), `used` (a default or in a fallback list) and `problem` (used and off, unreachable, not signed in or resting). Nothing is probed with a paid call, and nothing at all on page load: the cells learn from the calls (a speech server's identity probes run only when a call needs an address).
 
 Settings → Status shows them under **Speech** (语音), after the runtimes: a row per provider with its state, the defaults and fallback lists under them, and the last day's calls, minutes of audio, characters and cost.
 
@@ -192,7 +248,7 @@ speech:
   local-only: true
 ```
 
-Its calls then use only self-hosted providers (`voice-studio`, an `openai-compatible` with `selfHosted: true`): a cloud provider in a fallback list is skipped, and a cloud first choice is a 403 that says so. A provider through a model gateway (`gateway: space` or `magpie`) cannot be marked `selfHosted` and is always a cloud provider here, whatever the gateway's provider is. The panel and the operator are not an app and follow the configuration.
+Its calls then use only self-hosted providers (`voice-studio`, `speech-server`, an `openai-compatible` with `selfHosted: true`): a cloud provider in a fallback list is skipped, and a cloud first choice is a 403 that says so. A provider through a model gateway (`gateway: space` or `magpie`) cannot be marked `selfHosted` and is always a cloud provider here, whatever the gateway's provider is. A `speech-server` counts as self-hosted because it is the operator's own server; that holds also when its address in use is a tunnel hostname, where the audio crosses the tunnel's provider (TLS to its edge, then the tunnel). The panel and the operator are not an app and follow the configuration.
 
 ## What does not change
 
@@ -216,4 +272,4 @@ Callers in apps, each in its own repository and deployed on its own: an app that
 
 ## Code
 
-`src/space/speech/`: `types.ts` (capabilities, requests and answers, the adapter interface, `SpeechError`), `config.ts` (`providers.yaml`'s `speech:` section and the built-in default), `spec.ts` (the manifest's `speech:` section), `voice-studio.ts`, `openai.ts` and `minimax.ts` (the adapters), `wav.ts` (a WAV's length, cutting and wrapping one), `prices.ts` with `prices.json`, `store.ts` (the `speech_calls` ledger), `service.ts` (choosing, fallback, voices, local-only, status cells, rows), `live.ts` (the live session between the client and the provider's socket), `api.ts` (the routes, the compatibility routes).
+`src/space/speech/`: `types.ts` (capabilities, requests and answers, the adapter interface, `SpeechError`), `config.ts` (`providers.yaml`'s `speech:` section and the built-in default), `spec.ts` (the manifest's `speech:` section), `voice-studio.ts`, `speech-server.ts` (the identity probe, the choice of address), `openai.ts` and `minimax.ts` (the adapters), `wav.ts` (a WAV's length, cutting and wrapping one), `prices.ts` with `prices.json`, `store.ts` (the `speech_calls` ledger), `service.ts` (choosing, fallback, voices, local-only, status cells, rows), `live.ts` (the live session between the client and the provider's socket), `api.ts` (the routes, the compatibility routes).

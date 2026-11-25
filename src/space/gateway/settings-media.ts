@@ -152,7 +152,8 @@ export function createGatewayMediaRoutes(o: MediaOptions, guarded: (h: (req: Req
       // Every speech provider that is not the page's own: custom, with what it serves and where it is.
       custom: custom.map((p) => {
         const c = cells.get(p.name);
-        const machine = p.kind === "voice-studio" ? (c?.where || p.machine || "") : undefined;
+        // A speech server is where its address is (the one in use, else the first), never "this machine".
+        const machine = p.kind === "voice-studio" ? (c?.where || p.machine || "") : p.kind === "speech-server" ? (c?.where || p.addresses[0]?.host || "") : undefined;
         return {
           name: p.name,
           kind: p.kind,
