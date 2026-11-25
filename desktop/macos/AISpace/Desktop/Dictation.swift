@@ -41,19 +41,31 @@ final class Dictation {
     }
 
     private func start() async {
-        guard let c = model.selected ?? model.store.defaultConnection, let live = model.lives[c.id] else {
+        // The selected Space first, then the others: this Mac's own Space often has no
+        // transcriber while a Space it is also connected to does.
+        let first = model.selected ?? model.store.defaultConnection
+        let order = ([first].compactMap { $0 } + model.store.connections.filter { $0.id != first?.id })
+        guard let first else {
             hud.note(String(localized: "Add a Space first to use voice input."))
             return
         }
-        switch live.status {
-        case .signInNeeded, .offline:
-            hud.note(String(localized: "\(c.name) is not connected. Voice input needs the Space."))
-            return
-        case .ok, .unknown: break
+        var reachable = false
+        for c in order {
+            guard let live = model.lives[c.id] else { continue }
+            switch live.status {
+            case .signInNeeded, .offline: continue
+            case .ok, .unknown: break
+            }
+            reachable = true
+            await voice.check(live.api)
+            if voice.state != .unavailable { break }
         }
-        await voice.check(live.api)
         guard voice.state == .idle else {
-            if voice.state == .unavailable { hud.note(String(localized: "This Space cannot transcribe speech.")) }
+            if !reachable {
+                hud.note(String(localized: "\(first.name) is not connected. Voice input needs the Space."))
+            } else if voice.state == .unavailable {
+                hud.note(String(localized: "None of your Spaces can transcribe speech."))
+            }
             return
         }
         let ownKeyWindow = NSApp.keyWindow != nil

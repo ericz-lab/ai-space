@@ -416,7 +416,7 @@
 "Listening… %@ to stop" = "正在听… 按 %@ 结束";
 "Add a Space first to use voice input." = "先添加一个 Space 才能使用语音输入。";
 "%@ is not connected. Voice input needs the Space." = "%@ 未连接。语音输入需要连上 Space。";
-"This Space cannot transcribe speech." = "这个 Space 无法把语音转成文字。";
+"None of your Spaces can transcribe speech." = "已连接的 Space 都无法把语音转成文字。";
 "The text is on the clipboard. Press ⌘V to paste it." = "文字已在剪贴板里，按 ⌘V 粘贴。";
 "The text is on the clipboard. Press ⌘V to paste it. To have it go in by itself, allow AI Space in System Settings → Privacy & Security → Accessibility." = "文字已在剪贴板里，按 ⌘V 粘贴。想让它自动填入，请在“系统设置 → 隐私与安全性 → 辅助功能”中允许 AI Space。";
 
