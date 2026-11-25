@@ -102,6 +102,8 @@ describe("a gateway model, called directly", () => {
     expect(call).toMatchObject({ runtime: "claude", backend: "local" });
     expect(v.seen).toEqual([]);
     expect(service.resolve("haiku").runtime.name).toBe("claude");
+    // What the status table counts as used: runtime models only.
+    expect([service.namesGateway("ds/deepseek-chat"), service.namesGateway("fast"), service.namesGateway("oa/tts-1"), service.namesGateway("claude/haiku"), service.namesGateway("basic")]).toEqual([true, true, true, false, false]);
     expect(() => service.resolve("box:ds/deepseek-chat")).toThrow(/unknown machine: box/);
     // A first segment that is neither: as before.
     expect(() => service.resolve("nope/x")).toThrow(/unknown runtime: nope/);
@@ -136,6 +138,7 @@ describe("a gateway model, called directly", () => {
     const off = new ModelService({ store, runtimes: claudeOnly(fakeModelBin()), log: () => {}, gateway: { link: new ModelGateway({ log: () => {} }).link } });
     expect(() => off.resolve("ds/deepseek-chat")).toThrow(/unknown runtime: ds/);
     expect(off.gatewayChoices()).toEqual({ text: [], image: [] });
+    expect(off.namesGateway("ds/deepseek-chat")).toBe(false);
   });
 
   test("a runtime named like a provider wins (the loader refuses that pair; this is the fallback)", () => {

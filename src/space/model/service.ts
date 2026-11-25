@@ -150,16 +150,21 @@ export class ModelService {
    * runtime (or nothing the gateway knows). Throws when it names a gateway model of another kind.
    */
   gatewayModel(model: string, purpose: "text" | "image"): string | undefined {
-    if (!this.gateway || !this.gatewayModels || splitMachine(model)) return undefined;
-    const slash = model.indexOf("/");
-    if (slash < 0 ? (MODEL_TIERS as readonly string[]).includes(model) : this.runtimes.get(model.slice(0, slash))) return undefined;
-    const kinds = this.gateway.kindsOf(model);
-    if (!kinds) return undefined;
+    if (!this.namesGateway(model)) return undefined;
+    const kinds = this.gateway!.kindsOf(model)!;
     if (!kinds.includes(purpose)) {
       const what = kinds.includes("image") ? "a picture model (send it to /api/model/image)" : kinds.includes("text") ? "a text model (send it to /api/model/run)" : `a ${kinds.join("/")} model (the speech service uses it)`;
       throw new Error(`${model} is ${what}, not a ${purpose === "image" ? "picture" : "text"} model of the model gateway`);
     }
     return model;
+  }
+
+  /** Whether a value names a model of the built-in model gateway (of any kind), not a runtime's. */
+  namesGateway(model: string): boolean {
+    if (!this.gateway || !this.gatewayModels || splitMachine(model)) return false;
+    const slash = model.indexOf("/");
+    if (slash < 0 ? (MODEL_TIERS as readonly string[]).includes(model) : this.runtimes.get(model.slice(0, slash))) return false;
+    return Boolean(this.gateway.kindsOf(model));
   }
 
   /** Whether a call naming this model goes to the built-in model gateway rather than a runtime. */

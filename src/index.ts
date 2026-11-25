@@ -329,7 +329,8 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       for (const t of Object.values(m.model?.tags ?? {})) out.push(appModels.qualify(t)!);
       for (const a of m.agents ?? []) if (a.runtime) out.push(`${a.runtime}/${a.model ?? "intermediate"}`);
     }
-    return out.filter(Boolean);
+    // A gateway model (`ds/deepseek-chat`) is no runtime: it has no cell in the status table.
+    return out.filter((m) => Boolean(m) && !model.namesGateway(m));
   };
   const machineCells = () =>
     statusTable({
