@@ -420,6 +420,12 @@ button.gw-chip { cursor: pointer; }
 .gw-order-list li { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .gw-order-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; overflow-wrap: anywhere; }
 .gw-order-head .gw-order .btn2 { padding: 2px 10px; font-size: 12px; }
+/* One box per provider in an order: its model and voice sit inside it, under its name. */
+.gw-order-list li.gw-order-item { padding: 6px 10px; border: 1px solid transparent; border-radius: 8px; }
+.gw-order-list li.gw-order-item.has-fields { border-color: var(--hairline); padding-bottom: 10px; }
+.gw-order-fields { display: grid; gap: 6px; padding-left: 12px; border-left: 2px solid var(--hairline); }
+.gw-order-fields .gw-field { grid-template-columns: 100px minmax(0, 1fr); }
+@media (max-width: 560px) { .gw-order-fields .gw-field { grid-template-columns: minmax(0, 1fr); } }
 .gw-who { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 2px; font-size: 12px; overflow-wrap: anywhere; }
 .gw-who b { font-weight: 500; }
 .gw-addmodel { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 4px 0 8px; }

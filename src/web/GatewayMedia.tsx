@@ -223,7 +223,7 @@ export function SpeechCard({ g, editable, onAddProvider, initial, t }: { g: Gate
                     const models = p ? modelsOf(p, role) : [];
                     const voices = p && "gateway" in item && role === "tts" ? p.voices[item.model] ?? [] : [];
                     return (
-                      <li key={keyOf(item)}>
+                      <li key={keyOf(item)} className={"gateway" in item && p ? "gw-order-item has-fields" : "gw-order-item"}>
                         <div className="gw-order-head">
                           <span>
                             <b>{nameOf(item)}</b> <small className="cli-dim">{i === 0 ? t("speechg.first") : t("speechg.then")}{"gateway" in item ? ` · ${t("speechg.viaGateway")}` : c ? ` · ${t("speechg.custom")}` : ""}</small>
@@ -238,7 +238,8 @@ export function SpeechCard({ g, editable, onAddProvider, initial, t }: { g: Gate
                         </div>
                         {"gateway" in item && !p && <small className="gw-warn">{t("speechg.gone")}</small>}
                         {"gateway" in item && p && (
-                          <>
+                          // Inside this provider's own box: its model and voice, not the role's.
+                          <div className="gw-order-fields">
                             <label className="gw-field">
                               <span>{t("speechg.model")}</span>
                               {models.length ? (
@@ -268,7 +269,7 @@ export function SpeechCard({ g, editable, onAddProvider, initial, t }: { g: Gate
                                 )}
                               </label>
                             )}
-                          </>
+                          </div>
                         )}
                       </li>
                     );
