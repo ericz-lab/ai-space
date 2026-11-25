@@ -22,11 +22,42 @@ export type CardKind = (typeof CARD_KINDS)[number];
 export const CARD_ACTIONS = ["undo"] as const;
 export type CardAction = (typeof CARD_ACTIONS)[number];
 export const MAX_CARD_ITEMS = 20;
+/**
+ * Version 2 of the contract, still `v: 1` (docs/chat-cards.md#styles): built-in looks a card picks
+ * by name. A name a client does not know is drawn as `rows`, so a style added later still shows.
+ */
+export const CARD_STYLES = ["rows", "compact", "gallery", "agenda", "stat"] as const;
+export type CardStyle = (typeof CARD_STYLES)[number];
+/** A tag's colour by meaning; an unknown name is left off the tag, which reads as `neutral`. */
+export const CARD_TONES = ["neutral", "accent", "positive", "warning", "negative"] as const;
+export type CardTone = (typeof CARD_TONES)[number];
+/** The glyphs an item may name; an unknown name is left off the item. */
+export const CARD_ICONS = ["check", "note", "link", "calendar", "image", "file", "person", "chart", "clock", "flag", "bell", "folder"] as const;
+export type CardIcon = (typeof CARD_ICONS)[number];
+export const MAX_CARD_TAGS = 4;
+export type CardTag = { text: string; tone?: CardTone };
 
-export type CardItem = { id: string; title: string; detail?: string; url?: string; version?: number };
+/** The structured fields an item may carry, on a card and in a state or undo answer alike. */
+export type CardItemFields = {
+  /** The app's own time words, shown first in the secondary line. */
+  when?: string;
+  /** `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM` in the app's zone, without a zone; `agenda` draws it. */
+  date?: string;
+  tags?: CardTag[];
+  /** An absolute http(s) URL once resolved, like `url`. */
+  image?: string;
+  icon?: CardIcon;
+  /** A short value: `stat`'s number, `compact`'s right-hand value. */
+  value?: string;
+  /** 0 to 1. */
+  progress?: number;
+};
+export type CardItem = { id: string; title: string; detail?: string; url?: string; version?: number } & CardItemFields;
 export type Card = {
   v: 1;
   kind: CardKind;
+  /** How the card is drawn; absent means `rows`. */
+  style?: CardStyle;
   title?: string;
   items: CardItem[];
   /** A `value` card's value as shown. */
@@ -37,7 +68,7 @@ export type Card = {
 };
 
 /** One item as a card's `state` or action capability answers it. */
-export type CardItemState = { id: string; status: "active" | "done" | "removed"; title?: string; detail?: string; url?: string; version?: number; changed?: boolean };
+export type CardItemState = { id: string; status: "active" | "done" | "removed"; title?: string; detail?: string; url?: string; version?: number; changed?: boolean } & CardItemFields;
 
 const CAPABILITY_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/i;
 const ITEM_STATUSES = ["active", "done", "removed"] as const;
@@ -53,6 +84,57 @@ const line = (v: unknown, max: number): string | undefined | false => {
 /** A link the app gives: a path on its own page, or an http(s) URL. */
 const linkOk = (v: string) => (v.startsWith("/") && !v.startsWith("//")) || /^https?:\/\//i.test(v);
 
+const DATE_RE = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}))?$/;
+/** A real calendar date (and time of day), not one Date would roll over. */
+function dateOk(v: string): boolean {
+  const m = DATE_RE.exec(v);
+  if (!m) return false;
+  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  if (mo < 1 || mo > 12 || d < 1 || d > new Date(Date.UTC(y, mo, 0)).getUTCDate()) return false;
+  return m[4] === undefined || (Number(m[4]) < 24 && Number(m[5]) < 60);
+}
+
+/**
+ * An item's structured fields (docs/chat-cards.md#item-fields), or false when one has the wrong
+ * type or is too long. Only a name that is not known (a tag's `tone`, `icon`) degrades: it is left out.
+ */
+function parseFields(raw: Record<string, unknown>): CardItemFields | false {
+  const out: CardItemFields = {};
+  const when = line(raw.when, 40);
+  const value = line(raw.value, 24);
+  if (when === false || value === false) return false;
+  if (when) out.when = when;
+  if (raw.date !== undefined) {
+    if (typeof raw.date !== "string" || !dateOk(raw.date)) return false;
+    out.date = raw.date;
+  }
+  if (raw.tags !== undefined) {
+    if (!Array.isArray(raw.tags) || raw.tags.length > MAX_CARD_TAGS) return false;
+    const tags: CardTag[] = [];
+    for (const t of raw.tags) {
+      if (!isRecord(t)) return false;
+      const text = line(t.text, 24);
+      if (!text || (t.tone !== undefined && typeof t.tone !== "string")) return false;
+      tags.push({ text, ...((CARD_TONES as readonly unknown[]).includes(t.tone) ? { tone: t.tone as CardTone } : {}) });
+    }
+    if (tags.length) out.tags = tags;
+  }
+  if (raw.image !== undefined) {
+    if (typeof raw.image !== "string" || raw.image.length > 2000 || !linkOk(raw.image)) return false;
+    out.image = raw.image;
+  }
+  if (raw.icon !== undefined) {
+    if (typeof raw.icon !== "string") return false;
+    if ((CARD_ICONS as readonly string[]).includes(raw.icon)) out.icon = raw.icon as CardIcon;
+  }
+  if (value) out.value = value;
+  if (raw.progress !== undefined) {
+    if (typeof raw.progress !== "number" || !(raw.progress >= 0 && raw.progress <= 1)) return false;
+    out.progress = raw.progress;
+  }
+  return out;
+}
+
 function parseItem(raw: unknown): CardItem | null {
   if (!isRecord(raw)) return null;
   const id = typeof raw.id === "number" && Number.isInteger(raw.id) ? String(raw.id) : raw.id;
@@ -62,13 +144,18 @@ function parseItem(raw: unknown): CardItem | null {
   if (!title || detail === false) return null;
   if (raw.url !== undefined && (typeof raw.url !== "string" || raw.url.length > 2000 || !linkOk(raw.url))) return null;
   if (raw.version !== undefined && (typeof raw.version !== "number" || !Number.isInteger(raw.version) || raw.version < 0)) return null;
-  return { id: id.trim(), title, ...(detail ? { detail } : {}), ...(typeof raw.url === "string" ? { url: raw.url } : {}), ...(raw.version !== undefined ? { version: raw.version as number } : {}) };
+  const fields = parseFields(raw);
+  if (!fields) return null;
+  return { id: id.trim(), title, ...(detail ? { detail } : {}), ...(typeof raw.url === "string" ? { url: raw.url } : {}), ...(raw.version !== undefined ? { version: raw.version as number } : {}), ...fields };
 }
 
 /** A card as the spec allows it, or null: a card that breaks a rule is dropped whole, never repaired. */
 export function parseCard(raw: unknown): Card | null {
   if (!isRecord(raw) || raw.v !== 1 || !(CARD_KINDS as readonly unknown[]).includes(raw.kind)) return null;
   const kind = raw.kind as CardKind;
+  // A style is a name: not a string drops the card, a name this version does not know is left out.
+  if (raw.style !== undefined && typeof raw.style !== "string") return null;
+  const style = (CARD_STYLES as readonly unknown[]).includes(raw.style) ? (raw.style as CardStyle) : undefined;
   const title = line(raw.title, 200);
   if (title === false) return null;
   const rawItems = raw.items ?? [];
@@ -92,7 +179,7 @@ export function parseCard(raw: unknown): Card | null {
       if ((CARD_ACTIONS as readonly string[]).includes(name)) (actions ??= {})[name as CardAction] = capability;
     }
   }
-  return { v: 1, kind, ...(title ? { title } : {}), items, ...(text ? { text } : {}), ...(typeof raw.state === "string" ? { state: raw.state } : {}), ...(actions ? { actions } : {}) };
+  return { v: 1, kind, ...(style ? { style } : {}), ...(title ? { title } : {}), items, ...(text ? { text } : {}), ...(typeof raw.state === "string" ? { state: raw.state } : {}), ...(actions ? { actions } : {}) };
 }
 
 /** A tool output without its card lines, and the cards they held that pass (at most CARDS_PER_REPLY). */
@@ -119,19 +206,27 @@ export function extractCards(output: string): { text: string; cards: Card[] } {
   return { text: kept.join("\n"), cards };
 }
 
-/** The item links of a card resolved against the app's public URL; a link that does not resolve to http(s) is left out. */
-export function resolveCard<T extends { items: { url?: string }[] }>(card: T, resolve: (url: string) => string): T {
+/** The item links (`url`, `image`) of a card resolved against the app's public URL; a link that does not resolve to http(s) is left out. */
+export function resolveCard<T extends { items: { url?: string; image?: string }[] }>(card: T, resolve: (url: string) => string): T {
   return { ...card, items: card.items.map((i) => withLink(i, resolve)) };
 }
 
-function withLink<T extends { url?: string }>(item: T, resolve: (url: string) => string): T {
-  if (item.url === undefined) return item;
-  const { url, ...rest } = item;
-  const abs = resolve(url);
-  return (/^https?:\/\//i.test(abs) ? { ...rest, url: abs } : rest) as T;
+function withLink<T extends { url?: string; image?: string }>(item: T, resolve: (url: string) => string): T {
+  let out: T = item;
+  for (const key of ["url", "image"] as const) {
+    if (out[key] === undefined) continue;
+    const { [key]: link, ...rest } = out;
+    const abs = resolve(link as string);
+    out = (/^https?:\/\//i.test(abs) ? { ...rest, [key]: abs } : rest) as T;
+  }
+  return out;
 }
 
-/** An app's answer of item states, checked: an item that breaks a rule is left out. */
+/**
+ * An app's answer of item states, checked: an item that breaks a rule is left out. The v1 fields
+ * that do not pass are left off the item, as before; a structured field that breaks its rule
+ * leaves the whole item out, as it would drop a card.
+ */
 export function parseItemStates(raw: unknown, resolve: (url: string) => string): CardItemState[] {
   if (!Array.isArray(raw)) return [];
   const out: CardItemState[] = [];
@@ -143,7 +238,9 @@ export function parseItemStates(raw: unknown, resolve: (url: string) => string):
     const detail = line(r.detail, 300);
     const url = typeof r.url === "string" && r.url.length <= 2000 && linkOk(r.url) ? r.url : undefined;
     const version = typeof r.version === "number" && Number.isInteger(r.version) && r.version >= 0 ? r.version : undefined;
-    out.push(withLink({ id, status: r.status as CardItemState["status"], ...(title ? { title } : {}), ...(detail ? { detail } : {}), ...(url ? { url } : {}), ...(version !== undefined ? { version } : {}), ...(r.changed === true ? { changed: true } : {}) }, resolve));
+    const fields = parseFields(r);
+    if (!fields) continue;
+    out.push(withLink({ id, status: r.status as CardItemState["status"], ...(title ? { title } : {}), ...(detail ? { detail } : {}), ...(url ? { url } : {}), ...(version !== undefined ? { version } : {}), ...(r.changed === true ? { changed: true } : {}), ...fields }, resolve));
   }
   return out;
 }
