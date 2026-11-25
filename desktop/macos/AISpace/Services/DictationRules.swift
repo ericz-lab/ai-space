@@ -55,4 +55,23 @@ enum DictationRules {
         out.append(pcm)
         return out
     }
+
+    /// The transcript's segments are joined by a space (VoiceTranscript), which is wrong inside
+    /// Chinese or Japanese text: a space between two such characters is dropped, one beside a
+    /// Latin word or a digit stays.
+    static func tidy(_ text: String) -> String {
+        let chars = Array(text)
+        var out = ""
+        for (i, c) in chars.enumerated() {
+            if c == " ", i > 0, i + 1 < chars.count, wide(chars[i - 1]), wide(chars[i + 1]) { continue }
+            out.append(c)
+        }
+        return out
+    }
+
+    /// CJK ideographs, kana, and their punctuation and full-width forms.
+    private static func wide(_ c: Character) -> Bool {
+        guard let v = c.unicodeScalars.first?.value else { return false }
+        return (0x2E80...0x9FFF).contains(v) || (0xF900...0xFAFF).contains(v) || (0xFF00...0xFFEF).contains(v)
+    }
 }

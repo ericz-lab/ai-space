@@ -84,6 +84,7 @@ final class Dictation {
     /// The transcript goes through the clipboard: written, pasted, and the earlier contents put
     /// back once the field has read it.
     private func insert(_ text: String) {
+        let text = DictationRules.tidy(text)
         let board = NSPasteboard.general
         var delivery = DictationRules.delivery(ownKeyWindow: NSApp.keyWindow != nil, active: NSApp.isActive, trusted: AXIsProcessTrusted())
         let saved = delivery == .clipboardOnly ? [] : snapshot(board)
@@ -160,8 +161,8 @@ final class DictationHUD {
     func follow(_ state: LiveVoice.State, text: String) {
         switch state {
         case .starting, .recording:
-            show(.listening(text.isEmpty ? String(localized: "Listening… let go of fn to finish") : DictationRules.tail(text)))
-        case .finishing: show(.transcribing(DictationRules.tail(text)))
+            show(.listening(text.isEmpty ? String(localized: "Listening… let go of fn to finish") : DictationRules.tail(DictationRules.tidy(text))))
+        case .finishing: show(.transcribing(DictationRules.tail(DictationRules.tidy(text))))
         case .idle:
             // A note just shown (a failed transcription) outlives the end of the recording.
             if case .note = look { return }

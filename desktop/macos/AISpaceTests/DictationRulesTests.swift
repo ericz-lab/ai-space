@@ -54,4 +54,10 @@ struct DictationRulesTests {
         #expect(u32(40) == pcm.count)
         #expect(wav.suffix(pcm.count) == pcm)
     }
+
+    @Test func segmentsOfChineseJoinWithoutSpaces() {
+        #expect(DictationRules.tidy("今天天气不错， 我们出去走走 好吗") == "今天天气不错，我们出去走走好吗")
+        #expect(DictationRules.tidy("打开 Xcode 然后 运行") == "打开 Xcode 然后运行")
+        #expect(DictationRules.tidy("hello world") == "hello world")
+    }
 }
