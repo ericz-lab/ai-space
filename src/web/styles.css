@@ -1065,12 +1065,71 @@ a.chat-hbtn { box-sizing: border-box; text-decoration: none; }
 .chat-question-own:focus { outline: none; border-color: var(--link); }
 .chat-question-answer { color: var(--link); font-weight: 600; }
 /* A message the person added to the running turn. */
-/* Chat cards (docs/chat-cards.md): the Shortcuts result rows in a frame under the reply. */
+/* Chat cards (docs/chat-cards.md): a narrow solid card under the reply, headed by the app that
+   acted, one two-line row per item with its state as a circle on the left and Undo on the right. */
 .chat-cards { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
-.chat-card.sc-result { border: 1px solid var(--hairline); border-radius: 12px; padding: 10px 12px; }
-.chat-card-title { font-size: 13px; }
-.chat-card-actions { display: flex; gap: 8px; }
-.chat-card .sc-item.removed > a, .chat-card .sc-item.removed > span:first-child { text-decoration: line-through; color: var(--muted); }
+.chat-card {
+  width: min(460px, 100%); overflow: hidden; color: var(--text);
+  background: var(--solid); border: 1px solid var(--hairline); border-radius: var(--radius-md);
+}
+.chat-card.live { box-shadow: 0 1px 2px color-mix(in srgb, var(--shadow-color) 50%, transparent), 0 10px 28px var(--shadow-color); }
+.chat-card-head {
+  display: flex; align-items: center; gap: 8px; min-height: 52px; padding: 0 10px 0 14px;
+  font-size: 13px; line-height: 1.4;
+}
+.chat-card-head:not(:last-child) { border-bottom: 1px solid var(--hairline); }
+.chat-card-app-icon {
+  flex: none; width: 20px; height: 20px; border-radius: 6px; overflow: hidden;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.chat-card-app-icon.solid { background: color-mix(in srgb, var(--text) 7%, transparent); font-size: 13px; line-height: 1; }
+.chat-card-app-icon img { width: 100%; height: 100%; object-fit: cover; }
+.chat-card-app { flex: none; font-weight: 600; }
+.chat-card-title { flex: 1; min-width: 0; color: var(--muted); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-card-undo {
+  flex: none; margin-left: auto; height: 32px; padding: 0 12px 0 10px; display: inline-flex; align-items: center; gap: 6px;
+  border: 1px solid color-mix(in srgb, var(--text) 14%, transparent); border-radius: 999px;
+  background: transparent; color: var(--text); font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap;
+}
+.chat-card-undo:hover:not(:disabled) { background: color-mix(in srgb, var(--text) 6%, transparent); }
+.chat-card-undo:disabled, .chat-card-row-undo:disabled { opacity: 0.5; cursor: default; }
+.chat-card-value { padding: 12px 14px; font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.chat-card-value:not(:last-child) { border-bottom: 1px solid var(--hairline); }
+.chat-card-row { display: flex; align-items: center; gap: 12px; padding: 10px 14px; color: inherit; text-decoration: none; }
+.chat-card-row.acts { padding-right: 10px; }
+.chat-card-row.single { padding: 12px 14px; }
+.chat-card-row:not(:last-child) { border-bottom: 1px solid var(--hairline); }
+a.chat-card-row:hover { background: color-mix(in srgb, var(--text) 4%, transparent); }
+.chat-card-row.removed { background: color-mix(in srgb, var(--text) 4%, transparent); }
+.chat-card-mark {
+  flex: none; width: 18px; height: 18px; border-radius: 50%;
+  border: 1.5px solid color-mix(in srgb, var(--text) 35%, transparent);
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.chat-card-mark.removed { border-style: dashed; border-color: color-mix(in srgb, var(--text) 30%, transparent); }
+.chat-card-mark.done { border: none; background: var(--success); color: #fff; }
+.chat-card-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.chat-card-name { font-size: 14px; font-weight: 600; line-height: 1.35; color: inherit; text-decoration: none; overflow-wrap: anywhere; }
+a.chat-card-name:hover, a.chat-card-row:hover .chat-card-name { color: var(--link); }
+.chat-card-row.done .chat-card-name { font-weight: 500; color: var(--muted); }
+.chat-card-row.removed .chat-card-name { font-weight: 500; color: var(--muted); text-decoration: line-through; }
+.chat-card-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; font-size: 12px; line-height: 1.4; color: var(--muted); font-variant-numeric: tabular-nums; }
+.chat-card-pill {
+  flex: none; font-size: 12px; font-weight: 600; line-height: 1.4; padding: 3px 9px; border-radius: 999px; white-space: nowrap;
+  color: var(--muted); background: color-mix(in srgb, var(--text) 7%, transparent);
+}
+/* The status colors pulled halfway to the text, as --success-text is: words on a pale tint need 4.5:1. */
+.chat-card-pill.ok { color: var(--success-text); background: color-mix(in srgb, var(--success) 14%, transparent); }
+.chat-card-pill.warn { color: color-mix(in srgb, var(--warning) 50%, var(--text)); background: color-mix(in srgb, var(--warning) 14%, transparent); }
+.chat-card-row-undo {
+  flex: none; width: 32px; height: 32px; padding: 0; border: none; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent; color: var(--muted); cursor: pointer;
+}
+.chat-card-row-undo:hover:not(:disabled) { background: color-mix(in srgb, var(--text) 7%, transparent); color: var(--text); }
+.chat-card-chevron { flex: none; color: var(--muted); }
+.chat-card-note { margin: 0; padding: 8px 14px; font-size: 12px; color: var(--muted); }
+.chat-card-note.error { color: var(--danger); }
 .chat-steer { font-size: 12px; padding: 6px 10px; border-left: 2px solid var(--link); color: var(--text); white-space: pre-wrap; }
 .chat-steer b { color: var(--link); font-weight: 600; margin-right: 4px; }
 .chat-steer.pending { opacity: 0.6; border-left-style: dashed; }
