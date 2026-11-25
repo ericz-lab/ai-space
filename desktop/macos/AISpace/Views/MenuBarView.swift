@@ -10,6 +10,8 @@ struct MenuBarView: View {
         VStack(alignment: .leading, spacing: 10) {
             if store.connections.isEmpty {
                 Text("No connection yet.").foregroundStyle(.secondary)
+                // The main window opens on adding one (FirstLaunchView) while there is none.
+                Button("Add Connection…") { model.showMainWindow() }
             }
             ForEach(store.connections) { c in
                 if let live = model.lives[c.id] { ConnectionSummary(model: model, connection: c, live: live) }

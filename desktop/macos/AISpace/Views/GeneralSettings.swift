@@ -11,6 +11,10 @@ struct GeneralSettings: View {
             Picker("Quick Chat shortcut", selection: $prefs.quickChat) {
                 ForEach(Preferences.Shortcut.allCases) { Text($0.label).tag($0) }
             }
+            if prefs.quickChatTaken {
+                Text("Another app already uses this shortcut, so it does nothing here. Pick another one.")
+                    .font(.caption).foregroundStyle(Theme.danger).fixedSize(horizontal: false, vertical: true)
+            }
             Text("Opens a chat with an agent over any app. Services > Ask ai-space sends selected text to it, and Shortcuts can open aispace://chat?agent=<app>/<agent>&text=… — a message is never sent without you.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Toggle("Hold fn to talk", isOn: $prefs.voiceInput)

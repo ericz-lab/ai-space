@@ -36,7 +36,8 @@ struct ChatView: View {
                                        cardsActionable: !message.cards.isEmpty && chat.cardsActionable(message), cardStores: chat.cardStores)
                         }
                         if let error = chat.error {
-                            // An earlier chat that would not open; a failed turn shows in its own reply.
+                            // An earlier chat that would not open, or a Stop the Space did not take; a
+                            // failed turn shows in its own reply.
                             Label(error, systemImage: "exclamationmark.triangle").font(.callout).foregroundStyle(Theme.danger)
                         }
                         Color.clear.frame(height: 1).id("end")
@@ -80,7 +81,7 @@ struct ChatView: View {
             composer
         }
         .onDrop(of: [UTType.image.identifier, UTType.fileURL.identifier], isTargeted: nil) { providers in
-            importImages(providers)
+            chat.importImages(providers)
             return true
         }
         .onAppear { focused = true }
@@ -96,42 +97,9 @@ struct ChatView: View {
         }
     }
 
-    private func importImage(url: URL) {
-        let access = url.startAccessingSecurityScopedResource()
-        defer { if access { url.stopAccessingSecurityScopedResource() } }
-        do { appendImage(try PictureImport.read(url), name: url.lastPathComponent) }
-        catch { chat.imageError = String(localized: "Could not read this image.") }
-    }
+    private func importImage(url: URL) { chat.importImage(url: url) }
 
     private func appendImage(_ data: Data, name: String) { chat.attach(data, name: name) }
-
-    private func importImages(_ providers: [NSItemProvider]) {
-        guard providers.count + chat.images.count + chat.pendingImageImports <= 4 else {
-            chat.imageError = String(localized: "Add up to 4 images, 5 MB each and 10 MB in total.")
-            return
-        }
-        for provider in providers {
-            if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
-                chat.pendingImageImports += 1
-                _ = provider.loadDataRepresentation(forTypeIdentifier: UTType.fileURL.identifier) { data, _ in
-                    Task { @MainActor in
-                        defer { chat.pendingImageImports -= 1 }
-                        guard let data, let url = URL(dataRepresentation: data, relativeTo: nil) else { chat.imageError = String(localized: "Could not read this image."); return }
-                        importImage(url: url)
-                    }
-                }
-            } else if let type = provider.registeredTypeIdentifiers.first(where: { UTType($0)?.conforms(to: .image) == true }) {
-                chat.pendingImageImports += 1
-                _ = provider.loadDataRepresentation(forTypeIdentifier: type) { data, _ in
-                    Task { @MainActor in
-                        defer { chat.pendingImageImports -= 1 }
-                        guard let data else { chat.imageError = String(localized: "Could not read this image."); return }
-                        appendImage(data, name: "Image")
-                    }
-                }
-            }
-        }
-    }
 
     /// What the field says it takes: a message, or during a turn a message for that turn.
     private var placeholder: String {
@@ -167,9 +135,13 @@ struct ChatView: View {
             // still be ended while the field is in use.
             let empty = (chat.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && chat.images.isEmpty) || chat.pendingImageImports > 0 || offlineMachine != nil
             if chat.busy {
-                Button { chat.stop() } label: { Image(systemName: "stop.circle.fill").font(.system(size: 26)) }
+                Button { chat.stop() } label: {
+                    if chat.stopping { ProgressView().controlSize(.small).frame(width: 26, height: 26) }
+                    else { Image(systemName: "stop.circle.fill").font(.system(size: 26)) }
+                }
                     .buttonStyle(.borderless).foregroundStyle(Theme.danger)
-                    .help("Stop").accessibilityLabel(Text("Stop"))
+                    .disabled(chat.stopping)
+                    .help(chat.stopping ? Text("Stopping…") : Text("Stop")).accessibilityLabel(chat.stopping ? Text("Stopping…") : Text("Stop"))
             }
             if !chat.busy || !empty {
                 Button { chat.send() } label: { Image(systemName: "arrow.up.circle.fill").font(.system(size: 26)) }
@@ -859,6 +831,46 @@ struct ChatImagePreview: View {
 
 @MainActor
 extension ChatController {
+    /// Reads a picture file into the next message, or says it could not.
+    func importImage(url: URL) {
+        let access = url.startAccessingSecurityScopedResource()
+        defer { if access { url.stopAccessingSecurityScopedResource() } }
+        do { attach(try PictureImport.read(url), name: url.lastPathComponent) }
+        catch { imageError = String(localized: "Could not read this image.") }
+    }
+
+    /// Pictures dropped on a conversation, the main window's or Quick Chat's: more than fit, or
+    /// one that cannot be read, says so under the field instead of being left out unseen.
+    func importImages(_ providers: [NSItemProvider]) {
+        guard ChatImage.fits(adding: providers.count, attached: images.count, pending: pendingImageImports) else {
+            imageError = String(localized: "Add up to 4 images, 5 MB each and 10 MB in total.")
+            return
+        }
+        for provider in providers {
+            if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
+                pendingImageImports += 1
+                _ = provider.loadDataRepresentation(forTypeIdentifier: UTType.fileURL.identifier) { data, _ in
+                    Task { @MainActor in
+                        defer { self.pendingImageImports -= 1 }
+                        guard let data, let url = URL(dataRepresentation: data, relativeTo: nil) else { self.imageError = String(localized: "Could not read this image."); return }
+                        self.importImage(url: url)
+                    }
+                }
+            } else if let type = provider.registeredTypeIdentifiers.first(where: { UTType($0)?.conforms(to: .image) == true }) {
+                pendingImageImports += 1
+                _ = provider.loadDataRepresentation(forTypeIdentifier: type) { data, _ in
+                    Task { @MainActor in
+                        defer { self.pendingImageImports -= 1 }
+                        guard let data else { self.imageError = String(localized: "Could not read this image."); return }
+                        self.attach(data, name: "Image")
+                    }
+                }
+            } else {
+                imageError = String(localized: "Could not read this image.")
+            }
+        }
+    }
+
     /// Adds a picture to the next message: PNG, JPEG, GIF or WebP as it is, anything else as PNG,
     /// within the size the Space takes. The composer and the floating ball both come here.
     func attach(_ data: Data, name: String) {

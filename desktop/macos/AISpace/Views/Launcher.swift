@@ -203,7 +203,7 @@ struct LauncherPage: View {
             ContentUnavailableView {
                 Label("Nothing on this screen yet", systemImage: "square.grid.2x2")
             } description: {
-                Text("Right-click an app, agent or widget on Home and choose Add to Panel. Right-click here for the screen's own actions.")
+                Text("Right-click an app, agent or widget on Home and choose Add to Screen. Right-click here for the screen's own actions.")
             } actions: {
                 Button("Open Home") { withAnimation { model.showPage(Pager.home) } }.buttonStyle(.borderedProminent)
             }
@@ -418,10 +418,10 @@ struct EntryMenu: View {
         if screens.count <= 1 {
             if screen == nil {
                 let on = Screens.isPinned(screens, Screens.home, entry.key)
-                Button(on ? "Remove from Panel" : "Add to Panel") { model.togglePin(entry.key, screen: Screens.home, in: connection) }
+                Button(on ? "Remove from Screen" : "Add to Screen") { model.togglePin(entry.key, screen: Screens.home, in: connection) }
             }
         } else {
-            Menu("Add to Panel") {
+            Menu("Add to Screen") {
                 ForEach(Array(screens.enumerated()), id: \.element.id) { index, s in
                     Toggle(isOn: Binding(get: { s.items.contains(entry.key) }, set: { _ in model.togglePin(entry.key, screen: s.id, in: connection) })) {
                         Text(verbatim: Screens.title(at: index))
@@ -543,6 +543,10 @@ struct OmniboxField: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 6)
+                if let problem = model.askProblem {
+                    Text(verbatim: problem).font(.caption).foregroundStyle(Theme.danger)
+                        .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 6)
+                }
             }
         }
         .frame(maxWidth: 640)

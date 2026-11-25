@@ -77,10 +77,10 @@ struct PinMenu: View {
         if screens.count <= 1 {
             if screen == nil {
                 let on = Screens.isPinned(screens, Screens.home, key)
-                Button(on ? "Remove from Panel" : "Add to Panel") { model.togglePin(key, screen: Screens.home, in: connection) }
+                Button(on ? "Remove from Screen" : "Add to Screen") { model.togglePin(key, screen: Screens.home, in: connection) }
             }
         } else {
-            Menu("Add to Panel") {
+            Menu("Add to Screen") {
                 ForEach(Array(screens.enumerated()), id: \.element.id) { index, s in
                     Toggle(isOn: Binding(get: { s.items.contains(key) }, set: { _ in model.togglePin(key, screen: s.id, in: connection) })) {
                         Text(verbatim: Screens.title(at: index))

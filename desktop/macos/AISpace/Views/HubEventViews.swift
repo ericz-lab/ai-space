@@ -284,6 +284,16 @@ struct InboxPage: View {
                             }
                             .tint(Theme.success)
                         }
+                        // The swipe's actions, and reading, for a pointer that does not swipe.
+                        .contextMenu {
+                            Button { Task { await store.mark(item.thread, done: item.done != true) } } label: {
+                                Label(item.done == true ? String(localized: "Reopen") : String(localized: "Done"), systemImage: item.done == true ? "arrow.uturn.backward" : "checkmark")
+                            }
+                            Button { Task { await store.mark(item.thread, read: item.unread == true) } } label: {
+                                Label(item.unread == true ? String(localized: "Mark as Read") : String(localized: "Mark as Unread"),
+                                      systemImage: item.unread == true ? "envelope.open" : "circle.fill")
+                            }
+                        }
                 }
             }
         }

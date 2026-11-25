@@ -13,6 +13,8 @@ final class AgentChats: ObservableObject {
     @Published private(set) var current: ChatController
     /// The agent's stored conversations, newest first, to pick one up again.
     @Published private(set) var sessions: [ChatSessionInfo] = []
+    /// The last read of the stored conversations failed; the sidebar offers to read them again.
+    @Published private(set) var sessionsFailed = false
 
     /// A turn may install or change apps, even when it ends with an error or Stop.
     var onTurnEnded: () -> Void = {}
@@ -48,8 +50,9 @@ final class AgentChats: ObservableObject {
     }
 
     /// Shows an empty conversation: the one on show when nothing was said in it yet, else a new one.
-    func newConversation() {
-        if let id = ChatRoster.blankConversation(items, current: current.id), let chat = conversation(id) {
+    /// `untouched` passes over one with a draft or pictures waiting (ChatRoster.blankConversation).
+    func newConversation(untouched: Bool = false) {
+        if let id = ChatRoster.blankConversation(items, current: current.id, untouched: untouched), let chat = conversation(id) {
             show(chat)
         } else {
             show(make())
@@ -82,8 +85,12 @@ final class AgentChats: ObservableObject {
     }
 
     func loadSessions() async {
-        guard let data = try? await api.data("\(agent.base)/sessions") else { return }
-        sessions = (try? Hub.rows(ChatSessionInfo.self, "sessions", from: data)) ?? []
+        do {
+            sessions = try Hub.rows(ChatSessionInfo.self, "sessions", from: try await api.data("\(agent.base)/sessions"))
+            sessionsFailed = false
+        } catch {
+            sessionsFailed = true
+        }
     }
 
     /// The sidebar's rows (ChatRoster.rows).

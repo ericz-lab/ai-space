@@ -120,7 +120,11 @@ final class AppModel: ObservableObject {
     }
     /// The screen last shown, for the screen actions and for coming back to the screens.
     private(set) var homePage = Screens.home
-    @Published var query = ""
+    @Published var query = "" {
+        didSet { if query != oldValue { askProblem = nil } }
+    }
+    /// Why the Home box's question could not go to Space Assistant (`ask`); cleared as the text changes.
+    @Published var askProblem: String?
     /// Asks the library's search field for the keyboard (⌘F).
     let focusSearch = PassthroughSubject<Void, Never>()
     /// The screen whose entries are being rearranged, in a sheet.
@@ -586,8 +590,10 @@ final class AppModel: ObservableObject {
 
     // MARK: Main window
 
-    /// Reloads what is on show: the app's page, the web panel, or the launcher's catalogue.
+    /// Reloads what is on show: the front app window's page, else the app's page, the web panel,
+    /// or the launcher's catalogue.
     func reload() {
+        if let session = appWindows.keyWindowSession { return session.reload() }
         guard let c = selected else { return }
         switch destination {
         case .app(let id): tab(id, connection: c.id)?.session.reload()
@@ -599,6 +605,10 @@ final class AppModel: ObservableObject {
     }
 
     func openInBrowser() {
+        if let session = appWindows.keyWindowSession {
+            NSWorkspace.shared.open(session.appBrowserURL)
+            return
+        }
         guard let c = selected else { return }
         if case .app(let id) = destination, let tab = tab(id, connection: c.id) {
             NSWorkspace.shared.open(tab.session.appBrowserURL)
@@ -922,11 +932,26 @@ final class AppModel: ObservableObject {
     /// The Home box's question for Space Assistant (docs/panel.md#omnibox): a new conversation on
     /// the selected Space, shown in the main window. While the assistant still answers another
     /// question, this one starts a conversation beside it; that turn carries on.
+    /// When the question cannot be asked yet, the box keeps the text and says why under it.
     func ask(_ text: String) {
-        guard let c = selected, let agent = lives[c.id]?.agents.first(where: { $0.app == "space" && $0.peer == nil }),
-              let chats = conversations(AgentRef(connection: c.id, agent: agent.id)) else { return }
+        guard let c = selected else { return }
+        let live = lives[c.id]
+        guard let agent = live?.agents.first(where: { $0.app == "space" && $0.peer == nil }),
+              let chats = conversations(AgentRef(connection: c.id, agent: agent.id)) else {
+            switch live?.status {
+            case .signInNeeded?: askProblem = String(localized: "Sign in to this Space to ask Space Assistant.")
+            case .offline?: askProblem = String(localized: "This Space cannot be reached, so Space Assistant cannot answer. Try again when it is back.")
+            case .ok?: askProblem = String(localized: "This Space has no Space Assistant.")
+            case .unknown?, nil:
+                askProblem = String(localized: "Space Assistant is not ready yet. Try again in a moment.")
+                if let live { Task { await live.refresh(catalogue: true) } }
+            }
+            return
+        }
+        askProblem = nil
         query = ""
-        chats.newConversation()
+        // A conversation holding an unsent draft or pictures keeps them: the question gets its own.
+        chats.newConversation(untouched: true)
         let chat = chats.current
         chat.images = []
         chat.imageError = nil

@@ -30,10 +30,13 @@ enum ChatRoster {
     static let keep = 4
 
     /// The conversation New Conversation shows instead of opening another one: the one on show
-    /// when nothing was said in it yet, else another such one, else nil (open a new one).
-    static func blankConversation(_ items: [Item], current: UUID) -> UUID? {
-        if let c = items.first(where: { $0.id == current }), c.blank { return current }
-        return items.filter(\.blank).max { $0.shown < $1.shown }?.id
+    /// when nothing was said in it yet, else another such one, else nil (open a new one). With
+    /// `untouched`, one with text or pictures waiting in its field is left alone: a question asked
+    /// from elsewhere (the Home box) goes into its own conversation rather than over that draft.
+    static func blankConversation(_ items: [Item], current: UUID, untouched: Bool = false) -> UUID? {
+        let usable = items.filter { $0.blank && !(untouched && $0.composing) }
+        if usable.contains(where: { $0.id == current }) { return current }
+        return usable.max { $0.shown < $1.shown }?.id
     }
 
     /// The open conversation that continues a stored session, to show it rather than load it twice.
@@ -72,13 +75,13 @@ enum ChatRoster {
         }
     }
 
-    /// The conversations to let go: never the one on show or a busy one. An empty one goes at once,
-    /// even with a draft (New Conversation would have shown it again rather than a new one); of the
-    /// others, one with something waiting in its field stays and the `keep` shown last stay. A
-    /// stored one can be opened again from the history.
+    /// The conversations to let go: never the one on show or a busy one. An empty one goes at once
+    /// unless something waits in its field (a question asked from the Home box left it for one of
+    /// its own; New Conversation shows it again); of the others, one with something waiting in its
+    /// field stays and the `keep` shown last stay. A stored one can be opened again from the history.
     static func pruned(_ items: [Item], current: UUID, keep: Int = ChatRoster.keep) -> Set<UUID> {
         let idle = items.filter { $0.id != current && !$0.busy }
-        var drop = Set(idle.filter { !$0.hasMessages }.map(\.id))
+        var drop = Set(idle.filter { !$0.hasMessages && !$0.composing }.map(\.id))
         let rest = idle.filter { $0.hasMessages && !$0.composing }.sorted { $0.shown > $1.shown }
         drop.formUnion(rest.dropFirst(keep).map(\.id))
         return drop
@@ -116,6 +119,19 @@ enum ChatRoster {
             return Row(id: "s:\(s.sid)", conversation: here?.id, sid: s.sid, title: title, ts: s.ts, busy: here?.busy == true || elsewhere)
         }
         return fresh + saved
+    }
+
+    /// What the sidebar says under Recent besides its rows.
+    enum HistoryNote: Equatable {
+        /// Nothing to list, and the stored conversations were read.
+        case empty
+        /// The stored conversations could not be read: saying "none" would be wrong.
+        case failed
+    }
+
+    static func historyNote(rows: Int, loadFailed: Bool) -> HistoryNote? {
+        if loadFailed { return .failed }
+        return rows == 0 ? .empty : nil
     }
 
     /// A conversation's title before it is stored: the first line of its first message.
