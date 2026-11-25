@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readCatalog } from "../runtimes/magpie.ts";
 import { GATEWAY_PREFIX, createGatewayRoutes, gatewayBase } from "./api.ts";
-import { parseGatewayYaml, setGatewayTiersText } from "./config.ts";
+import { IMAGE_TIER_IGNORED, parseGatewayYaml, setGatewayTiersText } from "./config.ts";
 import { PriceBook, PRICES_FILE } from "./prices.ts";
 import { ModelGateway } from "./service.ts";
 import { GatewayTokens } from "./tokens.ts";
@@ -345,11 +345,11 @@ describe("tiers: in gateway.yaml", () => {
   const head = "# my gateway\nproviders:\n  ds: { preset: deepseek, apiKeyEnv: DS }   # deepseek\n  glm:\n    preset: zai\n    apiKeyEnv: ZAI\n    models: [glm-4.6]\n  openai: { preset: openai, apiKeyEnv: OA }\ngroups:\n  fast: [ds/deepseek-chat, glm/glm-4.5-air]\n";
   const env = { DS: "k", ZAI: "k" };
 
-  test("each tier any vendor's model or a group; image a provider with an openai base", () => {
+  test("each tier any vendor's model or a group; an old image tier loads and is ignored", () => {
     const { config, warnings } = parseGatewayYaml(`${head}tiers:\n  basic: fast\n  intermediate: ds/deepseek-chat\n  advanced: glm/glm-4.6\n  image: openai/gpt-image-1\n`, env);
     expect(config.tiers).toEqual({ basic: "fast", intermediate: "ds/deepseek-chat", advanced: "glm/glm-4.6", image: "openai/gpt-image-1" });
-    // openai is off (OA unset): a warning for it, none for the tiers.
-    expect(warnings).toEqual(["model gateway provider openai is off: OA is not set"]);
+    // openai is off (OA unset): a warning for it, none for the text tiers; the old picture tier is ignored.
+    expect(warnings).toEqual(["model gateway provider openai is off: OA is not set", IMAGE_TIER_IGNORED]);
     expect(parseGatewayYaml(head, env).config.tiers).toEqual({});
     expect(() => parseGatewayYaml(`${head}tiers:\n  huge: fast\n`, env)).toThrow(/tiers has unknown key "huge"/);
     expect(() => parseGatewayYaml(`${head}tiers: [fast]\n`, env)).toThrow(/tiers must map/);
@@ -361,7 +361,8 @@ describe("tiers: in gateway.yaml", () => {
     expect(config.tiers).toEqual({ basic: "kimi/k2", junior: "openai/gpt-5", image: "ds/deepseek-chat" });
     expect(warnings).toContain("gateway.yaml: tiers.basic: kimi/k2 names provider kimi, which is not in this file");
     expect(warnings).toContain("gateway.yaml: tiers.junior: openai/gpt-5 has no provider with a messages base (text go there)");
-    expect(warnings).toContain("gateway.yaml: tiers.image: ds/deepseek-chat has no provider with a openai base (pictures go there)");
+    // The picture tier is gone: it loads, stays, and is said to be ignored.
+    expect(warnings).toContain(IMAGE_TIER_IGNORED);
   });
 
   test("Settings edits the text: comments and order stay, the block is replaced, added at the end, or removed", () => {

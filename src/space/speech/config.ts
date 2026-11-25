@@ -7,6 +7,7 @@ import {
   SPEECH_KINDS,
   SPEECH_ROLES,
   VOICE_PATTERN,
+  type MinimaxSpec,
   type OpenAiSpec,
   type Price,
   type ProviderSpec,
@@ -34,6 +35,9 @@ import {
 
 export const PROVIDERS_FILE = "providers.yaml";
 export const OPENAI_URL = "https://api.openai.com/v1";
+/** MiniMax's two sites: a key from one is refused at the other (docs/speech.md#kinds). */
+export const MINIMAX_SITES = { cn: "https://api.minimaxi.com", intl: "https://api.minimax.io" } as const;
+export const MINIMAX_DEFAULT_MODELS = { asr: "asr-1.0", tts: "speech-2.8-turbo" } as const;
 
 export type LoadedSpeech = { config: SpeechConfig; source: "file" | "builtin"; warnings: string[] };
 
@@ -156,6 +160,7 @@ function parseProvider(name: string, kind: SpeechKind, raw: Record<string, unkno
   const allowed: Record<SpeechKind, string[]> = {
     "voice-studio": ["kind", "app", "machine"],
     "openai-compatible": ["kind", "url", "apiKeyEnv", "asrModel", "ttsModel", "voice", "voices", "selfHosted", "responseFormat", "price", "gateway", "provider"],
+    minimax: ["kind", "url", "site", "apiKeyEnv", "asrModel", "ttsModel", "voice", "voices", "price", "gateway", "provider"],
     dashscope: ["kind", "apiKeyEnv", "url", "asrModel", "ttsModel", "voice", "voices", "price"],
   };
   for (const key of Object.keys(raw)) if (!allowed[kind].includes(key)) throw new Error(`${ctx} has unknown key "${key}"`);
@@ -183,14 +188,7 @@ function parseProvider(name: string, kind: SpeechKind, raw: Record<string, unkno
         // Through a gateway a model is the gateway's id for it: `<provider>/<model>`.
         return via ? `${via.provider}/${v}` : v;
       };
-      const voice = optionalString(raw.voice, `${ctx}: voice`);
-      if (voice !== undefined && !VOICE_PATTERN.test(voice)) throw new Error(`${ctx}: voice must be a voice name`);
-      let voices: string[] | undefined;
-      if (raw.voices !== undefined) {
-        if (!Array.isArray(raw.voices) || !raw.voices.every((v) => typeof v === "string" && VOICE_PATTERN.test(v.trim()))) throw new Error(`${ctx}: voices must be a list of voice names`);
-        voices = (raw.voices as string[]).map((v) => v.trim());
-        if (voice && !voices.includes(voice)) throw new Error(`${ctx}: voice ${voice} is not in its voices list`);
-      }
+      const { voice, voices } = parseVoices(raw, ctx);
       if (raw.selfHosted !== undefined && typeof raw.selfHosted !== "boolean") throw new Error(`${ctx}: selfHosted must be true or false`);
       const responseFormat = optionalString(raw.responseFormat, `${ctx}: responseFormat`);
       if (responseFormat !== undefined && responseFormat !== "json" && responseFormat !== "verbose_json") throw new Error(`${ctx}: responseFormat must be json or verbose_json`);
@@ -204,11 +202,63 @@ function parseProvider(name: string, kind: SpeechKind, raw: Record<string, unkno
       };
       return { spec, ...(apiKeyEnv && !apiKey ? { off: `${apiKeyEnv} is not set` } : {}) };
     }
+    case "minimax":
+      return parseMinimax(name, raw, ctx, env);
     case "dashscope": {
       const apiKeyEnv = optionalString(raw.apiKeyEnv, `${ctx}: apiKeyEnv`);
       return { spec: { name, kind, ...(apiKeyEnv ? { apiKeyEnv } : {}) }, off: "the dashscope kind is not built yet (docs/speech.md#later)" };
     }
   }
+}
+
+function parseVoices(raw: Record<string, unknown>, ctx: string): { voice?: string; voices?: string[] } {
+  const voice = optionalString(raw.voice, `${ctx}: voice`);
+  if (voice !== undefined && !VOICE_PATTERN.test(voice)) throw new Error(`${ctx}: voice must be a voice name`);
+  let voices: string[] | undefined;
+  if (raw.voices !== undefined) {
+    if (!Array.isArray(raw.voices) || !raw.voices.every((v) => typeof v === "string" && VOICE_PATTERN.test(v.trim()))) throw new Error(`${ctx}: voices must be a list of voice names`);
+    voices = (raw.voices as string[]).map((v) => v.trim());
+    if (voice && !voices.includes(voice)) throw new Error(`${ctx}: voice ${voice} is not in its voices list`);
+  }
+  return { ...(voice ? { voice } : {}), ...(voices ? { voices } : {}) };
+}
+
+/**
+ * `kind: minimax`: either `gateway: space` with `provider:` (the key and the host are that
+ * gateway.yaml provider's), or a hand-written entry with `apiKeyEnv` and `site: cn | intl` or `url`.
+ * Models are MiniMax's own ids, never `<provider>/<model>`: nothing goes through the gateway.
+ */
+function parseMinimax(name: string, raw: Record<string, unknown>, ctx: string, env: Record<string, string | undefined>): { spec: MinimaxSpec; off?: string } {
+  const via = optionalString(raw.gateway, `${ctx}: gateway`);
+  const provider = optionalString(raw.provider, `${ctx}: provider`);
+  const model = (key: string, fallback: string) => {
+    const v = optionalString(raw[key], `${ctx}: ${key}`) ?? fallback;
+    if (!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(v)) throw new Error(`${ctx}: ${key} must name a model`);
+    return v;
+  };
+  const { voice, voices } = parseVoices(raw, ctx);
+  const price = parsePrice(raw.price, ctx);
+  const common = {
+    name, kind: "minimax" as const, asrModel: model("asrModel", MINIMAX_DEFAULT_MODELS.asr), ttsModel: model("ttsModel", MINIMAX_DEFAULT_MODELS.tts),
+    ...(voice ? { voice } : {}), ...(voices ? { voices } : {}), ...(price ? { price } : {}),
+  };
+  if (via !== undefined || provider !== undefined) {
+    if (via !== "space") throw new Error(`${ctx}: a minimax provider takes its key from the built-in model gateway only: gateway: space`);
+    if (!provider || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(provider)) throw new Error(`${ctx}: gateway: space needs provider: the gateway's provider name`);
+    if (raw.url !== undefined || raw.site !== undefined || raw.apiKeyEnv !== undefined) throw new Error(`${ctx}: through a gateway provider the host and the key are its own; drop url, site and apiKeyEnv`);
+    return { spec: { ...common, url: "", gateway: { via: "space", provider } } };
+  }
+  const site = optionalString(raw.site, `${ctx}: site`);
+  if (site !== undefined && site !== "cn" && site !== "intl") throw new Error(`${ctx}: site must be cn (api.minimaxi.com) or intl (api.minimax.io)`);
+  const given = optionalString(raw.url, `${ctx}: url`);
+  if (given !== undefined && site !== undefined) throw new Error(`${ctx}: give url or site, not both`);
+  if (given === undefined && site === undefined) throw new Error(`${ctx}: name the site (site: cn or site: intl): a key from one is refused at the other`);
+  const url = (given ?? MINIMAX_SITES[site as "cn" | "intl"]).replace(/\/+$/, "");
+  if (!/^https?:\/\/[^\s/]+$/.test(url)) throw new Error(`${ctx}: url must be the API's origin (https://api.minimaxi.com), without a path`);
+  const apiKeyEnv = optionalString(raw.apiKeyEnv, `${ctx}: apiKeyEnv`);
+  if (!apiKeyEnv || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(apiKeyEnv)) throw new Error(`${ctx}: apiKeyEnv must name the environment variable that holds the key`);
+  const apiKey = env[apiKeyEnv]?.trim() || undefined;
+  return { spec: { ...common, url, apiKeyEnv, ...(apiKey ? { apiKey } : {}) }, ...(apiKey ? {} : { off: `${apiKeyEnv} is not set` }) };
 }
 
 /**
@@ -231,17 +281,19 @@ function parseGatewayShorthand(raw: Record<string, unknown>, ctx: string): OpenA
 
 /**
  * Speech providers that name a provider of the built-in model gateway it does not have, or one
- * without an `openai` base, or one that is off: turned off with the reason (a warning each), as a
+ * without the base they need (`openai` for openai-compatible, either for minimax), or one that is off: turned off with the reason (a warning each), as a
  * provider whose key is missing is.
  */
-export function checkGatewayProviders(config: SpeechConfig, has: (provider: string) => { off?: string; openai: boolean } | undefined, configured: boolean): string[] {
+export function checkGatewayProviders(config: SpeechConfig, has: (provider: string) => { off?: string; openai: boolean; messages?: boolean } | undefined, configured: boolean): string[] {
   const warnings: string[] = [];
   for (const p of config.providers) {
-    if (p.kind !== "openai-compatible" || p.gateway?.via !== "space" || config.off[p.name]) continue;
+    if ((p.kind !== "openai-compatible" && p.kind !== "minimax") || p.gateway?.via !== "space" || config.off[p.name]) continue;
     const g = has(p.gateway.provider);
+    // A minimax provider needs only a host to read: either base names it.
     const why = !configured ? "the built-in model gateway is off (no gateway.yaml)"
       : !g ? `${p.gateway.provider} is not a provider of gateway.yaml`
-      : !g.openai ? `the model gateway's provider ${p.gateway.provider} has no openai base`
+      : p.kind === "openai-compatible" && !g.openai ? `the model gateway's provider ${p.gateway.provider} has no openai base`
+      : p.kind === "minimax" && !g.openai && !g.messages ? `the model gateway's provider ${p.gateway.provider} has no base to read the host from`
       : g.off ? `the model gateway's provider ${p.gateway.provider} is off (${g.off})`
       : undefined;
     if (why) {

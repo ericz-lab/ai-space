@@ -66,7 +66,11 @@ export const GATEWAY_SITES: Record<string, Record<GatewaySite, Pick<GatewayProvi
 
 export type LoadedGateway = { config: GatewayConfig; warnings: string[] };
 
-export function parseGatewayYaml(text: string, env: Record<string, string | undefined> = process.env): LoadedGateway {
+/**
+ * `runtimes`: the names of runtimes.yaml's runtimes. A provider named like one is refused: an app's
+ * `name/model` goes to that runtime (docs/model.md#models), so the provider could never be named.
+ */
+export function parseGatewayYaml(text: string, env: Record<string, string | undefined> = process.env, opts: { runtimes?: readonly string[] } = {}): LoadedGateway {
   let doc: unknown;
   try {
     doc = Bun.YAML.parse(text);
@@ -84,6 +88,7 @@ export function parseGatewayYaml(text: string, env: Record<string, string | unde
   const providers: GatewayProvider[] = [];
   for (const [name, raw] of Object.entries(doc.providers)) {
     const p = parseProvider(name, raw, env);
+    if (opts.runtimes?.includes(name)) throw new Error(runtimeClash(name));
     providers.push(p);
     if (p.disabled) off[name] = "turned off";
     else if (p.apiKeyEnv && !p.apiKey) {
@@ -169,8 +174,14 @@ function parseGroups(raw: unknown, providers: GatewayProvider[]): Record<string,
 }
 
 /**
+ * An old `tiers.image` (the picture tier, before a picture call named its model): it still loads,
+ * is kept in the file and shown on the page with this warning, and nothing reads it.
+ */
+export const IMAGE_TIER_IGNORED = `${GATEWAY_FILE}: tiers.image is ignored: the gateway has no picture tier; an app's picture call names its picture model (provider/model)`;
+
+/**
  * `tiers:`: the model or group behind each ai-space tier (basic, junior, intermediate, advanced)
- * and behind `image`. Each should name a group of this file or `provider/model` with a provider of
+ * and behind `image` (ignored, above). Each should name a group of this file or `provider/model` with a provider of
  * this file that has the base the tier needs: `messages` for text, `openai` for pictures (a group:
  * at least one member that has it). One that does not (a provider removed since) stays, with a
  * warning: its calls fail with the gateway's reason, and the rest of the gateway still answers.
@@ -183,8 +194,11 @@ function parseTiers(raw: unknown, providers: GatewayProvider[], groups: Record<s
     if (!(GATEWAY_TIERS as readonly string[]).includes(tier)) throw new Error(`${GATEWAY_FILE}: tiers has unknown key "${tier}" (${GATEWAY_TIERS.join(", ")})`);
     if (value === null || value === undefined || value === "") continue;
     if (typeof value !== "string" || !GATEWAY_MODEL_PATTERN.test(value.trim())) throw new Error(`${GATEWAY_FILE}: tiers.${tier} must be a model or a group`);
-    const why = tierProblem(tier as GatewayTier, value.trim(), providers, groups);
-    if (why) warnings.push(`${GATEWAY_FILE}: tiers.${tier}: ${why}`);
+    if (tier === "image") warnings.push(IMAGE_TIER_IGNORED);
+    else {
+      const why = tierProblem(tier as GatewayTier, value.trim(), providers, groups);
+      if (why) warnings.push(`${GATEWAY_FILE}: tiers.${tier}: ${why}`);
+    }
     out[tier as GatewayTier] = value.trim();
   }
   return out;
@@ -216,10 +230,15 @@ export function splitModelId(id: string): { provider: string; model: string } | 
 }
 
 /** The file when present; undefined when the space has none (no built-in gateway). Throws on an invalid file. */
-export async function loadGateway(workspaceHome: string, env: Record<string, string | undefined> = process.env): Promise<LoadedGateway | undefined> {
+export async function loadGateway(workspaceHome: string, env: Record<string, string | undefined> = process.env, opts: { runtimes?: readonly string[] } = {}): Promise<LoadedGateway | undefined> {
   const file = Bun.file(join(workspaceHome, GATEWAY_FILE));
   if (!(await file.exists())) return undefined;
-  return parseGatewayYaml(await file.text(), env);
+  return parseGatewayYaml(await file.text(), env, opts);
+}
+
+/** Why a provider may not have this name: a runtime of runtimes.yaml has it. */
+export function runtimeClash(name: string): string {
+  return `${GATEWAY_FILE}: provider ${name} is named like the runtime ${name} in runtimes.yaml; an app's ${name}/<model> goes to that runtime, so rename the provider (lowercase letters, digits and -)`;
 }
 
 /**

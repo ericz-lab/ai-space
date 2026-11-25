@@ -49,9 +49,10 @@ const TOTALS_SQL = `
   COALESCE(SUM(audio_seconds), 0) AS audio_seconds,
   COALESCE(SUM(chars), 0) AS chars,
   COALESCE(SUM(cost_usd), 0) AS cost_usd,
+  SUM(CASE WHEN price_basis IS NOT NULL AND cost_usd IS NULL THEN 1 ELSE 0 END) AS unpriced,
   COALESCE(SUM(duration_ms), 0) AS duration_ms`;
 
-type TotalsRow = { calls: number; errors: number | null; audio_seconds: number; chars: number; cost_usd: number; duration_ms: number };
+type TotalsRow = { calls: number; errors: number | null; audio_seconds: number; chars: number; cost_usd: number; unpriced: number | null; duration_ms: number };
 
 export const SPEECH_WINDOWS = { "5h": 5 * 3600_000, "24h": 86400_000, "7d": 7 * 86400_000, "30d": 30 * 86400_000 } as const;
 export type SpeechWindow = keyof typeof SPEECH_WINDOWS;
@@ -147,7 +148,7 @@ export class SpeechStore {
 }
 
 function totalsOf(r: TotalsRow): SpeechTotals {
-  return { calls: r.calls, errors: r.errors ?? 0, audioSeconds: Math.round(r.audio_seconds * 1000) / 1000, chars: r.chars, costUsd: Math.round(r.cost_usd * 1e6) / 1e6, durationMs: r.duration_ms };
+  return { calls: r.calls, errors: r.errors ?? 0, audioSeconds: Math.round(r.audio_seconds * 1000) / 1000, chars: r.chars, costUsd: Math.round(r.cost_usd * 1e6) / 1e6, unpriced: r.unpriced ?? 0, durationMs: r.duration_ms };
 }
 
 function fromRow(r: Row): SpeechCall {

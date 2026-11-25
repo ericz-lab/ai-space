@@ -15,7 +15,7 @@ import { pollWhileVisible } from "./poll.ts";
 // - A call that fell back says from which model; one with a trace opens to how it was placed (docs/model.md#trace).
 // Token figures are what the runtime reported; a call with none shows a dash, nothing is estimated.
 
-type Totals = { calls: number; errors: number; inputTokens: number; cacheWriteTokens: number; cacheReadTokens: number; outputTokens: number; tokens: number; costUsd: number; durationMs: number };
+type Totals = { calls: number; errors: number; inputTokens: number; cacheWriteTokens: number; cacheReadTokens: number; outputTokens: number; tokens: number; costUsd: number; unpriced?: number; durationMs: number };
 type UsageInfo = {
   window: string;
   since: string;
@@ -67,6 +67,15 @@ export const fmtTokens = (n: number | undefined): string => {
   if (n >= 1e6) return `${(n / 1e6).toFixed(n >= 1e7 ? 1 : 2)}M`;
   if (n >= 1e3) return `${(n / 1e3).toFixed(n >= 1e4 ? 0 : 1)}K`;
   return String(n);
+};
+
+/**
+ * A sum of costs that may leave calls out: the built-in gateway's calls with no price are not free,
+ * so a sum of only those reads "unpriced", and a sum with some says how many it left out.
+ */
+export const fmtCostOf = (x: { costUsd: number; unpriced?: number }, t: (k: "usage.unpriced" | "usage.plusUnpriced", v?: Record<string, string | number>) => string): string => {
+  if (!x.unpriced) return fmtCost(x.costUsd);
+  return x.costUsd ? `${fmtCost(x.costUsd)} ${t("usage.plusUnpriced", { n: x.unpriced })}` : t("usage.unpriced");
 };
 
 export const fmtCost = (usd: number | undefined): string => {
@@ -143,7 +152,7 @@ function History({ h, metric, setMetric }: { h: UsageInfo["history"]; metric: Me
           <span>{t("usage.tokens")}</span>
         </div>
         <div className="usage-card">
-          <b>{fmtCost(h.totals.costUsd)}</b>
+          <b>{fmtCostOf(h.totals, t)}</b>
           <span>{t("usage.costPerDay", { cost: fmtCost(daysRecorded ? h.totals.costUsd / daysRecorded : 0) })}</span>
         </div>
       </div>
@@ -268,7 +277,7 @@ export default function Usage() {
                 <span>{t("usage.tokens")}</span>
               </div>
               <div className="usage-card">
-                <b>{fmtCost(tot.costUsd)}</b>
+                <b>{fmtCostOf(tot, t)}</b>
                 <span>{t("usage.cost")}</span>
               </div>
               <div className="usage-card">
@@ -309,7 +318,7 @@ export default function Usage() {
                           {r.errors ? <i className="usage-err">{r.errors}</i> : null}
                         </td>
                         <TokenCells t={r} />
-                        <td>{fmtCost(r.costUsd)}</td>
+                        <td>{fmtCostOf(r, t)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -341,7 +350,7 @@ export default function Usage() {
                         <td>{modelOn(r)}</td>
                         <td>{r.calls}</td>
                         <TokenCells t={r} />
-                        <td>{fmtCost(r.costUsd)}</td>
+                        <td>{fmtCostOf(r, t)}</td>
                       </tr>
                     ))}
                     {usage.byBackend.map((r) => (
@@ -351,7 +360,7 @@ export default function Usage() {
                         </td>
                         <td>{r.calls}</td>
                         <TokenCells t={r} />
-                        <td>{fmtCost(r.costUsd)}</td>
+                        <td>{fmtCostOf(r, t)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -384,7 +393,7 @@ export default function Usage() {
                       </span>
                       <span className="run-dur">
                         {c.usage ? `${fmtTokens(c.usage.inputTokens + c.usage.cacheWriteTokens + c.usage.cacheReadTokens + c.usage.outputTokens)} · ` : ""}
-                        {c.costUsd !== undefined ? `${fmtCost(c.costUsd)} · ` : ""}
+                        {c.costUsd !== undefined ? `${fmtCost(c.costUsd)} · ` : c.backend === "gateway" && c.status !== "error" ? `${t("usage.unpriced")} · ` : ""}
                         {fmtDuration(c.durationMs, lang)}
                       </span>
                     </div>

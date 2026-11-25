@@ -2,12 +2,13 @@ import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import { writeAtomic } from "../model/inventory.ts";
 import { gatewayImage } from "../runtimes/anthropic-api.ts";
-import { PROVIDERS_FILE, builtinSpeech } from "../speech/config.ts";
+import { MINIMAX_DEFAULT_MODELS, PROVIDERS_FILE, builtinSpeech } from "../speech/config.ts";
+import { MinimaxAdapter } from "../speech/minimax.ts";
 import { OpenAiAdapter } from "../speech/openai.ts";
-import { KIND_CAPABILITIES, ROLE_CAPABILITY, type ProviderSpec, type SpeechConfig, type SpeechRole } from "../speech/types.ts";
+import { KIND_CAPABILITIES, ROLE_CAPABILITY, type ProviderSpec, type SpeechAdapter, type SpeechConfig, type SpeechRole } from "../speech/types.ts";
 import { GATEWAY_FILE, parseGatewayYaml, splitModelId } from "./config.ts";
 import { GatewayEditError } from "./edit.ts";
-import { documentedIds, kindOf, servesOf, voicesFor } from "./kinds.ts";
+import { documentedIds, kindOf, servesOf, speechKindOf, voicesFor } from "./kinds.ts";
 import type { ModelGateway } from "./service.ts";
 import { MANAGED_PREFIX, chainOf, isManaged, setSpeechText, speechEditProblem, visibleSpeech, type BuiltinPresence, type ChainItem, type SpeechOrder } from "./speech-edit.ts";
 import { GATEWAY_MODEL_PATTERN, GATEWAY_NAME_PATTERN, type GatewayConfig, type GatewayKind, type GatewayProvider } from "./types.ts";
@@ -56,6 +57,7 @@ export type MediaOptions = {
 const json = (body: unknown, status = 200) => Response.json(body, { status, headers: { "cache-control": "no-store" } });
 const ROLES = ["asr", "tts"] as const;
 const TEST_TEXT = "Hello from ai-space.";
+const TEST_CALLER = { app: "settings", tag: "settings-test" };
 const MAX_TEST_AUDIO = 5 * 1024 * 1024;
 
 export function createGatewayMediaRoutes(o: MediaOptions, guarded: (h: (req: Request) => Promise<Response>) => (req: Request) => Promise<Response>) {
@@ -91,6 +93,8 @@ export function createGatewayMediaRoutes(o: MediaOptions, guarded: (h: (req: Req
       imageModels: of("image"),
       // Documented voices per TTS model (the vendor's list); empty where it documents none.
       voices: Object.fromEntries(tts.map((m) => [m, voicesFor(p.preset, m)])),
+      // The documented voices are a few of many (and cloned ones): another voice id may be typed.
+      ...(speechKindOf(p) !== "openai-compatible" ? { voicesOpen: true } : {}),
     };
   }
 
@@ -112,9 +116,11 @@ export function createGatewayMediaRoutes(o: MediaOptions, guarded: (h: (req: Req
   function orderOf(config: SpeechConfig): SpeechOrder {
     const item = (name: string, role: "asr" | "tts"): ChainItem => {
       const p = config.providers.find((x) => x.name === name);
-      if (!p || !isManaged(p) || p.kind !== "openai-compatible" || !p.gateway) return { provider: name };
+      if (!p || !isManaged(p) || !p.gateway) return { provider: name };
       const g = p.gateway.provider;
-      const model = (role === "asr" ? p.asrModel : p.ttsModel).slice(g.length + 1);
+      const id = role === "asr" ? p.asrModel : p.ttsModel;
+      // openai-compatible holds the gateway's id (`<provider>/<model>`), minimax its vendor's own.
+      const model = p.kind === "openai-compatible" ? id.slice(g.length + 1) : id;
       return { gateway: g, model, ...(role === "tts" && p.voice ? { voice: p.voice } : {}) };
     };
     return { asr: chainOf(config, "asr").map((n) => item(n, "asr")), tts: chainOf(config, "tts").map((n) => item(n, "tts")) };
@@ -187,9 +193,11 @@ export function createGatewayMediaRoutes(o: MediaOptions, guarded: (h: (req: Req
         if (!GATEWAY_MODEL_PATTERN.test(model)) return json({ ok: false, error: `${role}: pick a model for ${provider}` }, 400);
         if (role === "tts") {
           const voice = typeof raw.voice === "string" && raw.voice.trim() ? raw.voice.trim() : undefined;
-          const documented = voicesFor(p.preset, model);
-          out.tts.push({ gateway: provider, model, ...(voice ? { voice } : {}), ...(documented.length ? { voices: documented } : {}) });
-        } else out.asr.push({ gateway: provider, model });
+          const kind = speechKindOf(p);
+          // A vendor with hundreds of voices and cloned ones (MiniMax) gets no list: it refuses an unknown voice itself.
+          const documented = kind === "openai-compatible" ? voicesFor(p.preset, model) : [];
+          out.tts.push({ gateway: provider, model, kind, ...(voice ? { voice } : {}), ...(documented.length ? { voices: documented } : {}) });
+        } else out.asr.push({ gateway: provider, model, kind: speechKindOf(p) });
       }
     }
     return out;
@@ -228,8 +236,21 @@ export function createGatewayMediaRoutes(o: MediaOptions, guarded: (h: (req: Req
     return json({ ok: true, after, applied, created: text === undefined, ...(applied ? {} : { restart: true }) });
   }
 
-  /** A speech adapter through the gateway for one test, as the speech shorthand would make it. */
-  function adapterFor(provider: string, model: string, role: SpeechRole, voice?: string): OpenAiAdapter {
+  /** A speech adapter for one test, as the speech shorthand would make it: through the gateway, or the preset's own kind with its key. */
+  function adapterFor(p: GatewayProvider, model: string, role: SpeechRole, voice?: string): SpeechAdapter {
+    const provider = p.name;
+    const deps = { gateway: o.gateway.link, ...(o.fetch ? { fetch: o.fetch } : {}) };
+    if (speechKindOf(p) === "minimax") {
+      return new MinimaxAdapter(
+        {
+          name: `${MANAGED_PREFIX}test`, kind: "minimax", url: "",
+          asrModel: role === "asr" ? model : MINIMAX_DEFAULT_MODELS.asr, ttsModel: role === "tts" ? model : MINIMAX_DEFAULT_MODELS.tts,
+          ...(voice ? { voice } : {}),
+          gateway: { via: "space", provider },
+        },
+        deps,
+      );
+    }
     return new OpenAiAdapter(
       {
         name: `${MANAGED_PREFIX}test`, kind: "openai-compatible", url: "", selfHosted: false,
@@ -238,7 +259,7 @@ export function createGatewayMediaRoutes(o: MediaOptions, guarded: (h: (req: Req
         ...(voice ? { voice } : {}),
         gateway: { via: "space", provider },
       },
-      { gateway: o.gateway.link, ...(o.fetch ? { fetch: o.fetch } : {}) },
+      deps,
     );
   }
 
@@ -259,14 +280,14 @@ export function createGatewayMediaRoutes(o: MediaOptions, guarded: (h: (req: Req
       if (role === "tts") {
         const voice = typeof body!.voice === "string" && body!.voice.trim() ? body!.voice.trim() : voicesFor(p.preset, model)[0];
         const text = typeof body!.text === "string" && body!.text.trim() ? body!.text.trim().slice(0, 200) : TEST_TEXT;
-        const r = await adapterFor(provider, model, "tts", voice).speak({ text, voices: voice ? [voice] : [] });
+        const r = await adapterFor(p, model, "tts", voice).speak!({ text, voices: voice ? [voice] : [] }, TEST_CALLER);
         return json({ ok: true, role, ms: Date.now() - started, text, contentType: r.contentType, audio: Buffer.from(r.audio).toString("base64"), bytes: r.audio.byteLength });
       }
       const b64 = typeof body!.audio === "string" ? body!.audio : "";
       const audio = Buffer.from(b64, "base64");
       if (!audio.length) return json({ ok: false, error: "send the clip to transcribe (run the TTS test first)" }, 400);
       if (audio.length > MAX_TEST_AUDIO) return json({ ok: false, error: "the test clip is too large" }, 413);
-      const r = await adapterFor(provider, model, "asr").transcribe({ file: new Blob([audio], { type: "audio/wav" }), filename: "test.wav", language: "", context: "" });
+      const r = await adapterFor(p, model, "asr").transcribe!({ file: new Blob([audio], { type: "audio/wav" }), filename: "test.wav", language: "", context: "" }, TEST_CALLER);
       return json({ ok: true, role, ms: Date.now() - started, text: r.text });
     } catch (e) {
       // The vendor's error as text; never the key.
@@ -297,8 +318,9 @@ export function createGatewayMediaRoutes(o: MediaOptions, guarded: (h: (req: Req
   async function testImage(req: Request): Promise<Response> {
     const body = (await req.json().catch(() => ({}))) as { model?: unknown };
     const g = await gatewayConfig();
-    const model = typeof body.model === "string" && body.model.trim() ? body.model.trim() : g?.tiers.image;
-    if (!model || !GATEWAY_MODEL_PATTERN.test(model)) return json({ ok: false, error: "pick the image model first" }, 400);
+    // The test names the picture model it draws with: the gateway has no picture tier.
+    const model = typeof body.model === "string" && body.model.trim() ? body.model.trim() : undefined;
+    if (!model || !GATEWAY_MODEL_PATTERN.test(model)) return json({ ok: false, error: "pick the picture model to test" }, 400);
     const base = o.gateway.link.base();
     if (!base) return json({ ok: false, error: `the built-in model gateway is off: ${o.gateway.link.problem() ?? ""}` }, 409);
     const split = splitModelId(model);

@@ -2,6 +2,7 @@ import { mkdir, rename, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { PriceBasis, PricedAnswer, Usage } from "../runtimes/types.ts";
 import { GATEWAY_SITES } from "./config.ts";
+import type { ModelWatchPrices, ModelWatchStatus } from "./model-watch.ts";
 import type { GatewayProvider } from "./types.ts";
 
 /**
@@ -11,7 +12,9 @@ import type { GatewayProvider } from "./types.ts";
  *
  *  1. `<workspace>/gateway-prices.yaml`: the owner's price for `provider/model`;
  *  2. the same file's `provider/*`: every model of that provider (a relay's discount, a plan);
- *  3. models.dev's catalogue, for the models.dev provider that matches this provider's site.
+ *  3. Model Watch's copy of the vendor's pricing page, shipped with ai-space (model-watch-prices.json,
+ *     model-watch.ts), for the page of this provider's site, in USD or converted from CNY at the owner's rate;
+ *  4. models.dev's catalogue, for the models.dev provider that matches this provider's site.
  *
  * No price: the call is unpriced, never counted as free. A price file of its own, not a key of
  * gateway.yaml, whose parser refuses unknown keys: an older ai-space keeps its gateway on a rollback.
@@ -36,8 +39,12 @@ export type Price = {
   perMinute?: number;
   perMillionChars?: number;
 };
-export type PriceSource = "price file" | "price file (provider/*)" | `models.dev ${string}`;
-export type PriceLookup = { price: Price; source: PriceSource };
+export type PriceSource = "price file" | "price file (provider/*)" | `Model Watch ${string}` | `models.dev ${string}`;
+/**
+ * `checkedAt`: when Model Watch last read the page. `currency` and `printed`: the page's currency and
+ * figures when they were converted. `needsRate`: a CNY price with no rate set, shown but costing nothing.
+ */
+export type PriceLookup = { price: Price; source: PriceSource; checkedAt?: string; currency?: string; printed?: Price; needsRate?: true };
 
 /** models.dev, trimmed: provider id → its API base (when it lists one) and model id → price. */
 export type PriceCatalog = { fetchedAt: string; providers: Record<string, { api?: string; models: Record<string, Price> }> };
@@ -214,7 +221,7 @@ const host = (url: string | undefined) => {
   }
 };
 
-export type PriceBookOptions = { home: string; fetch?: typeof fetch; now?: () => number; log?: (line: string) => void };
+export type PriceBookOptions = { home: string; fetch?: typeof fetch; now?: () => number; log?: (line: string) => void; modelWatch?: ModelWatchPrices };
 
 /**
  * The price file and the models.dev catalogue. The file is re-read when it changes; the catalogue
@@ -234,8 +241,10 @@ export class PriceBook {
   private refreshing: Promise<void> | undefined;
   private readonly listeners: (() => void)[] = [];
   private timer: ReturnType<typeof setInterval> | undefined;
+  readonly modelWatch: ModelWatchPrices | undefined;
 
   constructor(o: PriceBookOptions) {
+    this.modelWatch = o.modelWatch;
     this.file = join(o.home, PRICES_FILE);
     this.cache = join(o.home, MODELS_DEV_CACHE);
     this.doFetch = o.fetch ?? fetch;
@@ -314,8 +323,8 @@ export class PriceBook {
   }
 
   /** When the catalogue was fetched, and why the price file did not load. */
-  status(): { catalogFetchedAt?: string; fileError?: string } {
-    return { ...(this.catalog ? { catalogFetchedAt: this.catalog.fetchedAt } : {}), ...(this.ownError ? { fileError: this.ownError } : {}) };
+  status(): { catalogFetchedAt?: string; fileError?: string; modelWatch?: ModelWatchStatus } {
+    return { ...(this.catalog ? { catalogFetchedAt: this.catalog.fetchedAt } : {}), ...(this.ownError ? { fileError: this.ownError } : {}), ...(this.modelWatch ? { modelWatch: this.modelWatch.status() } : {}) };
   }
 
   /** The models.dev provider this gateway provider is priced from: by preset and site, else the one whose API host is its base's. */
@@ -339,16 +348,25 @@ export class PriceBook {
     return this.lookupSync(p, model);
   }
 
+  /** The price calls are costed at; a CNY price waiting for its rate is none. */
   lookupSync(p: Pick<GatewayProvider, "name" | "preset" | "messages" | "openai">, model: string): PriceLookup | undefined {
+    const found = this.describe(p, model);
+    return found?.needsRate ? undefined : found;
+  }
+
+  /** The price as Settings shows it: a CNY price waiting for its rate included. */
+  describe(p: Pick<GatewayProvider, "name" | "preset" | "messages" | "openai">, model: string): PriceLookup | undefined {
     const own = this.own[`${p.name}/${model}`];
     if (own) return { price: own, source: "price file" };
     const all = this.own[`${p.name}/*`];
     if (all) return { price: all, source: "price file (provider/*)" };
+    const watched = this.modelWatch?.lookup(p, model);
+    if (watched && !watched.needsRate) return watched;
+    // A CNY price waiting for its rate does not hide a USD one: models.dev's is used until the rate is set.
     const id = this.catalogProvider(p);
     const models = id ? this.catalog?.providers[id]?.models : undefined;
-    if (!models) return undefined;
-    const exact = models[model] ?? Object.entries(models).find(([k]) => k.toLowerCase() === model.toLowerCase())?.[1];
-    return exact ? { price: exact, source: `models.dev ${id}` } : undefined;
+    const exact = models ? models[model] ?? Object.entries(models).find(([k]) => k.toLowerCase() === model.toLowerCase())?.[1] : undefined;
+    return exact ? { price: exact, source: `models.dev ${id}` } : watched;
   }
 
   /** The models the price file names for this provider (not `provider/*`): pictures and speech are often not in its model list. */

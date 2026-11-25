@@ -128,7 +128,8 @@ export type TraceCandidate = {
 };
 
 export type TraceTry = {
-  runtime: string;
+  /** Absent when the call went to the built-in model gateway directly (no runtime): `model` is the gateway model. */
+  runtime?: string;
   machine?: string;
   /** The model as that runtime was asked (a tier resolved here, or a peer's tier). */
   model: string;
@@ -153,6 +154,8 @@ export type UsageTotals = {
   /** All four token kinds added up. */
   tokens: number;
   costUsd: number;
+  /** Calls through the built-in gateway with no price (docs/model-gateway.md#prices): left out of `costUsd`, not free. */
+  unpriced?: number;
   durationMs: number;
 };
 

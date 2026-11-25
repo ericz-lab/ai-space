@@ -1,4 +1,4 @@
-import type { ModelChoice } from "./api.ts";
+import type { GatewayModelChoice, ModelChoice } from "./api.ts";
 import { ChoiceOption, SavedChoice } from "./model-choices.tsx";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { type AppInfo, getJson, isImgIcon, sendJson } from "./api.ts";
@@ -21,7 +21,9 @@ import { type Key, type Lang, localized, useLang } from "./i18n.ts";
 type Source = "request" | "choice" | "override-tag" | "override-app" | "manifest-tag" | "manifest-default" | "default";
 export type Row = { tag: string | null; manifest?: string; override?: string; model: string; source: Source };
 export type AppRows = { app: string; rows: Row[] };
-export type Option = ModelChoice;
+/** A runtime/tier choice, or a model of the built-in model gateway (no runtime). */
+export type Option = ModelChoice | GatewayModelChoice;
+const isGateway = (o: Option): o is GatewayModelChoice => "gateway" in o;
 type AppLabel = { title: string; i18n?: AppInfo["i18n"]; icon: string };
 export type AppGroup = AppRows & { key: string; peer?: string; title: string; icon: string };
 /** One peer's part of the page: its rows and choices, or why there are none. */
@@ -106,6 +108,8 @@ function ModelRow({ app, peer, row, options, onSaved }: { app: string; peer?: st
   const [choice, setChoice] = useState<string | null>(null);
   const [error, setError] = useState("");
   const saves = useRef(0);
+  const runtimeOptions = options.filter((o): o is ModelChoice => !isGateway(o));
+  const gatewayOptions = options.filter(isGateway);
   const save = async (value: string) => {
     const n = ++saves.current;
     setChoice(value);
@@ -134,9 +138,14 @@ function ModelRow({ app, peer, row, options, onSaved }: { app: string; peer?: st
           <select id={`app-model-${peer ? `${peer}-` : ""}${app}-${row.tag ?? ""}`} value={choice ?? row.override ?? ""} onChange={(e) => void save(e.target.value)}>
             <option value="">{t("appModels.noOverride")}</option>
             {row.override && !options.some((o) => o.value === row.override) && <SavedChoice value={row.override} t={t} />}
-            {[...new Set(options.map((o) => o.runtime))].map((runtime) => (
+            {[...new Set(runtimeOptions.map((o) => o.runtime))].map((runtime) => (
               <optgroup key={runtime} label={runtime}>
-                {options.filter((o) => o.runtime === runtime).map((o) => <ChoiceOption key={o.value} o={o} label={`${t(`modelTier.${o.tier}`)} · ${o.model}`} t={t} />)}
+                {runtimeOptions.filter((o) => o.runtime === runtime).map((o) => <ChoiceOption key={o.value} o={o} label={`${t(`modelTier.${o.tier}`)} · ${o.model}`} t={t} />)}
+              </optgroup>
+            ))}
+            {(["text", "image"] as const).filter((k) => gatewayOptions.some((o) => o.gateway === k)).map((k) => (
+              <optgroup key={`gateway-${k}`} label={t(k === "text" ? "appModels.gatewayText" : "appModels.gatewayImage")}>
+                {gatewayOptions.filter((o) => o.gateway === k).map((o) => <option key={o.value} value={o.value}>{o.model}</option>)}
               </optgroup>
             ))}
           </select>

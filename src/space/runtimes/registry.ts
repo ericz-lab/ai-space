@@ -234,12 +234,9 @@ export class RuntimeRegistry {
     return out;
   }
 
-  private tierModel(name: string, model: string, purpose: "text" | "image" = "text"): string {
+  private tierModel(name: string, model: string, _purpose: "text" | "image" = "text"): string {
     if (!(MODEL_TIERS as readonly string[]).includes(model)) return model;
-    // Pictures through the built-in gateway: any tier goes to its picture tier, when it has one.
-    const spec = this.specs.get(name);
-    const image = purpose === "image" && spec && "gateway" in spec && spec.gateway === "space" ? this.deps.gateway?.tiers().image : undefined;
-    if (image) return image;
+    // The gateway has no picture tier any more (`tiers.image` is ignored): a tier is the runtime's own, for pictures too.
     const resolved = this.tiersOf(name)[model as ModelTier];
     if (!resolved) throw new Error(`runtime ${name} has no model for tier ${model}`);
     return resolved;

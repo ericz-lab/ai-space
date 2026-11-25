@@ -19,8 +19,11 @@ export type RuntimeKind = (typeof RUNTIME_KINDS)[number];
 /** A runtime's name in the configuration and in the ledger (`claude`, `api`, `dsh`). */
 export const RUNTIME_NAME_PATTERN = /^[a-z][a-z0-9-]{0,31}$/;
 
-/** Where a call ran: the machine's own CLI, one reached over ssh, an HTTP API, or another space reached as a peer. */
-export type Backend = "local" | `ssh:${string}` | "api" | `peer:${string}`;
+/**
+ * Where a call ran: the machine's own CLI, one reached over ssh, an HTTP API, another space reached
+ * as a peer, or the built-in model gateway called directly with the model the app named (no runtime).
+ */
+export type Backend = "local" | `ssh:${string}` | "api" | `peer:${string}` | "gateway";
 
 /**
  * A machine's name in a model string (`box:codex/basic`, docs/model-machines.md): a peer

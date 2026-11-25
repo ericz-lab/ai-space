@@ -4,7 +4,7 @@ import { failureText } from "./call-trace.ts";
 import { localized, useLang } from "./i18n.ts";
 import { LOCALE, type Key } from "./messages.ts";
 import { HEALTH, Icon, STATUS } from "./Tiles.tsx";
-import { fmtCost } from "./Usage.tsx";
+import { fmtCostOf } from "./Usage.tsx";
 
 /**
  * The status part of the settings: peers, runtimes, speech providers, services and backups fold into one
@@ -224,7 +224,7 @@ export default function SettingsStatus() {
                 calls: speech.usage24h.calls.toLocaleString(),
                 minutes: (speech.usage24h.audioSeconds / 60).toFixed(1),
                 chars: speech.usage24h.chars.toLocaleString(),
-                cost: fmtCost(speech.usage24h.costUsd),
+                cost: fmtCostOf(speech.usage24h, t),
               })}
             </p>
           )}

@@ -64,7 +64,7 @@ describe("ModelStore", () => {
     store.add(call({ tag: "story", model: "sonnet", status: "error", error: "x", usage: { inputTokens: 20, cacheWriteTokens: 0, cacheReadTokens: 0, outputTokens: 0 }, costUsd: 0.5 }));
     store.add(call({ app: "other", startedAt: T0 - 2 * DAY, usage: undefined, costUsd: undefined }));
     const all = store.totals(T0 - 3 * DAY);
-    expect(all).toEqual({ calls: 3, errors: 1, inputTokens: 21, cacheWriteTokens: 2, cacheReadTokens: 3, outputTokens: 4, tokens: 30, costUsd: 0.51, durationMs: 3000 });
+    expect(all).toEqual({ calls: 3, errors: 1, inputTokens: 21, cacheWriteTokens: 2, cacheReadTokens: 3, outputTokens: 4, tokens: 30, costUsd: 0.51, unpriced: 0, durationMs: 3000 });
     expect(store.totals(T0 - 1)).toMatchObject({ calls: 2 });
     expect(store.totals(T0 - 3 * DAY, "other")).toMatchObject({ calls: 1, tokens: 0 });
     const byTag = store.groupBy(["app", "tag", "model"], T0 - 3 * DAY);

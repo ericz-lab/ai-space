@@ -10,7 +10,7 @@ import { AuthStore } from "../auth/store.ts";
 import { parseRuntimesYaml } from "../runtimes/config.ts";
 import { RuntimeRegistry } from "../runtimes/registry.ts";
 import { GATEWAY_PREFIX, createGatewayRoutes } from "./api.ts";
-import { parseGatewayYaml } from "./config.ts";
+import { parseGatewayYaml, runtimeClash } from "./config.ts";
 import { setProviderText } from "./edit.ts";
 import { ModelGateway } from "./service.ts";
 import { createGatewaySettingsRoutes } from "./settings.ts";
@@ -176,7 +176,8 @@ describe("providers from the page", () => {
     expect(after.imageModels).toEqual(["minimax/MiniMax-H3-Image"]);
     expect(after.textModels).toEqual(["minimax/MiniMax-M3"]);
     expect(after.providers[0]!.imageOffer).toEqual(["MiniMax-H3-Image-Highspeed"]);
-    expect((await call("PUT", "/api/model/gateway/tiers", { tiers: { image: "minimax/MiniMax-H3-Image" } })).status).toBe(200);
+    // There is no picture tier to set: a picture call names its model.
+    expect((await call("PUT", "/api/model/gateway/tiers", { tiers: { image: "minimax/MiniMax-H3-Image" } })).json).toMatchObject({ ok: false, error: expect.stringContaining("image is not a tier any more") });
   });
 
   test("a key the environment sets is shown so and never overwritten; replacing a workspace key applies at once", async () => {
@@ -297,23 +298,35 @@ describe("models and the test", () => {
 });
 
 describe("a runtime through it", () => {
-  test("the Messages API runtime is written to runtimes.yaml (comments kept) and answers at once, through the gateway's tiers", async () => {
+  test("the Messages API runtime is no longer offered; an old one with gateway: space still answers and is not listed", async () => {
     const v = vendor();
-    const { call, runtimes, added } = await setup();
+    const old = "# my runtimes\nruntimes:\n  claude:\n    kind: claude-code\n  gateway-api:\n    kind: anthropic-api\n    gateway: space\n";
+    const { call, runtimes, added } = await setup({ runtimes: old });
     await call("POST", "/api/model/gateway/providers", { name: "ds", preset: "deepseek", messages: v.url, key: KEY, models: ["chat-a"] });
     await call("PUT", "/api/model/gateway/tiers", { tiers: { basic: "ds/chat-a" } });
     const r = await call("POST", "/api/model/gateway/runtimes", { kind: "anthropic-api" });
-    expect(r.json).toEqual({ ok: true, runtime: "gateway-api", kind: "anthropic-api", applied: true });
-    expect(added).toEqual(["gateway-api"]);
-    const text = await Bun.file(join(home, "runtimes.yaml")).text();
-    expect(text).toStartWith("# my runtimes\nruntimes:\n");
-    expect(parseRuntimesYaml(text, {}).config.runtimes.find((x) => x.name === "gateway-api")).toMatchObject({ kind: "anthropic-api", gateway: "space" });
+    expect(r.status).toBe(400);
+    expect(r.json.error).toContain("no longer added here");
+    expect(added).toEqual([]);
+    expect(await Bun.file(join(home, "runtimes.yaml")).text()).toBe(old);
+    // Deprecated, it loads and answers through the gateway's tiers as before.
     const target = runtimes.resolve("gateway-api/basic");
     expect(target.model).toBe("ds/chat-a");
     const out = await target.runtime.complete({ prompt: "hi", system: "", model: target.model, tag: "t", tools: [], timeoutMs: 10_000, maxTokens: 5 });
     expect(out).toMatchObject({ ok: true, text: "ok from chat-a", served: "ds/chat-a" });
-    expect((await call("POST", "/api/model/gateway/runtimes", { kind: "anthropic-api" })).json.runtime).toBe("gateway-api-2");
-    expect((await call("GET", "/api/model/gateway")).json.runtimes.map((x: { runtime: string }) => x.runtime)).toEqual(["gateway-api-2", "gateway-api"]);
+    // The card lists only Claude Code through the gateway.
+    expect((await call("GET", "/api/model/gateway")).json.runtimes).toEqual([]);
+  });
+
+  test("a provider named like a runtime is refused, from the page and in the file", async () => {
+    const v = vendor();
+    const { call } = await setup();
+    const r = await call("POST", "/api/model/gateway/providers", { name: "claude", preset: "deepseek", messages: v.url, key: KEY, models: ["chat-a"] });
+    expect(r.status).toBe(400);
+    expect(r.json.error).toBe(runtimeClash("claude"));
+    expect(await Bun.file(join(home, "gateway.yaml")).exists()).toBe(false);
+    expect(() => parseGatewayYaml(`providers:\n  claude: { messages: '${v.url}' }\n`, {}, { runtimes: ["claude", "codex"] })).toThrow(/provider claude is named like the runtime claude/);
+    expect(parseGatewayYaml(`providers:\n  claude: { messages: '${v.url}' }\n`, {}).config.providers.map((p) => p.name)).toEqual(["claude"]);
   });
 
   test("Claude Code needs the CLI found here; the path never comes from the request; refused when the gateway cannot exist", async () => {
@@ -325,6 +338,6 @@ describe("a runtime through it", () => {
     expect(await Bun.file(join(home, "runtimes.yaml")).text()).toContain('bin: ["/opt/bin/claude"]');
     const off = await setup({ unavailable: "ai-space listens on 10.0.0.2 only" });
     expect((await off.call("GET", "/api/model/gateway")).json.unavailable).toContain("10.0.0.2");
-    expect((await off.call("POST", "/api/model/gateway/runtimes", { kind: "anthropic-api" })).status).toBe(409);
+    expect((await off.call("POST", "/api/model/gateway/runtimes", { kind: "claude-code" })).status).toBe(409);
   });
 });

@@ -55,6 +55,17 @@ function parseModel(v: unknown, where: string): string {
   return v.trim();
 }
 
+/**
+ * A gateway model an override may name (docs/model.md#models): `gateway` says what it is for, text
+ * for `/api/model/run`, image for `/api/model/image`. A model listed for both is offered once, as text.
+ */
+export type GatewayModelOption = { value: string; gateway: "text" | "image"; model: string };
+
+export function gatewayModelOptions(choices: { text: string[]; image: string[] }): GatewayModelOption[] {
+  const text = choices.text.map((id): GatewayModelOption => ({ value: id, gateway: "text", model: id }));
+  return [...text, ...choices.image.filter((id) => !choices.text.includes(id)).map((id): GatewayModelOption => ({ value: id, gateway: "image", model: id }))];
+}
+
 export type AppModelsOptions = {
   /** The app's parsed `model:` section, from the registry. */
   manifest: (app: string) => AppModelSpec | undefined;
@@ -62,7 +73,7 @@ export type AppModelsOptions = {
   fallback: () => string;
   /** Whether this space can run a model value; a layer that fails is skipped. */
   runnable: (model: string) => boolean;
-  /** What the panel may pick: the configured runtime/tier values. */
+  /** What the panel may pick: the configured runtime/tier values, and the gateway's models. */
   options: () => { value: string }[];
 };
 
@@ -128,7 +139,7 @@ export class AppModels {
       this.db.query("DELETE FROM model_overrides WHERE app = ? AND tag = ?").run(app, tag ?? "");
       return;
     }
-    if (!this.options().some((o) => o.value === model)) throw new Error("select a configured runtime/tier");
+    if (!this.options().some((o) => o.value === model)) throw new Error("select a configured runtime/tier or a model of the model gateway");
     this.db.query("INSERT INTO model_overrides (app, tag, model) VALUES (?, ?, ?) ON CONFLICT(app, tag) DO UPDATE SET model = excluded.model").run(app, tag ?? "", model);
   }
 

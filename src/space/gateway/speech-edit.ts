@@ -18,6 +18,17 @@ import { GATEWAY_MODEL_PATTERN, GATEWAY_NAME_PATTERN } from "./types.ts";
  *     ttsModel: tts-1
  *     voice: alloy
  *
+ * A provider whose preset has a speech kind of its own (kinds.ts `NATIVE_SPEECH`, MiniMax) is
+ * written with that kind and its vendor's model ids, the key and the host still the gateway provider's:
+ *
+ *   gateway-minimax:
+ *     kind: minimax
+ *     gateway: space
+ *     provider: minimax
+ *     asrModel: asr-1.0
+ *     ttsModel: speech-2.8-turbo
+ *     voice: English_Graceful_Lady
+ *
  * Every other provider (voice-studio, a hand-written openai-compatible, …) is custom: it can be
  * moved within an order or taken out of one, never rewritten. Live, `voices:` and the other
  * providers stay as they are. A space without the file gets the built-in default written out only
@@ -25,20 +36,23 @@ import { GATEWAY_MODEL_PATTERN, GATEWAY_NAME_PATTERN } from "./types.ts";
  */
 
 /** One place in an order: a provider already in the speech configuration, or a model gateway provider with its model. */
-export type ChainItem = { provider: string } | { gateway: string; model: string; voice?: string; voices?: string[] };
+export type ChainItem = { provider: string } | { gateway: string; model: string; voice?: string; voices?: string[]; kind?: GatewaySpeechKind };
+/** The speech kind a gateway provider's entry is written as (kinds.ts `speechKindOf`). */
+export type GatewaySpeechKind = "openai-compatible" | "minimax";
 export type SpeechOrder = { asr: ChainItem[]; tts: ChainItem[] };
 /** Whether the built-in default's provider exists here (with no file): written out when present, left out when absent. */
 export type BuiltinPresence = "present" | "absent";
 
 /** The page's own speech providers: the ones it names and may rewrite or remove. */
 export const MANAGED_PREFIX = "gateway-";
-export const isManaged = (p: ProviderSpec) => p.name.startsWith(MANAGED_PREFIX) && p.kind === "openai-compatible" && p.gateway?.via === "space";
+export const isManaged = (p: ProviderSpec): p is Managed => p.name.startsWith(MANAGED_PREFIX) && (p.kind === "openai-compatible" || p.kind === "minimax") && p.gateway?.via === "space";
+type Managed = Extract<ProviderSpec, { kind: GatewaySpeechKind }>;
 export const managedName = (gatewayProvider: string) => `${MANAGED_PREFIX}${gatewayProvider}`;
 
 const HEADER = "# Speech providers (docs/speech.md). Settings → Gateway → Speech edits this file; hand edits are kept.";
 const ROLES = ["asr", "tts"] as const;
 
-type ManagedEntry = { provider: string; asrModel?: string; ttsModel?: string; voice?: string; voices?: string[] };
+type ManagedEntry = { kind: GatewaySpeechKind; provider: string; asrModel?: string; ttsModel?: string; voice?: string; voices?: string[] };
 type Planned = {
   default: SpeechConfig["default"];
   fallback: SpeechConfig["fallback"];
@@ -76,9 +90,10 @@ export function canServe(spec: ProviderSpec, role: SpeechRole): boolean {
   return spec.kind === "dashscope" || KIND_CAPABILITIES[spec.kind].includes(ROLE_CAPABILITY[role]);
 }
 
-const bareOf = (p: Extract<ProviderSpec, { kind: "openai-compatible" }>): ManagedEntry => {
+const bareOf = (p: Managed): ManagedEntry => {
   const g = p.gateway!.provider;
-  return { provider: g, asrModel: bare(p.asrModel, g), ttsModel: bare(p.ttsModel, g), ...(p.voice ? { voice: p.voice } : {}), ...(p.voices ? { voices: [...p.voices] } : {}) };
+  const own = (m: string) => (p.kind === "openai-compatible" ? bare(m, g) : m);
+  return { kind: p.kind, provider: g, asrModel: own(p.asrModel), ttsModel: own(p.ttsModel), ...(p.voice ? { voice: p.voice } : {}), ...(p.voices ? { voices: [...p.voices] } : {}) };
 };
 
 /** What the save leads to: each role's default and fallback, and the page's providers. */
@@ -91,7 +106,7 @@ export function planSpeech(current: SpeechConfig, order: SpeechOrder): Planned {
   const start = (name: string): ManagedEntry | undefined => {
     if (entries[name]) return entries[name]!;
     const was = byName.get(name);
-    return was && isManaged(was) ? bareOf(was as Extract<ProviderSpec, { kind: "openai-compatible" }>) : undefined;
+    return was && isManaged(was) ? bareOf(was) : undefined;
   };
   for (const role of ROLES) {
     const names: string[] = [];
@@ -101,8 +116,11 @@ export function planSpeech(current: SpeechConfig, order: SpeechOrder): Planned {
         if (!item.gateway || !GATEWAY_NAME_PATTERN.test(item.gateway)) throw new GatewayEditError(`${role}: pick a provider of the model gateway`);
         if (!item.model || !GATEWAY_MODEL_PATTERN.test(item.model) || !/^[A-Za-z0-9][A-Za-z0-9._:/-]*$/.test(item.model)) throw new GatewayEditError(`${role}: pick a model for ${item.gateway}`);
         name = managedName(item.gateway);
-        const e = start(name) ?? { provider: item.gateway };
-        if (e.provider !== item.gateway) throw new GatewayEditError(`${name} names another gateway provider; change it by hand`);
+        const kind = item.kind ?? "openai-compatible";
+        const was = start(name);
+        if (was && was.provider !== item.gateway) throw new GatewayEditError(`${name} names another gateway provider; change it by hand`);
+        // A different kind (the provider's preset changed) starts the entry again: the other role's model would not fit it.
+        const e: ManagedEntry = was && was.kind === kind ? was : { kind, provider: item.gateway };
         if (role === "asr") e.asrModel = item.model;
         else {
           if (item.voice !== undefined && !VOICE_PATTERN.test(item.voice)) throw new GatewayEditError("tts: the voice is not a voice name");
@@ -139,7 +157,7 @@ function entryLines(name: string, e: NonNullable<Planned["entries"][string]>, pa
   const comments = commentsOf(old);
   const inner = pad + unit;
   const keyComment = old[0] ? /^\s*[A-Za-z0-9._-]+:\s*(#.*)$/.exec(old[0])?.[1] : undefined;
-  const out = [`${pad}${name}:${keyComment ? `   ${keyComment}` : ""}`, `${inner}kind: openai-compatible`, `${inner}gateway: space`, `${inner}provider: ${e.provider}`];
+  const out = [`${pad}${name}:${keyComment ? `   ${keyComment}` : ""}`, `${inner}kind: ${e.kind}`, `${inner}gateway: space`, `${inner}provider: ${e.provider}`];
   if (e.asrModel) out.push(`${inner}asrModel: ${scalar(e.asrModel)}`);
   if (e.ttsModel) out.push(`${inner}ttsModel: ${scalar(e.ttsModel)}`);
   if (e.voice) out.push(`${inner}voice: ${scalar(e.voice)}`);
@@ -236,7 +254,7 @@ export function setSpeechText(current: string | undefined, order: SpeechOrder, e
   const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
   const oldEntry = (name: string) => {
     const p = before.config.providers.find((x) => x.name === name);
-    return p && isManaged(p) ? bareOf(p as Extract<ProviderSpec, { kind: "openai-compatible" }>) : undefined;
+    return p && isManaged(p) ? bareOf(p) : undefined;
   };
   const sameEntries = Object.entries(plan.entries).every(([n, e]) => (e === null ? !oldEntry(n) : same(oldEntry(n), e)));
   const sameRoles = ROLES.every((r) => same(chainOf(before.config, r), plan.default[r] ? [plan.default[r], ...(plan.fallback[r] ?? [])] : []));
@@ -312,8 +330,10 @@ function verify(before: SpeechConfig, after: SpeechConfig, plan: Planned): void 
       if (got) fail(`${name} is still there`);
       continue;
     }
-    if (!got || got.kind !== "openai-compatible" || got.gateway?.provider !== e.provider) fail(`${name} was not written`);
-    const g = got as Extract<ProviderSpec, { kind: "openai-compatible" }>;
-    if ((e.asrModel && g.asrModel !== `${e.provider}/${e.asrModel}`) || (e.ttsModel && g.ttsModel !== `${e.provider}/${e.ttsModel}`) || (e.voice ?? undefined) !== g.voice) fail(`${name} differs from the choice`);
+    if (!got || got.kind !== e.kind || !isManaged(got) || got.gateway?.provider !== e.provider) fail(`${name} was not written`);
+    const g = got as Managed;
+    // openai-compatible keeps the gateway's ids (`<provider>/<model>`), minimax its vendor's own.
+    const id = (m: string) => (e.kind === "openai-compatible" ? `${e.provider}/${m}` : m);
+    if ((e.asrModel && g.asrModel !== id(e.asrModel)) || (e.ttsModel && g.ttsModel !== id(e.ttsModel)) || (e.voice ?? undefined) !== g.voice) fail(`${name} differs from the choice`);
   }
 }

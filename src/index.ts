@@ -8,11 +8,11 @@ import { ConnectionPeers, PeerHub, PeerLedgers, PeerStore, createAdoptHandler, c
 import { ModelService, ModelStore, RuntimeHealth, createModelRoutes, createPeerModelRoutes, createPeerUsageRoutes, recordAgentRun } from "./space/model/index.ts";
 import { probeTargets, statusTable } from "./space/model/machines.ts";
 import { availabilityOf, probeRuntime } from "./space/model/health.ts";
-import { ModelGateway, PriceBook, createGatewayRoutes, gatewayBase, loadGateway } from "./space/gateway/index.ts";
+import { ModelGateway, ModelWatchPrices, PriceBook, createGatewayRoutes, gatewayBase, loadGateway } from "./space/gateway/index.ts";
 import { createInventoryRoutes, machineRow, peerRow } from "./space/model/inventory.ts";
 import { createGatewaySettingsRoutes } from "./space/gateway/settings.ts";
 import { ModelPreferences, createModelPreferenceRoutes } from "./space/model/preferences.ts";
-import { AppModels, createAppModelRoutes, createPeerAppModelRoutes } from "./space/model/app-models.ts";
+import { AppModels, createAppModelRoutes, createPeerAppModelRoutes, gatewayModelOptions } from "./space/model/app-models.ts";
 import { ChatService, ChatStore, createChatRoutes } from "./space/chat/index.ts";
 import { buildWidget } from "./web/chat-widget/build.ts";
 import { RuntimeRegistry, loadRuntimes } from "./space/runtimes/index.ts";
@@ -181,14 +181,18 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   });
   // The built-in model gateway (docs/model-gateway.md): gateway.yaml's providers, loopback only. No file: off.
   // A file that does not load leaves it off with the reason, and the space running.
-  const gatewayLoaded = await loadGateway(ws.home, env).then((l) => ({ loaded: l, error: undefined }), (e: Error) => ({ loaded: undefined, error: e.message }));
+  // runtimes.yaml first: a gateway provider named like one of its runtimes is refused (docs/model.md#models).
+  const loaded = await loadRuntimes(ws.home, env);
+  const gatewayLoaded = await loadGateway(ws.home, env, { runtimes: [...loaded.config.runtimes.map((r) => r.name)] }).then((l) => ({ loaded: l, error: undefined }), (e: Error) => ({ loaded: undefined, error: e.message }));
   if (gatewayLoaded.error) console.error(`[model-gateway] ${gatewayLoaded.error}; the built-in model gateway answers 503 until it is fixed`);
   for (const w of gatewayLoaded.loaded?.warnings ?? []) console.warn(`[model-gateway] ${w}`);
-  // What its calls cost: gateway-prices.yaml, then models.dev's catalogue, cached in run/ and refreshed daily.
-  const gatewayPrices = new PriceBook({ home: ws.home });
+  // What its calls cost: gateway-prices.yaml, then Model Watch's copy of the vendors' pages (started
+  // below, once the bus and the peers are up), then models.dev's catalogue; both kept in run/.
+  // Model Watch's prices ship with ai-space (src/space/gateway/model-watch-prices.json, `bun run sync-prices`).
+  const modelWatchPrices = new ModelWatchPrices({ env });
+  const gatewayPrices = new PriceBook({ home: ws.home, modelWatch: modelWatchPrices });
   await gatewayPrices.load();
   const modelGateway = new ModelGateway({ ...(gatewayLoaded.loaded ? { config: gatewayLoaded.loaded.config } : {}), ...(gatewayLoaded.error ? { error: gatewayLoaded.error } : {}), prices: gatewayPrices });
-  const loaded = await loadRuntimes(ws.home, env);
   for (const w of loaded.warnings) console.warn(`[runtimes] ${w}`);
   for (const r of loaded.config.runtimes) if ("gateway" in r && r.gateway === "space" && !gatewayLoaded.loaded) console.error(`[runtimes] runtime ${r.name} answers through the built-in model gateway, but ${gatewayLoaded.error ?? "there is no gateway.yaml in the workspace"}`);
   const runtimes = new RuntimeRegistry(loaded.config, { gateway: modelGateway.link });
@@ -217,7 +221,8 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   runtimeHealth.seed(modelStore.lastOk());
   // The choices leave out a runtime whose CLI is missing and grey one that is not signed in (docs/model-machines.md#inventory).
   runtimes.setAvailability((machine, runtime) => availabilityOf(runtimeHealth.get(machine, runtime)));
-  const model = new ModelService({ store: modelStore, runtimes, maxConcurrency: config.model.maxConcurrency, health: runtimeHealth });
+  // An app's call that names a gateway model (`ds/deepseek-chat`) goes to the gateway directly, with no runtime.
+  const model = new ModelService({ store: modelStore, runtimes, maxConcurrency: config.model.maxConcurrency, health: runtimeHealth, gateway: { link: modelGateway.link } });
   // Per app and tag, when a call names no model (docs/model.md#app-models): panel overrides, the manifest, then the default above.
   const appModels = new AppModels(store.db, {
     manifest: (app) => registry.get(app)?.manifest.model,
@@ -227,11 +232,16 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
         model.resolve(m);
         return true;
       } catch {
-        return false;
+        // A gateway picture model is runnable too: for the app's picture calls (docs/model.md#models).
+        try {
+          return Boolean(model.gatewayModel(m, "image"));
+        } catch {
+          return false;
+        }
       }
     },
-    // A model on another machine (`box:codex/basic`) is a valid override too.
-    options: () => [...modelPreferences.options(), ...runtimes.machineTierOptions()],
+    // A model on another machine (`box:codex/basic`) is a valid override too, and so is a gateway model.
+    options: () => [...modelPreferences.options(), ...runtimes.machineTierOptions(), ...gatewayModelOptions(model.gatewayChoices())],
   });
   // The Models page's rows, for this panel and for a hub's (peers/serve.ts).
   const appModelRouteOpts = { appModels, apps: () => registry.list().map((e) => e.manifest.app), seenTags: (app: string) => modelStore.tags(app, Date.now() - 30 * 86400_000) };
@@ -322,7 +332,8 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       for (const t of Object.values(m.model?.tags ?? {})) out.push(appModels.qualify(t)!);
       for (const a of m.agents ?? []) if (a.runtime) out.push(`${a.runtime}/${a.model ?? "intermediate"}`);
     }
-    return out.filter(Boolean);
+    // A gateway model (`ds/deepseek-chat`) is no runtime: it has no cell in the status table.
+    return out.filter((m) => Boolean(m) && !model.namesGateway(m));
   };
   const machineCells = () =>
     statusTable({
@@ -364,11 +375,11 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   const loadSpeechState = async () => {
     const loaded = await loadSpeech(ws.home, env).then((l) => ({ ...l, error: undefined as string | undefined }), (e: Error) => ({ config: undefined, source: "file" as const, warnings: [] as string[], error: e.message }));
     if (loaded.error) console.error(`[speech] ${loaded.error}; speech calls answer 503 until it is fixed`);
-    // A provider through the built-in model gateway names one of gateway.yaml's providers with an openai base (docs/model-gateway.md#speech).
+    // A provider through the built-in model gateway names one of gateway.yaml's providers: openai-compatible needs its openai base, minimax either base (docs/model-gateway.md#speech).
     if (loaded.config) loaded.warnings.push(...checkGatewayProviders(loaded.config, (name) => {
       const p = modelGateway.link.provider(name);
       const off = modelGateway.providerOff(name);
-      return p ? { openai: Boolean(p.openai), ...(off ? { off } : {}) } : undefined;
+      return p ? { openai: Boolean(p.openai), messages: Boolean(p.messages), ...(off ? { off } : {}) } : undefined;
     }, modelGateway.enabled));
     for (const p of loaded.config?.providers ?? []) if (p.kind === "voice-studio" && p.machine && !peers.get(p.machine)) console.error(`[speech] provider ${p.name} names machine ${p.machine}, which is not a peer here`);
     return {
