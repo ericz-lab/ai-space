@@ -139,6 +139,16 @@ export type SpeechCaller = { app: string; tag: string };
 
 export type Segment = { start: number; end: number; text: string };
 
+/**
+ * A request's language as the providers take it (docs/speech.md#languages): the primary subtag,
+ * lowercased, so `zh-Hans`, `zh-CN` and `en-US` reach every provider as `zh` and `en`. voice-studio
+ * refuses a tag with a hyphen on its live socket and detects the language for one its model has no
+ * name for, so a client sending its locale would otherwise get no hint or a refusal.
+ */
+export function languageHint(tag: string): string {
+  return (tag.trim().split(/[-_]/)[0] ?? "").toLowerCase();
+}
+
 export type TranscribeInput = {
   file: Blob;
   filename: string;

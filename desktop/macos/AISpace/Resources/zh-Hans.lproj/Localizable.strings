@@ -429,6 +429,10 @@
 "What you say is sent to this Space and to no other. When it cannot transcribe, voice input says so and sends nothing." = "你说的话只会发给这个 Space，不会发给别的。它无法转写时，语音输入会提示，并且什么都不发送。";
 "The text is on the clipboard. Press ⌘V to paste it." = "文字已在剪贴板里，按 ⌘V 粘贴。";
 "The text is on the clipboard. Press ⌘V to paste it. To have it go in by itself, allow AI Space in System Settings → Privacy & Security → Accessibility." = "文字已在剪贴板里，按 ⌘V 粘贴。想让它自动填入，请在“系统设置 → 隐私与安全性 → 辅助功能”中允许 AI Space。";
+"Voice language" = "语音输入语言";
+"Same as AI Space" = "与 AI Space 相同";
+"Detect automatically" = "自动识别";
+"The language you speak, for holding fn and for the microphone beside a field. Naming it makes the transcript faster and more accurate; by default it is the language AI Space is shown in." = "你说话用的语言，用于按住 fn 说话和输入框旁的麦克风。指定语言后转写更快、更准；默认与 AI Space 的显示语言相同。";
 
 // Device usage
 "Device usage" = "设备使用";

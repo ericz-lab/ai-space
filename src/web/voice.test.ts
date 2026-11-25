@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { runInNewContext } from "node:vm";
-import { captureProcessor, VoiceTranscript } from "./voice.ts";
+import { captureProcessor, voiceLanguage, VoiceTranscript } from "./voice.ts";
 
 test("partials replace drafts, finals commit once, empty finals clear drafts", () => {
   const transcript = new VoiceTranscript("Existing text ");
@@ -122,4 +122,21 @@ test("speech before the transcriber is ready is held and sent first, then stop",
       else Reflect.deleteProperty(globalThis, key);
     }
   }
+});
+
+test("voice language follows the panel's language unless the setting names one", () => {
+  // Default: the panel's language.
+  expect(voiceLanguage("", "zh")).toBe("zh");
+  expect(voiceLanguage("", "en")).toBe("en");
+  expect(voiceLanguage("", "zh-Hans")).toBe("zh");
+  // A language voice input has no code for: the provider detects it.
+  expect(voiceLanguage("", "fr")).toBe("");
+  expect(voiceLanguage("", "")).toBe("");
+  // Detect, whatever the panel shows.
+  expect(voiceLanguage("auto", "zh")).toBe("");
+  // An explicit language wins over the panel's.
+  expect(voiceLanguage("en", "zh")).toBe("en");
+  expect(voiceLanguage("ja", "en")).toBe("ja");
+  // A saved value this panel does not know is the default.
+  expect(voiceLanguage("xx", "zh")).toBe("zh");
 });

@@ -33,6 +33,52 @@ class Capture extends AudioWorkletProcessor {
 registerProcessor("space-voice", Capture);
 `;
 
+/**
+ * The languages voice input may name (docs/speech.md#languages): codes every provider accepts as
+ * they are, with their own names for the Settings row. Any other panel language lets the provider
+ * detect the language.
+ */
+export const VOICE_LANGUAGES = [
+  { code: "zh", label: "中文" },
+  { code: "en", label: "English" },
+  { code: "ja", label: "日本語" },
+  { code: "ko", label: "한국어" },
+] as const;
+
+/** Settings › General › Voice language: "" the panel's language (the default), "auto" detect, or a code. */
+export type VoiceLanguageSetting = "" | "auto" | (typeof VOICE_LANGUAGES)[number]["code"];
+
+const VOICE_LANGUAGE_KEY = "panel-voice-language";
+const isVoiceCode = (s: string): s is (typeof VOICE_LANGUAGES)[number]["code"] => VOICE_LANGUAGES.some((l) => l.code === s);
+
+/** The `language` voice input sends: the setting's code, else the panel's; empty lets the provider detect it. */
+export function voiceLanguage(setting: string, panelLang: string): string {
+  if (setting === "auto") return "";
+  if (isVoiceCode(setting)) return setting;
+  const primary = panelLang.split("-")[0]?.toLowerCase() ?? "";
+  return isVoiceCode(primary) ? primary : "";
+}
+
+/** The saved setting, "" when none (or no storage). */
+export function loadVoiceLanguage(): VoiceLanguageSetting {
+  try {
+    const saved = localStorage.getItem(VOICE_LANGUAGE_KEY) ?? "";
+    if (saved === "auto" || isVoiceCode(saved)) return saved;
+  } catch {
+    /* no storage: the panel's language */
+  }
+  return "";
+}
+
+export function saveVoiceLanguage(setting: VoiceLanguageSetting): void {
+  try {
+    if (setting) localStorage.setItem(VOICE_LANGUAGE_KEY, setting);
+    else localStorage.removeItem(VOICE_LANGUAGE_KEY);
+  } catch {
+    /* no storage: the choice lasts for this page */
+  }
+}
+
 export type VoiceState = "connecting" | "recording" | "transcribing" | "idle";
 
 /** What is said while the model loads (about 15 s cold) is held, up to this much; recording stops there. */
@@ -54,7 +100,8 @@ export class LiveVoice {
   private heldBytes = 0;
   private flushedBytes = 0;
   private transcript: VoiceTranscript;
-  constructor(prefix: string, private onText: (text: string) => void, private onState: (state: VoiceState) => void, private onError: (error: string) => void) {
+  /** `language`: what `voiceLanguage` chose; empty lets the provider detect it. */
+  constructor(prefix: string, private onText: (text: string) => void, private onState: (state: VoiceState) => void, private onError: (error: string) => void, private language = "") {
     this.transcript = new VoiceTranscript(prefix);
   }
   private deadline(ms: number) {
@@ -145,7 +192,7 @@ export class LiveVoice {
       const url = new URL("/api/speech/live", location.href);
       url.protocol = location.protocol === "https:" ? "wss:" : "ws:";
       const socket = this.socket = new WebSocket(url);
-      socket.onopen = () => socket.send(JSON.stringify({ type: "start", format: "pcm_s16le", sample_rate: 16000, channels: 1, language: "", tag: "voice-input" }));
+      socket.onopen = () => socket.send(JSON.stringify({ type: "start", format: "pcm_s16le", sample_rate: 16000, channels: 1, language: this.language, tag: "voice-input" }));
       socket.onmessage = ({ data }) => {
         if (this.disposed) return;
         try {

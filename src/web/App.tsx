@@ -26,6 +26,7 @@ import { BUILTINS, type Builtin, HOME, type Screen, addScreen, entryKey, move, p
 import { canonicalItems, groupAgents, groupById, groupOf, preferredMachine } from "./agent-groups.ts";
 import { BUILTIN_ICONS, fmtDuration, getJson, recordOpen, relTime, repoUrl, sendJson, type AgentInfo, type AppInfo, type BuiltinIcons, type InboxSummary, type UsageKind, type UsageRow, type WidgetInfo } from "./api.ts";
 import { LANGS, type Lang, localized, saveLang, useLang, withLang } from "./i18n.ts";
+import { loadVoiceLanguage, saveVoiceLanguage, VOICE_LANGUAGES, type VoiceLanguageSetting } from "./voice.ts";
 import SettingsStatus from "./SettingsStatus.tsx";
 import { SECTION_LABEL, type SettingsSection, SettingsNav, saveSection, savedSection } from "./SettingsNav.tsx";
 import Packages from "./Packages.tsx";
@@ -140,6 +141,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
     return n;
   };
   const togglePref = (k: "noPop" | "noPet" | "noWidget") => setPrefs((p) => savePrefs({ ...p, [k]: !p[k] }));
+  const [voiceLanguage, setVoiceLanguage] = useState<VoiceLanguageSetting>(loadVoiceLanguage);
   const pet = prefs.petBuiltin && BUILTIN[prefs.petBuiltin] ? prefs.petBuiltin : DEFAULT_PET;
   const setPet = (name: string) => setPrefs((p) => savePrefs({ ...p, petBuiltin: name }));
   const setsOpen = panel === "settings";
@@ -1060,6 +1062,26 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
                       {t("settings.language")}
                       <select className="setselect" value={lang} onChange={pickLang}>
                         {LANGS.map((l) => (
+                          <option key={l.code} value={l.code}>
+                            {l.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="setrow">
+                      {t("settings.voiceLanguage")}
+                      <select
+                        className="setselect"
+                        value={voiceLanguage}
+                        onChange={(e) => {
+                          const next = e.target.value as VoiceLanguageSetting;
+                          saveVoiceLanguage(next);
+                          setVoiceLanguage(next);
+                        }}
+                      >
+                        <option value="">{t("settings.voiceLanguage.same")}</option>
+                        <option value="auto">{t("settings.voiceLanguage.auto")}</option>
+                        {VOICE_LANGUAGES.map((l) => (
                           <option key={l.code} value={l.code}>
                             {l.label}
                           </option>

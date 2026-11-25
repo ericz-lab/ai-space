@@ -15,7 +15,7 @@ Now callers use `/api/speech/*`. Which provider answers, where it runs, what hap
 | Route | Body | Answer |
 | --- | --- | --- |
 | `GET /api/speech` | | `{ ok, configured, source, configError?, warnings, default: { asr, tts, live }, fallback, voices, providers: [cell], usage24h }`: what this space can do, and each provider's [status cell](#status). |
-| `POST /api/speech/transcribe` | multipart: `file` (required, at most 25 MB), `language` (`zh`, `en`, …; empty lets the provider detect it), `context` (at most 300 characters: terms the speech may contain), `tag`, `provider` | `200 { ok: true, text, language, segments: [{ start, end, text }], provider, call }`. `segments` is empty when the provider gives no timing. |
+| `POST /api/speech/transcribe` | multipart: `file` (required, at most 25 MB), `language` (`zh`, `en`, …; empty lets the provider detect it; see [Languages](#languages)), `context` (at most 300 characters: terms the speech may contain), `tag`, `provider` | `200 { ok: true, text, language, segments: [{ start, end, text }], provider, call }`. `segments` is empty when the provider gives no timing. |
 | `POST /api/speech/speak` | JSON: `text` (required, at most 20,000 characters), `voice` or `voices` (a list, for a provider that reads `Speaker N:` scripts), `tag`, `provider` | `200 audio/wav`, with `x-speech-provider`, `x-speech-voice` and `x-speech-call-id`. |
 | `GET /api/speech/voices` | | `{ ok, providers: [{ provider, voices?, error? }], mapped }`: each provider's own voices (`voice-studio` from its `/api/voices`, an API provider from its configuration) and the [voice table](#voices). |
 | `WS /api/speech/live` | the [live protocol](#live-protocol) | the same |
@@ -196,7 +196,7 @@ Before a call, the voice is checked against the provider's list: `voice-studio`'
 
 `WS /api/speech/live` speaks the Space's own stream protocol. Version 1 is the protocol `voice-studio` defined for `/api/asr/realtime`, so the self-hosted adapter passes it through and an API adapter translates its vendor's frames into it.
 
-1. The client sends `{"type":"start","format":"pcm_s16le","sample_rate":16000,"channels":1,"language":"zh"}`, optionally with `tag` and `provider`. Format, rate and channels are fixed in version 1; `language` empty lets the provider detect it.
+1. The client sends `{"type":"start","format":"pcm_s16le","sample_rate":16000,"channels":1,"language":"zh"}`, optionally with `tag` and `provider`. Format, rate and channels are fixed in version 1; `language` empty lets the provider detect it ([Languages](#languages)).
 2. The Space picks the provider ([Choosing a provider](#choosing-a-provider)) and opens its stream. A provider whose socket cannot be opened (the machine is off, the peer is down) is a link failure: the next candidate is tried before anything reached the client. Once a provider answered, the session stays with it.
 3. The provider answers `loading` while its model loads, then `ready` (`sample_rate`, `max_seconds`, `max_frame_bytes`), to which the Space adds `provider`. The client may record from the start and send what it held after `ready`.
 4. The client sends **binary** signed 16-bit little-endian mono PCM at 16 kHz, at most 100 ms (3,200 bytes) per frame.
@@ -207,6 +207,14 @@ Before a call, the voice is checked against the provider's list: `voice-studio`'
 The Space holds at most 640 frames (about a minute of speech) while the provider's socket opens. Each session is one ledger row: the seconds of audio the client sent, the characters of final text, how it ended.
 
 A browser socket must come from the panel's origin, as for `/api/voice/realtime`; an app's backend connects with its token in the `Authorization` header.
+
+## Languages
+
+`language` (transcribe) and the live `start`'s `language` are a hint: empty lets the provider detect the language, which is slower and less sure (the same 6 s Mandarin clip took 0.74 s with `zh` and 8.5 s without on voice-studio's Qwen3-ASR, which then heard it as Cantonese in traditional characters). The Space sends the providers the hint's primary subtag in lower case (`languageHint` in `types.ts`): `zh-Hans`, `zh-CN` and `en-US` arrive as `zh` and `en`. voice-studio's live socket refuses a code with a hyphen and its model detects for a code it has no name for, so without this a client sending its locale would get a refusal or no hint at all.
+
+What every provider path takes as it is: `zh`, `en`, `ja` and `ko` (voice-studio's Qwen3-ASR names and Whisper's codes, MiniMax's documented hints, OpenAI's ISO-639-1). These are the languages the clients offer.
+
+**The clients' voice input** sends one: the language the client is shown in when it is one of those four, else nothing (detect), unless the person chose otherwise in Settings › General › **Voice language** (语音输入语言): Same as AI Space (the default), Detect automatically (sends nothing), or one of the four. The web panel keeps the choice in the browser (`panel-voice-language`, `src/web/voice.ts`), the Mac and iPhone clients in their user defaults (`voiceLanguage`, `VoiceLanguage` in `desktop/macos/AISpace/Services/SpaceModels.swift`, shared by both). The value sent is always a bare code, so an older Space, which passes it on untouched, works the same.
 
 ## Ledger
 

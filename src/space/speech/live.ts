@@ -2,7 +2,7 @@ import type { ServerWebSocket } from "bun";
 import type { FailureKind } from "../model/failure.ts";
 import type { WsAttachment, WsData } from "../terminal/service.ts";
 import type { LiveSession, SpeechService } from "./service.ts";
-import { ProviderError, SpeechError, TAG_PATTERN, PROVIDER_NAME_PATTERN, type LiveTarget, type SpeechAdapter, type SpeechCaller } from "./types.ts";
+import { languageHint, ProviderError, SpeechError, TAG_PATTERN, PROVIDER_NAME_PATTERN, type LiveTarget, type SpeechAdapter, type SpeechCaller } from "./types.ts";
 
 /**
  * One live dictation session (docs/speech.md#live-protocol) between the client's socket and a
@@ -194,7 +194,7 @@ export function liveAttachment(opts: { service: SpeechService; caller: SpeechCal
           caller = { ...caller, tag: msg.tag };
         }
         if (msg.provider !== undefined && (typeof msg.provider !== "string" || !PROVIDER_NAME_PATTERN.test(msg.provider))) return refuse("invalid_request", "provider must be a provider name");
-        start = { type: "start", ...FORMAT, language: lang };
+        start = { type: "start", ...FORMAT, language: languageHint(lang) };
         try {
           session = opts.service.live(caller, typeof msg.provider === "string" ? { provider: msg.provider } : {});
         } catch (e) {

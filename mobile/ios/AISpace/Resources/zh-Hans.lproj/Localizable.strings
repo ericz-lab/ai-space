@@ -135,7 +135,10 @@
 "Light" = "浅色";
 "Dark" = "深色";
 "Language" = "语言";
-"These belong to this iPhone, as the same choices on the panel belong to each browser. The language follows the app's language in iOS Settings." = "这些选项只属于这台 iPhone，就像面板上的同类选项只属于各自的浏览器。语言跟随 iOS 设置里这个 app 的语言。";
+"These belong to this iPhone, as the same choices on the panel belong to each browser. The language follows the app's language in iOS Settings. Voice input is transcribed in that language too, unless Voice Language names another." = "这些选项只属于这台 iPhone，就像面板上的同类选项只属于各自的浏览器。语言跟随 iOS 设置里这个 app 的语言。语音输入也按这个语言转写，除非“语音输入语言”另选了一种。";
+"Voice language" = "语音输入语言";
+"Same as AI Space" = "与 AI Space 相同";
+"Detect automatically" = "自动识别";
 "Models" = "模型";
 "Default model" = "默认模型";
 "Environment defaults" = "使用环境配置";

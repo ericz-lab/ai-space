@@ -44,6 +44,8 @@ final class Preferences: ObservableObject {
     /// Voice input in any app while fn is held (Dictation.swift): it watches every key press and
     /// wants Accessibility, so it is off until the operator turns it on.
     @Published var voiceInput: Bool { didSet { defaults.set(voiceInput, forKey: "voiceInputFn") } }
+    /// What voice input is transcribed in (VoiceLanguage): "" the app's language, "auto" detect, or a code.
+    @Published var voiceLanguage: String { didSet { defaults.set(voiceLanguage, forKey: VoiceLanguage.defaultsKey) } }
     /// The Space that hears voice input, as a connection id; nil is the selected Space. Speech is
     /// never sent to a Space the person did not choose: the saved Spaces may not all be theirs.
     @Published var voiceInputSpace: String? { didSet { defaults.set(voiceInputSpace, forKey: "voiceInputSpace") } }
@@ -101,6 +103,7 @@ final class Preferences: ObservableObject {
         notifications = defaults.object(forKey: "notifications") as? Bool ?? true
         quickChat = Shortcut(rawValue: defaults.string(forKey: "quickChat") ?? "") ?? .optionSpace
         voiceInput = defaults.bool(forKey: "voiceInputFn")
+        voiceLanguage = defaults.string(forKey: VoiceLanguage.defaultsKey) ?? VoiceLanguage.sameAsApp
         voiceInputSpace = defaults.string(forKey: "voiceInputSpace")
         quickChatAgent = defaults.string(forKey: "quickChatAgent")
         appearance = Appearance(rawValue: defaults.string(forKey: "appearance") ?? "") ?? .system

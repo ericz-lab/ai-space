@@ -3,7 +3,7 @@ import { wantsWebSocket } from "../terminal/api.ts";
 import { type Connect, liveAttachment } from "./live.ts";
 import { MAX_SPEAK_CHARS, type SpeechService } from "./service.ts";
 import { SPEECH_WINDOWS, type SpeechWindow } from "./store.ts";
-import { PROVIDER_NAME_PATTERN, SpeechError, TAG_PATTERN, VOICE_PATTERN, type SpeechCaller } from "./types.ts";
+import { languageHint, PROVIDER_NAME_PATTERN, SpeechError, TAG_PATTERN, VOICE_PATTERN, type SpeechCaller } from "./types.ts";
 
 /**
  * HTTP surface of the speech layer (docs/speech.md#contract):
@@ -73,8 +73,9 @@ export function createSpeechRoutes(opts: SpeechApiOptions): Routes {
       const v = form.get(name);
       return typeof v === "string" ? v.trim() : "";
     };
-    const language = field("language");
-    if (!/^[A-Za-z-]{0,16}$/.test(language)) return fail(400, "language must be a language code such as zh or en");
+    const raw = field("language");
+    if (!/^[A-Za-z-]{0,16}$/.test(raw)) return fail(400, "language must be a language code such as zh or en");
+    const language = languageHint(raw);
     const context = field("context");
     if (context.length > MAX_CONTEXT_CHARS) return fail(400, `context is at most ${MAX_CONTEXT_CHARS} characters`);
     const tag = field("tag") || defaultTag;
