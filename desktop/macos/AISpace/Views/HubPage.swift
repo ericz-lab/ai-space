@@ -177,6 +177,7 @@ struct AgentChatPage: View {
                 ChatView(chat: chats.current, icons: icons, compact: false,
                          offlineMachine: entry?.isOffline == true ? entry?.peer ?? String(localized: "This machine") : nil)
                     .id(chats.current.id)
+                    .environment(\.chatCards, model.chatCards(connection.id, agent: chats.agent))
             }
         }
         .navigationTitle(Text(verbatim: chats.agent.displayTitle))

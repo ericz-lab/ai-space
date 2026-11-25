@@ -13,7 +13,7 @@ below where it does less.
 | Part | What it does |
 | --- | --- |
 | Home | Pages side by side, as on the Mac ([macos-desktop.md](macos-desktop.md)): a sideways swipe on the touchpad, the dots above them, or Ctrl+Page Up and Ctrl+Page Down. The first page is the **Library**: every app (with the panel's own tiles, `builtin:<name>`: App Store, Inbox, Shortcuts, Terminal and Settings, and this client's Panel tile; [below](#built-in-tiles)), agent and widget under the command box ([panel.md](panel.md#omnibox)). Then the **screens**, one page each; the window opens on the first, the **home screen** (主屏幕, "Main" in the app), which carries the command box too ([below](#the-home-screen-at-first)). Typing filters every app, agent and widget, best names first (the web panel's ranking, `src/space/shortcuts/ranking.ts`), and while the box holds a query that page shows the matches. When the Space reads the text as a shortcut it can run (`POST /api/shortcuts/resolve`: arithmetic, a conversion, an action named at its start such as `待办 明天下午3点 写周报`), a row above Ask Space Assistant shows it with what the text filled, and Return opens the panel's Shortcuts page on it, its form filled from the text (`/?page=shortcuts&run=<text>`, `core/shortcuts.ts`); otherwise Return opens the best match when its name holds the whole query, else asks Space Assistant in a new conversation; Ctrl+Return always asks. An agent the Space lists once per machine (the same `app/name` on this machine and on peers) is one tile, standing for the local variant, else the first peer that answers; a screen pinned with one machine's variant shows that tile (`core/agents.ts`, the web's `agent-groups.ts`). A screen shows its tiles, then its **widget cards**, drawn as the panel draws them (`core/widgets.ts`, from `src/web/WidgetBlocks.tsx`): the first block large (value, change, line or bar chart, progress bar, gauge), the next ones as rows, as many as the card's size holds; a list widget its items with their age; an `embed` widget the app's own page in a web view. The screens are this computer's (`~/.config/ai-space/screens.json`, `core/screens.ts`): copied from the panel's once, then changed here and never written to the Space; the one thing that still follows the panel is an app installed from the App Store, which lands on the home screen here as it does there ([below](#apps-installed-from-the-app-store)). Right-click a tile or a card for Open, the screens it is on, Remove from This Screen, Open in Browser and Copy Link; the ⋯ button, or a right-click on a screen's empty part, for New Screen, Rename, Edit (reorder and remove), Copy the Panel's Layout and Delete |
-| Chat | Native conversations with the Space's agents: the agents and recent conversations in a sidebar, messages drawn natively (Markdown, one quiet row per tool call that opens to its input and output, approval and question cards, a failed turn with its reason and Try Again, Grant and retry after a refusal for lack of permission), the permission picker, and, for an agent on several machines, a machine menu naming each machine's agent CLIs (`GET /api/model/inventory`): each machine keeps its own conversations, an offline one is listed but cannot be picked or sent to, and the choice is remembered per agent and opened next time from its tile; pictures attached by button, paste or drop, Stop. A message sent while a turn runs joins it (steering) or waits its turn. A turn survives a dropped connection (it reattaches from the last event) and an app restart (running turns are picked up again). The logic is the Mac's `ChatController`, ported to `core/conversation.ts` |
+| Chat | Native conversations with the Space's agents: the agents and recent conversations in a sidebar, messages drawn natively (Markdown, one quiet row per tool call that opens to its input and output, approval and question cards, a failed turn with its reason and Try Again, Grant and retry after a refusal for lack of permission), the permission picker, and, for an agent on several machines, a machine menu naming each machine's agent CLIs (`GET /api/model/inventory`): each machine keeps its own conversations, an offline one is listed but cannot be picked or sent to, and the choice is remembered per agent and opened next time from its tile; pictures attached by button, paste or drop, Stop. A message sent while a turn runs joins it (steering) or waits its turn. A turn survives a dropped connection (it reattaches from the last event) and an app restart (running turns are picked up again). The logic is the Mac's `ChatController`, ported to `core/conversation.ts`. What an app agent's tools did shows as chat cards under the reply ([below](#chat-cards)) |
 | Inbox | The Space's open threads; opening one marks it read and goes to its page; Mark as Read, Done, Mark All as Read. New unread threads arrive as desktop notifications with Mark as Read and Done, from every saved Space |
 | Terminal | Shells on the Space's machine and its peers, one tab each: xterm.js in a web view whose page counts as the Space's origin, speaking the panel's protocol ([terminal.md](terminal.md)); a passphrase is asked natively and kept in memory |
 | Apps | The Space's pages in tabs: apps, the web panel, links from the inbox or a chat. A link to another app opens in that app's tab, a link off the Space in the browser. A tab moves to a window of its own and back |
@@ -150,11 +150,12 @@ dialogs.
 desktop/linux/
   src/core/       runtime-neutral logic, typed and tested with bun test: URLs, connections,
                   the catalogue and search, Space checks, SSE, chat turns and conversations,
+                  chat cards (`cards.ts`),
                   the inbox, deep links, Markdown to Pango markup, navigation rules, Home's screens
                   and widget cards, the first launch (the look for a Space here, the installer's
                   address and command), strings (en, zh)
-  src/app/        GTK glue (GJS only): window, views, HTTP (libsoup), web views (WebKit),
-                  the Local manager, notifications
+  src/app/        GTK glue (GJS only): window, views, chat cards (`chat-cards.ts`), HTTP
+                  (libsoup), web views (WebKit), the Local manager, notifications
   src/main.ts     the entry point (`gjs -m main.js`)
   src/ball/       the floating ball's own process (`gjs -m ball.js`, GTK 3 on X11)
   src/pet/        the desk pet's own process on the desktop (`gjs -m pet.js`, GTK 3 on X11)
@@ -215,6 +216,42 @@ What the app keeps:
 | `~/.cache/ai-space/catalogue-<connection>.json` | the last catalogue, shown marked as such while the Space cannot be reached |
 | `~/.config/autostart/dev.ai_space.Desktop.desktop` | Start at login (`ai-space --background`) |
 | `~/.config/systemd/user/ai-space-peer-tunnel.service` | the peer tunnel, when one was started in Settings › Peer (remove it there) |
+
+## Chat cards
+
+When a person talks with an app's agent, what its tools did this turn shows as cards under the
+reply, as the web panel draws them (`src/web/ChatCards.tsx`; the contract and its five styles in
+[chat-cards.md](chat-cards.md)). ai-space extracts and checks the cards; the client only decodes,
+draws and calls two routes. `core/cards.ts` holds the rules, unit-tested; `app/chat-cards.ts` the
+widgets; `core/conversation.ts` the calls and each card's state.
+
+- **Where they come from**: a live turn's `{"type":"cards","cards":[...],"token":"..."}` events,
+  and the `cards` of an `ai` message in a restored session (no token). The token stays in memory,
+  on the conversation; nothing of a card is written to disk.
+- **State**: each card with a `state` capability asks `POST /api/agents/cards/state` (the card as
+  received and the agent) when it arrives, when the conversation is shown again (another agent
+  picked, back to Chat) and when a session is opened; the answer lays over what was printed.
+- **Undo**: only on the conversation's latest reply (no message of the person after it) that came
+  live with a token, and only on a `receipt` with an undo. The header's button takes back every
+  item still open ("Undo", "Undo all", "Undo the other N", the web's `chat.card.*` words in both
+  languages); with several items, `rows`, `agenda` and `gallery` items have their own.
+  `POST /api/agents/cards/action` sends the token, the card's index in its event and the ids; a
+  409 `{ readOnly: true }` makes the card read-only with a note. A peer's agent uses
+  `/api/peers/<peer>/agents/cards/*`.
+- **Styles**: `rows` (the first version's look: state circle, or the item's picture or icon,
+  title, a secondary line of time, detail, tags and id, a progress bar), `compact` (one 36 px line
+  per item with a state dot and a short value), `gallery` (4:3 pictures, three columns, two when the
+  card's content is narrower than 360 px), `agenda` (a day block, blank for the same day again,
+  with the month when it is not this month) and `stat` (big values side by side). An unknown style,
+  or one whose required field (`image`, `date`, `value`) is missing on any item, is drawn as
+  `rows`; `stat` on a `receipt` too. The choice is made on the card as printed, so a state answer
+  never moves the layout.
+- **Look**: a card is at most 460 px wide, on the left under the reply (narrower in Quick Chat),
+  in the theme's colours (`app/style.ts`, light and dark). Item icons are symbolic icons of the
+  Adwaita theme, each with a fallback name. Pictures load as app icons do (with the Space's
+  session on its origin), with the divider colour and an image icon until they load or when they
+  do not. A secondary line wraps with `Adw.WrapBox` on libadwaita 1.7 and later, a flow box before.
+- **Links**: an item's link opens as any link of a chat does: the app's tab, or the browser.
 
 ## Floating ball
 

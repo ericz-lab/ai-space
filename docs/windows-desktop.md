@@ -22,11 +22,12 @@ one click away, and the app adds what a page cannot do.
 | Web pages | The terminal (`/?page=terminal`), an agent's chat (`/?page=chat&agent=…`), the App Store (`/?page=store`), each open app and the web panel are web pages in tabs. Each saved Space has its own WebView2 profile (cookies, storage, cache), so signing in on the panel signs in everything that Space's pages and native calls do. A link to one of the Space's own pages never leaves the app: it opens the native page, or its tab; a link to an app of the Space opens in that app's tab, a link off the Space in the default browser. A page that cannot load shows why, with Try Again, Open in Browser and Edit Space… |
 | Sign-in | While a Space needs a sign-in, the window shows its web panel, where the sign-in page appears, in place of the native pages, and the native page again once the panel has signed in |
 | Quick Chat | A small window over every app with one agent's chat (the panel's own, so a conversation there is the same one): Ctrl+Alt+Space by default (Ctrl+Shift+Space, Alt+Shift+Space or off in Settings), the notification area menu, the jump list, a section of the floating ball, or `aispace://chat`. 380 wide as the Mac's, with no title bar: a 40 high header to drag it by (the Space, the agent, Open in Main Window, Close), then the page's chat in its narrow layout, whose header holds the model and the permission choice. The shortcut opens it in the upper middle of the screen, the ball beside itself ([below](#the-floating-ball)). It remembers the agent last used; Escape or Close hides it, and an answer being written goes on |
+| Voice input | A microphone at the end of Home's command box and in Quick Chat's header puts what is said into the field, never sent; and, off until Settings › General turns it on, hold Right Ctrl (or Right Alt) in any app to talk: the words show live at the bottom of the screen and go into the field in front on release ([below](#voice-input)) |
 | Floating ball | A 52 px ball over every app that never takes the keyboard (off until Settings › General turns it on; the notification area menu and its own right-click menu show and hide it) ([below](#the-floating-ball)) |
 | Notification area | The icon (the Mac's menu bar extra): a click opens the window; the menu has each Space with its state (it opens its Home), a sign-in when it needs one, who is working (each opens that agent's chat), the unread threads and the Inbox, and its apps, then Quick Chat, Show the Floating Ball, Settings… and Quit AI Space. Its tooltip counts what is unread and who is working |
 | Notifications | New unread inbox threads of every saved Space as Windows notifications, with Mark as Read and Done; a click opens the thread's link, else the Inbox. The taskbar button carries a badge while something is unread |
 | Links | `aispace://` links as on the Mac (`DeepLink` in `AISpace.Core`): `chat?agent=&text=` (Quick Chat), `open?app=` (the app's tab), `inbox` (the Inbox page), `show`. A link may fill in a message but never sends it. The jump list has Quick Chat and Inbox |
-| Settings | General (notifications, keep running when the window is closed, start at sign-in, the Quick Chat shortcut, the floating ball and its sections, installing, the log), and Spaces (add, edit, make default, sign out, remove) |
+| Settings | General (notifications, keep running when the window is closed, start at sign-in, the Quick Chat shortcut, voice input, the floating ball and its sections, installing, the log), and Spaces (add, edit, make default, sign out, remove) |
 
 The app is one copy per Windows session: starting it again (the Start menu, a link, the jump
 list) hands what it was started with to the running copy. Closing the window leaves it in the
@@ -93,6 +94,8 @@ Linux client's Home lay them out; the rules are in `AISpace.Core` (`HomeCatalogu
   panel's `ranking.ts`, the Mac's `OmniboxRules`). Enter opens the best match when its name holds
   the whole query; anything else, and Ctrl+Enter always, opens Space Assistant's chat with the text
   as a draft, never sent. Down moves into the results, Escape clears, Ctrl+F (or Ctrl+K) comes back.
+  The microphone at its right end, shown when the Space can transcribe, puts what is said after
+  what the box holds, as if typed ([Voice input](#voice-input)).
 - **Shortcuts in the box** (`Views/HomeShortcuts.cs`, [shortcuts.md](shortcuts.md#native-search-and-shared-resolution)):
   a quarter of a second after typing stops, the Space reads the text (`POST /api/shortcuts/resolve`):
   arithmetic, a conversion, an action named at its start with the rest filling its inputs
@@ -216,6 +219,94 @@ draws the ball and the dial and reads the pointer and drags.
 Where it differs from the Mac: Quick Chat is the Space's chat page rather than a native view, so it
 keeps one height (520) instead of growing from 96 to 420 with the replies, and a click elsewhere
 does not hide it.
+
+## Voice input
+
+Status: built and its rules tested (`VoiceTests`), not yet run on a Windows machine: the
+microphone, the keyboard hook, the overlay and the paste into other programs are untried.
+
+The Mac's two forms ([macos-desktop.md](macos-desktop.md#voice-input)): a microphone beside the
+app's own fields, and holding a key to talk in any app. Both go through `VoiceInput.cs`; the rules
+are in `AISpace.Core` (`Voice.cs`, `VoiceSession.cs`, `HoldKey.cs`, `SpaceApi.Voice.cs`).
+
+**Which Space, and whether it can.** The app asks `GET /api/voice` once per Space and offers voice
+only where it answers `transcribe: true` (asked again while the Space does not answer). A field's
+microphone uses that field's Space. Holding the key uses one Space only: the one chosen under
+Settings › General › Transcribe with (shown when more than one is saved), else the selected Space,
+else the default (`VoiceSpace.Choose`). When that Space is not connected or cannot transcribe, the
+overlay says so and nothing is recorded or sent; speech never falls over to another saved Space,
+which may not be the person's own.
+
+**Live, then a clip** (`VoiceSession`, the Mac's `LiveVoice` without the microphone). Recording
+starts at once: the default microphone through waveIn (`Shell/Microphone.cs`), which Windows'
+mapper converts to mono 16 kHz PCM16, in 100 ms buffers. The socket `WS /api/voice/realtime`
+([speech.md](speech.md#live-protocol)) opens with the Space's cookies and origin and is sent
+`start` with the language; what is recorded before `ready` (a cold model load takes about 15 s) is
+held, up to 50 seconds, and sent first, then live audio, in frames of at most 3,200 bytes. Partial
+and final events, by `segment_id`, update the overlay (the last 120 characters). Ending sends the
+rest and `stop`; the text is taken after `done`, at most 70 seconds later. Recording ends by itself
+after 90 seconds. Until the socket is `ready` the whole recording is also kept, so when it is
+refused (a Space whose transcriber has no live socket answers 503), fails or never gets ready, it
+goes up on release as a WAV clip to `POST /api/voice/transcribe` (with `language`) and that text is
+used instead. Segments are joined with a space that is dropped between two Chinese or Japanese
+characters (`VoiceText.Tidy`), so a Chinese transcript has no spaces in it.
+
+**Which language.** Settings › General › Voice language (语音输入语言): Same as AI Space (the
+default: the app's display language, `zh` or `en`, when it is one of `zh`, `en`, `ja`, `ko`, else
+none), Detect automatically (sends none), Chinese, English, Japanese or Korean (`VoiceLanguage`,
+the Mac's rule). Read when a recording starts; sent in the live `start` and on the clip.
+
+**The microphone beside a field** (`Views/VoiceButton.cs`): at the right end of Home's command box
+and in Quick Chat's header. A click records, a second click ends it (red while listening, greyed
+while transcribing); the overlay shows the live words. The transcript goes after what Home's box
+holds (it searches as typed text does and is never submitted), or into Quick Chat's message field
+through the chat page's draft link (`#chat=…&text=`, added to the draft, never sent). The Chat tab
+of the main window and other pages are the Space's web pages, with no native field: holding the
+key reaches them.
+
+**Holding a key in any app** (Settings › General › Hold a key to talk in any app, off by default;
+`Shell/HoldKeyHook.cs`, `HoldKeyRules`). Windows has no fn key programs can see, so the key is
+**Right Ctrl** by default, or Right Alt (the Key setting). Why: held alone, neither does anything
+in Windows or common programs; neither is an input method's default switch (Microsoft Pinyin
+switches on Shift, Japanese IMEs on Alt+\` or the 半角/全角 key, Korean on the 한/영 key); the
+left-hand Ctrl, Alt and Shift and the Windows key are too much a part of shortcuts, and Caps Lock
+would change state. A low-level keyboard hook (`WH_KEYBOARD_LL`, installed only while the setting is
+on) watches the key: a press arms a 0.25 second timer, and recording starts only if the key is
+still held alone when it runs out. A tap does nothing; the key pressed while another key is down,
+or another key pressed before the timer runs out, is a combination and does nothing. Unlike the
+Mac, a key pressed while already recording cancels the recording and nothing is sent: Ctrl is a
+modifier people use, so a slow Ctrl+C must not paste a transcript. When recording starts the app
+types an unassigned key (`0xE8`), so letting go of the key alone does not open the menu bar (Alt)
+or switch an input method set to switch on Ctrl. The hook keeps no key (each goes on unchanged) and
+ignores keys typed by programs. While the key is down its state is also read every 0.1 seconds, so
+a release the hook misses still ends the recording. Not handled: a click with Right Ctrl held for
+longer than 0.25 seconds starts a recording (the hook sees keys, not the mouse); on a keyboard
+layout that uses Right Alt as AltGr, Windows sends a left Ctrl with it, so Right Alt never starts;
+with a Korean layout that turns Right Ctrl into the 한자 key, Right Ctrl never starts.
+
+**How the text goes in** (`DictationRules`): through the clipboard. The transcript is put on it,
+marked to stay out of Windows' clipboard history and cloud clipboard
+(`ExcludeClipboardContentFromMonitorProcessing`, `CanIncludeInClipboardHistory` and
+`CanUploadToCloudClipboard`), Ctrl+V is typed (`SendInput`) into the window in front, and after 0.8
+seconds what the clipboard held before (every format that could be read) comes back, unless
+something was copied meanwhile (the clipboard's sequence number moved). Windows drops keys typed
+into a program running as administrator by one that is not, so when the window in front belongs to
+one (or its rights cannot be read), when no window is in front, or when this app is in front with
+no text field or page focused, the transcript is left on the clipboard and the overlay says to press
+Ctrl+V.
+
+**The overlay** (`Views/VoiceOverlay.cs`, the Mac's capsule): a small topmost tool window at the
+bottom of the work area of the screen under the pointer, 72 above it, that never takes the keyboard
+and lets the pointer through. It shows Listening with the live text, then what was heard with a
+working glyph until the final text is in, or a note (no Space, a Space that cannot transcribe or is
+not connected, the microphone off in Windows' privacy settings or missing, a failed transcription,
+the clipboard fallback) for four seconds. A press while the previous text is still on its way is
+ignored. No cancel key.
+
+**The microphone.** Windows asks no question of a desktop program: Settings › Privacy & security ›
+Microphone holds the switches, which the app reads (`MicrophoneAccess`, the `Deny` values under
+`CapabilityAccessManager\ConsentStore\microphone`) and names when one is off; no microphone at
+all is said too.
 
 ## Inbox
 
@@ -364,18 +455,23 @@ desktop/windows/
                        JSON calls; partial, an area adds its routes in SpaceApi.<Area>.cs) and
                        live state (catalogue, inbox, runs), deep links, navigation and permission
                        rules, installation strings, the search for an AI Space on this computer and
-                       its installer's command (ThisComputer.cs)
+                       its installer's command (ThisComputer.cs), voice input's rules (Voice.cs:
+                       language, transcript, frames, clip, which Space; VoiceSession.cs: the live
+                       session and its fallback; HoldKey.cs: the hold key and the paste;
+                       SpaceApi.Voice.cs: its routes)
   AISpace.Core.Tests/  its tests (xUnit), run on any system
   AISpace/             the app (Windows only): App.xaml.cs (the Mac's AppDelegate), AppModel.cs
                        (the Spaces, their native pages and web tabs, where links go),
-                       MainWindow.cs, FloatingBall.cs, IconStore.cs (a Space's icons with its
+                       MainWindow.cs, FloatingBall.cs, VoiceInput.cs (voice input: the recording,
+                       the Space, the paste), IconStore.cs (a Space's icons with its
                        sign-in), Ui.cs (the pieces the native windows and pages are made of),
                        ThisComputerSetup.cs (the first launch), Web/ (WebView2 profiles and
                        PanelView, the Mac's PanelSession), Views/ (the native pages: NativePage.cs
                        the contract, HomePage, InboxPage, ShortcutsPage, SpaceSettingsPage, PetView;
                        welcome, connection, Settings, Quick Chat, the floating ball's window and
-                       dial), Shell/ (single instance, notification area, notifications, the
-                       shortcut, registration, Win32 calls, the log), Strings*.cs (English, and
+                       dial, the voice overlay and the fields' microphone), Shell/ (single
+                       instance, notification area, notifications, the shortcut, the hold-to-talk
+                       key's hook, the microphone, registration, Win32 calls, the log), Strings*.cs (English, and
                        the Chinese per area), Assets/AISpace.ico (the mark on a transparent
                        ground, drawn by icon.ts)
   Directory.Build.props  shared settings and the version (`bun run set-version` rewrites it)
@@ -432,7 +528,7 @@ What the app keeps:
 | Path | What |
 | --- | --- |
 | `%APPDATA%\ai-space\connections.json` | the saved Spaces (an unreadable file is set aside as `connections.unreadable.json` and the app says so) |
-| `%APPDATA%\ai-space\preferences.json` | keep running, notifications, the shortcut, the window's place, the Quick Chat agent, the floating ball (shown, its place, each Space's sections) |
+| `%APPDATA%\ai-space\preferences.json` | keep running, notifications, the shortcut, the window's place, the Quick Chat agent, the floating ball (shown, its place, each Space's sections), voice input (`voiceInput`, `voiceInputKey`: `RightCtrl` or `RightAlt`, `voiceInputSpace`: a saved Space's id or unset, `voiceLanguage`: `""` same as AI Space, `auto`, or `zh`/`en`/`ja`/`ko`) |
 | `%LOCALAPPDATA%\ai-space-desktop\web\` | WebView2's data, one profile per saved Space: cookies (its sign-in), storage, cache |
 | `%LOCALAPPDATA%\ai-space-desktop\inbox-seen\` | which inbox threads were already notified, per Space |
 | `%LOCALAPPDATA%\ai-space-desktop\logs\windows.log` | the app's log (Settings › General › Open Log Folder) |
@@ -497,7 +593,14 @@ adds `AISpaceWindows/<version>` to the user agent, so a page (the feedback butto
 [feedback.md](feedback.md#context)) can tell this client from a browser. The browser's password
 saving and its developer tools (outside a debug build) are off.
 
+Voice input sends speech to one Space only ([above](#voice-input)), with that Space's sign-in.
+Its keyboard hook, while Settings turns it on, is shown every key typed in the session and acts
+on the talk key alone: it keeps nothing, writes nothing down and changes no key.
+
 ## What the Mac client has and this one does not (yet)
+
+- A microphone in the chat's own message field: the chat is the Space's page, so holding the key
+  (or Quick Chat's microphone) is how speech reaches it.
 
 - Native chat and terminals: the window shows the Space's own pages in tabs.
 - The desk pet on the desktop: it walks along the bottom of Home only.

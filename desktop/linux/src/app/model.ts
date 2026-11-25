@@ -8,7 +8,7 @@ import { normalizeConnectionUrl, sameOrigin } from "../core/url.ts";
 import { Conversation, type RunInfo } from "../core/conversation.ts";
 import { type InboxItem, type InboxSummary, InboxSeen, decodeInbox } from "../core/desktop.ts";
 import { type SpaceMood, decodeMood } from "../core/pet.ts";
-import { dirs, exists, log, logError, newId, path, prefs, readText, readTextSync, savePrefs, sleep, t, writeText } from "./env.ts";
+import { dirs, exists, log, logError, newId, path, prefs, readText, readTextSync, savePrefs, sleep, t, tw, writeText } from "./env.ts";
 import { SpaceClient } from "./http.ts";
 import { collectSoon } from "./memory.ts";
 import { cookieHeader, forgetSession } from "./web.ts";
@@ -388,7 +388,7 @@ export class AppModel {
       onChange: () => this.emit("chat", space),
       // A turn may install or change apps.
       onTurnEnded: () => void this.refresh(space),
-      text: { stopped: t("stopped"), signIn: t("signInFirst"), lost: t("connectionLost"), grantMessage: t("grantMessage"), noTurn: t("noTurn"), answerFailed: (why) => t("answerFailed", { why }) },
+      text: { stopped: t("stopped"), signIn: t("signInFirst"), lost: t("connectionLost"), grantMessage: t("grantMessage"), noTurn: t("noTurn"), answerFailed: (why) => t("answerFailed", { why }), cardReadOnly: tw("chat.card.readOnly") },
     });
     space.conversations.set(agent.id, conv);
     return conv;
