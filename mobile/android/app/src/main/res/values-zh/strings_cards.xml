@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="chat_card_undo">撤回</string>
+    <string name="chat_card_undo_all">全部撤回</string>
+    <string name="chat_card_undo_rest">撤回其余 %1$d 条</string>
+    <string name="chat_card_undo_item">撤回：%1$s</string>
+    <string name="chat_card_undone">已撤回</string>
+    <string name="chat_card_done">已完成</string>
+    <string name="chat_card_changed">已在别处修改</string>
+    <string name="chat_card_read_only">对话已继续，这张卡片现在只读。</string>
+</resources>

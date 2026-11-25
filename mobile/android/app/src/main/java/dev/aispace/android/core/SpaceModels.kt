@@ -87,6 +87,8 @@ data class AgentInfo(
     val description: String? = null,
     val i18n: I18n? = null,
     val avatar: String? = null,
+    /** The icon of the agent's app (the icon pack's over the manifest's), heading its chat cards. */
+    val appIcon: String? = null,
     val runtime: String? = null,
     /** Set on a peer's agent while that machine does not answer. */
     val stale: Boolean? = null,
@@ -111,6 +113,7 @@ data class AgentInfo(
                 description = o.str("description"),
                 i18n = I18nReader.read(o),
                 avatar = o.str("avatar"),
+                appIcon = o.str("appIcon"),
                 runtime = o.str("runtime"),
                 stale = o.bool("stale"),
             )

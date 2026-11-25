@@ -10,6 +10,8 @@ The same as the iPhone client, area by area (see `mobile/ios/README.md` → What
 
 Across machines, as the web panel does: an agent deployed on several machines shows once in the library, search, the screens and the agents list (`core/AgentGroups.kt`: the local variant, else the first peer that answers), and the chat head has a Machine menu that switches to another machine's variant, each with its own conversation; an offline machine is shown and cannot be sent to, and the choice is remembered per agent on the phone. Model usage names the Space, shows `machine:model`, a hub's peers' calls as `<peer>/<app>` and the peers that are missing; App models lists each peer's apps under its name with the peer's own choices; every model picker greys a choice that is not signed in or offline and keeps a saved choice that is no longer offered, marked.
 
+Chat cards, as the web panel draws them (docs/chat-cards.md, `core/ChatCards.kt`, `ui/hub/ChatCardViews.kt`): what an app agent's tools did in a turn shows as cards under the reply, from the run's `cards` event (with its token) and on a restored session's replies (without one). A card is headed by the app's icon and name, asks the app for its items' state each time it is shown, and offers Undo (per item and in the head) only under the conversation's latest reply with a token; the token stays in memory. A 409 `readOnly` turns the card read-only with a note, and a peer's agent uses the peer's card routes. The five styles (`rows`, `compact`, `gallery`, `agenda`, `stat`) are drawn with the theme's tokens; a style whose field is missing on any printed item, or that this client does not know, draws as rows. Item images load as app icons do, with a placeholder until they load or when they fail; a tap on an item opens its link as any link on the Space's pages.
+
 Where Android differs:
 
 | Area | Android |
@@ -84,6 +86,8 @@ On the emulator (Pixel 7, API 36), by screenshots from the debug launch switches
 - Against a real Space behind Cloudflare Access: signing in through Access in the web panel; the catalogue, icons and widget cards over native calls with the profile's cookie; the same after a force-stop (the cookie survives the process); an app on another subdomain opening signed in; the terminal socket through Access to a peer's shell; the chat agents, their earlier chats and a long Markdown answer; swiping between screens, a long press on an app, landscape.
 
 Agents across machines and the machine menu, Settings → Feedback, peers in Model usage and App models, greyed model choices and the CLIs by machine were checked by JVM tests of their `core/` rules and a full compile only, not yet on the emulator or against a hub with peers.
+
+Chat cards were checked by JVM tests of their decoding, rules and request bodies, a full compile, and layout renders of every style in light and dark (Paparazzi, outside the build), not yet on the emulator or against a Space whose app prints cards.
 
 Voice input (the language sent, the Voice language setting, the microphone in the chat's field, the clip fallback, the `GET /api/voice` check) was checked by JVM tests of its `core/` rules and the upload, and a full build, not yet on the emulator or a phone against a Space with a transcriber.
 

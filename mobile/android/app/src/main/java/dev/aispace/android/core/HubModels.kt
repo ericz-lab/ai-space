@@ -949,6 +949,8 @@ data class ChatStored(
     val text: String? = null,
     val steps: List<ChatStep> = emptyList(),
     val tools: List<Tool> = emptyList(),
+    /** An `ai` message's cards (docs/chat-cards.md): read-only, without a token. */
+    val cards: List<ShownCard> = emptyList(),
 ) {
     data class Tool(val name: String, val hint: String = "")
 
@@ -966,7 +968,7 @@ data class ChatStored(
                     Tool(tool.str("name") ?: return@mapNotNull null, tool.str("hint") ?: "")
                 }
             } ?: emptyList()
-            return ChatStored(o.str("role") ?: return null, o.str("text"), ChatStep.history(o.arr("steps")), tools)
+            return ChatStored(o.str("role") ?: return null, o.str("text"), ChatStep.history(o.arr("steps")), tools, ShownCard.restored(o.arr("cards")))
         }
     }
 }
