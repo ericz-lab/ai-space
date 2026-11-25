@@ -55,6 +55,11 @@ export const DOCUMENTED_KINDS: Record<string, { kinds: Record<string, GatewayKin
       "https://platform.minimax.io/docs/api-reference/speech-t2a-http.md",
     ],
   },
+  // Pay-as-you-go takes the dated Model IDs of Ark's model list (checked 2026-11-24).
+  ark: {
+    kinds: ids("image", ["doubao-seedream-5-5-261028", "doubao-seedream-5-0-pro-260628", "doubao-seedream-5-0-flash-260915", "doubao-seedream-4-0-260415"]),
+    source: ["https://www.volcengine.com/docs/82379/1330310", "https://docs.volcengine.com/docs/82379/1541523"],
+  },
   "ark-plan": {
     kinds: ids("image", ["doubao-seedream-5.5", "doubao-seedream-5.0-pro", "doubao-seedream-5.0-flash"]),
     source: ["https://docs.volcengine.com/docs/ark/agent-plan-personal-visual-models?lang=zh"],
