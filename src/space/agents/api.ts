@@ -493,7 +493,13 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
         const permissionMode = typeof body.permissionMode === "string" ? body.permissionMode : undefined;
         if (body.effort !== undefined && !(CHAT_EFFORTS as readonly unknown[]).includes(body.effort)) return error(400, `effort must be one of ${CHAT_EFFORTS.join(", ")}`);
         const effort = body.effort as ChatEffort | undefined;
-        const env: Record<string, string | undefined> = { ...process.env, ...(await loadAppEnv(agent.cwd)), ...(opts.envFor && agent.app !== SPACE_APP ? await opts.envFor(agent.app) : {}) };
+        const env: Record<string, string | undefined> = {
+          ...process.env,
+          ...(await loadAppEnv(agent.cwd)),
+          ...(opts.envFor && agent.app !== SPACE_APP ? await opts.envFor(agent.app) : {}),
+          // Which agent this turn is, for a command the agent runs that wants to return to this conversation later.
+          SPACE_AGENT_ID: agent.id,
+        };
         // What the person changed through the last turn's cards goes before the message (docs/chat-cards.md).
         const changes = cards.changesNote(agent.id, sessionId);
         let run;

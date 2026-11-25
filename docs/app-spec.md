@@ -604,6 +604,7 @@ Environment, always:
 | `SPACE_NAME` | What this space calls itself ([machines.md](machines.md)); the name a hub and other machines know it by. Written to `space.env`. |
 | `SPACE_APP_TOKEN` | Per-app bearer token for the Space API; identifies the app on `POST /api/notify`, `POST /api/events`, `GET /api/events/stream`, `POST /api/call/*`, `POST /api/model/run` and the `/api/chat/*` routes. Written to `space.env`. |
 | `PORT` | For services, and for the app's http and command tasks: the declared `service.port`. |
+| `SPACE_AGENT_ID` | For an agent's chat turn: the agent's id, `<app>/<agent>`. A command the agent runs can record it next to the runtime's own session id, so that an app allowed to reach that agent can continue the conversation later. |
 | `SPACE_TRIGGER` | For task runs: `schedule`, `manual` or `event`. With events, `SPACE_EVENT` (the latest) and `SPACE_EVENTS` (all) as JSON. |
 
 Environment, when declared: `DATABASE_URL` (or `DATABASE_URL_<NAME>` for several), `BLOB_URL`, `S3_*`.
