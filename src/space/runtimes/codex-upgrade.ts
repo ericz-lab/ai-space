@@ -1,5 +1,6 @@
 import { join } from "node:path";
-import { GPT_PRICING } from "../model/pricing.ts";
+import { MODELS_DEV_CACHE, type PriceCatalog } from "../gateway/prices.ts";
+import { mergeGptPricing } from "../model/pricing.ts";
 import { RUNTIMES_FILE, parseRuntimesYaml } from "./config.ts";
 import { spawnCollect } from "./process.ts";
 import type { RuntimeRegistry } from "./registry.ts";
@@ -196,9 +197,13 @@ export async function codexUpgrade(opts: UpgradeOptions): Promise<UpgradeResult>
     for (const p of stalePins(spec.models, tiers)) log(`${spec.name}/${p.tier}: the pin ${p.pinned} keeps an older model than ${p.latest}; remove the line in ${RUNTIMES_FILE} to follow the catalogue`);
   }
 
-  const prices = GPT_PRICING.models as Record<string, unknown>;
-  result.unpriced = [...new Set(Object.values(result.tiers).flatMap((t) => Object.values(t)))].filter((m) => !prices[m!]) as string[];
-  for (const m of result.unpriced) log(`${m} has no price in src/space/model/gpt-prices.json; its ledger rows show no cost until it is added`);
+  // The prices the running Space uses: gpt-prices.json, then models.dev's catalogue it keeps in run/.
+  const dev = await Bun.file(join(opts.home, MODELS_DEV_CACHE)).json().then((c) => c as PriceCatalog, () => undefined);
+  const pricing = mergeGptPricing(dev);
+  const tierModels = [...new Set(Object.values(result.tiers).flatMap((t) => Object.values(t)))].filter((m): m is string => !!m);
+  result.unpriced = tierModels.filter((m) => !pricing.models[m]);
+  for (const m of tierModels.filter((m) => pricing.filled[m])) log(`${m} is priced from ${pricing.filled[m]}; add it to src/space/model/gpt-prices.json for its Fast multiplier or to pin the price`);
+  for (const m of result.unpriced) log(`${m} has no price in src/space/model/gpt-prices.json nor in models.dev's catalogue${dev ? "" : " (none cached yet)"}; its ledger rows show no cost until it is priced`);
 
   if (opts.dryRun) return result;
   if (opts.restart) {

@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
 import { repriceBasis, type Price } from "../gateway/prices.ts";
 import type { PriceBasis } from "../runtimes/types.ts";
-import { MODEL_COST_SQL } from "./pricing.ts";
+import { modelCostSql } from "./pricing.ts";
 import { type CallStatus, type CallTrace, type ModelCall, type ModelCallInput, type Origin, type Usage, type UsageTotals } from "./types.ts";
 
 /**
@@ -81,14 +81,14 @@ type Row = {
   effective_cost_usd: number | null;
 };
 
-const TOTALS_SQL = `
+const totalsSql = () => `
   COUNT(*) AS calls,
   SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS errors,
   COALESCE(SUM(input_tokens), 0) AS input_tokens,
   COALESCE(SUM(cache_write_tokens), 0) AS cache_write_tokens,
   COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
   COALESCE(SUM(output_tokens), 0) AS output_tokens,
-  COALESCE(SUM(${MODEL_COST_SQL}), 0) AS cost_usd,
+  COALESCE(SUM(${modelCostSql()}), 0) AS cost_usd,
   SUM(CASE WHEN price_basis IS NOT NULL AND cost_usd IS NULL THEN 1 ELSE 0 END) AS unpriced,
   COALESCE(SUM(duration_ms), 0) AS duration_ms`;
 
@@ -285,7 +285,7 @@ export class ModelStore {
   }
 
   get(id: number): ModelCall | undefined {
-    const row = this.db.query<Row, [number]>(`SELECT *, ${MODEL_COST_SQL} AS effective_cost_usd FROM model_calls WHERE id = ?`).get(id);
+    const row = this.db.query<Row, [number]>(`SELECT *, ${modelCostSql()} AS effective_cost_usd FROM model_calls WHERE id = ?`).get(id);
     return row ? rowToCall(row) : undefined;
   }
 
@@ -296,7 +296,7 @@ export class ModelStore {
     // SQLite's default limit on bound parameters is far above a thread's length, but stay under it anyway.
     for (let i = 0; i < unique.length; i += 500) {
       const chunk = unique.slice(i, i + 500);
-      const rows = this.db.query<Row, number[]>(`SELECT *, ${MODEL_COST_SQL} AS effective_cost_usd FROM model_calls WHERE id IN (${chunk.map(() => "?").join(",")})`).all(...chunk);
+      const rows = this.db.query<Row, number[]>(`SELECT *, ${modelCostSql()} AS effective_cost_usd FROM model_calls WHERE id IN (${chunk.map(() => "?").join(",")})`).all(...chunk);
       for (const row of rows) {
         const call = rowToCall(row);
         out.set(call.id, call);
@@ -313,20 +313,20 @@ export class ModelStore {
       clauses.push(where ? "AND tag = ?" : "WHERE tag = ?");
       args.push(opts.tag);
     }
-    const sql = `SELECT *, ${MODEL_COST_SQL} AS effective_cost_usd FROM model_calls ${clauses.join(" ")} ORDER BY started_at DESC, id DESC LIMIT ?`;
+    const sql = `SELECT *, ${modelCostSql()} AS effective_cost_usd FROM model_calls ${clauses.join(" ")} ORDER BY started_at DESC, id DESC LIMIT ?`;
     return this.db.query<Row, (string | number)[]>(sql).all(...args, limit).map(rowToCall);
   }
 
   totals(since: number, scope?: string | LedgerScope): UsageTotals {
     const { sql: where, args } = scopeWhere(since, scope);
-    return totalsOf(this.db.query<TotalsRow, (string | number)[]>(`SELECT ${TOTALS_SQL} FROM model_calls ${where}`).get(...args));
+    return totalsOf(this.db.query<TotalsRow, (string | number)[]>(`SELECT ${totalsSql()} FROM model_calls ${where}`).get(...args));
   }
 
   /** Sums grouped by one or more columns, largest first by tokens. */
   groupBy<K extends readonly ("app" | "tag" | "model" | "runtime" | "machine" | "backend" | "origin")[]>(keys: K, since: number, scope?: string | LedgerScope): GroupTotals<Record<K[number], string>>[] {
     const cols = keys.join(", ");
     const { sql: where, args } = scopeWhere(since, scope);
-    const sql = `SELECT ${cols}, ${TOTALS_SQL} FROM model_calls ${where} GROUP BY ${cols}
+    const sql = `SELECT ${cols}, ${totalsSql()} FROM model_calls ${where} GROUP BY ${cols}
                  ORDER BY (COALESCE(SUM(input_tokens), 0) + COALESCE(SUM(cache_write_tokens), 0) + COALESCE(SUM(cache_read_tokens), 0) + COALESCE(SUM(output_tokens), 0)) DESC, calls DESC`;
     const rows = this.db.query<TotalsRow & Record<string, string | number>, (string | number)[]>(sql).all(...args);
     return rows.map((r) => {
@@ -342,7 +342,7 @@ export class ModelStore {
     const { sql: where, args } = scopeWhere(since, scope);
     return this.db
       .query<TotalsRow & { day: string }, (string | number)[]>(
-        `SELECT strftime('%Y-%m-%d', started_at / 1000, 'unixepoch') AS day, ${TOTALS_SQL} FROM model_calls ${where} GROUP BY day ORDER BY day`,
+        `SELECT strftime('%Y-%m-%d', started_at / 1000, 'unixepoch') AS day, ${totalsSql()} FROM model_calls ${where} GROUP BY day ORDER BY day`,
       )
       .all(...args)
       .map((r) => ({ day: r.day, ...totalsOf(r) }));

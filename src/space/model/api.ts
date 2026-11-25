@@ -1,7 +1,7 @@
 import type { ResolvedModel } from "./app-models.ts";
 import { parseImages, type RunImage, spoolImages } from "./images.ts";
 import { type FinalEvent, type PeerRun, PeerRuns, REF_PATTERN } from "./peer-runs.ts";
-import { GPT_PRICING } from "./pricing.ts";
+import { gptPricing } from "./pricing.ts";
 import { type CallChoice, type ModelService, needsLocal } from "./service.ts";
 import { parseImageInput, parseRunInput, parseWindow } from "./spec.ts";
 import { mergeReports, peerReport, type UsageReport, usageReport } from "./report.ts";
@@ -97,7 +97,7 @@ export function createModelRoutes(opts: ModelApiOptions): Routes {
   };
 
   return {
-    "/api/model/pricing": { GET: () => json({ ok: true, ...GPT_PRICING }) },
+    "/api/model/pricing": { GET: () => json({ ok: true, ...gptPricing() }) },
     "/api/model/run": {
       POST: async (req) => {
         let app: string;

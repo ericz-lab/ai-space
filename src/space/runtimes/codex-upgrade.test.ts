@@ -107,4 +107,18 @@ describe("codexUpgrade", () => {
     await codexUpgrade({ home, dryRun: true, restart: true, log: () => {}, run });
     expect(calls.some((c) => c.includes(" update") || c.includes(" exec ") || c.includes("systemctl"))).toBe(false);
   }));
+
+  test("a tier model only models.dev prices is not unpriced; one neither prices is", () => withHome(async (home) => {
+    const pinned = yaml.replace("basic: my-luna", "basic: gpt-9-nova\n      junior: gpt-9-terra");
+    await Bun.write(join(home, "runtimes.yaml"), pinned);
+    const logs: string[] = [];
+    const before = await codexUpgrade({ home, dryRun: true, log: (l) => logs.push(l), run: fake().run });
+    expect(before.unpriced.sort()).toEqual(["gpt-9-nova", "gpt-9-terra"]);
+    expect(logs.some((l) => l.includes("(none cached yet)"))).toBe(true);
+    await Bun.write(join(home, "run", "models-dev-prices.json"), JSON.stringify({ fetchedAt: "2026-11-24T00:00:00.000Z", providers: { openai: { models: { "gpt-9-nova": { input: 1, output: 4 } } } } }));
+    logs.length = 0;
+    const after = await codexUpgrade({ home, dryRun: true, log: (l) => logs.push(l), run: fake().run });
+    expect(after.unpriced).toEqual(["gpt-9-terra"]);
+    expect(logs).toContain("gpt-9-nova is priced from models.dev 2026-11-24; add it to src/space/model/gpt-prices.json for its Fast multiplier or to pin the price");
+  }));
 });

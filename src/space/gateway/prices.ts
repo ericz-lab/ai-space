@@ -322,6 +322,11 @@ export class PriceBook {
     }
   }
 
+  /** models.dev's catalogue as last read or fetched; the ledger's GPT list prices fill their gaps from it. */
+  catalogue(): PriceCatalog | undefined {
+    return this.catalog;
+  }
+
   /** When the catalogue was fetched, and why the price file did not load. */
   status(): { catalogFetchedAt?: string; fileError?: string; modelWatch?: ModelWatchStatus } {
     return { ...(this.catalog ? { catalogFetchedAt: this.catalog.fetchedAt } : {}), ...(this.ownError ? { fileError: this.ownError } : {}), ...(this.modelWatch ? { modelWatch: this.modelWatch.status() } : {}) };
