@@ -349,6 +349,17 @@ text in the message field, never sent; the page reads the fragment once it is up
 follows a later change without reloading, so a new draft for the agent the Chat tab shows needs no
 reload. Quick Chat is the panel's root with that fragment.
 
+Chat cards ([chat-cards.md](chat-cards.md)) come with the page: the Chat tab and Quick Chat are the
+panel's `Chat.tsx`, which draws the cards under a reply (`ChatCards.tsx`), asks their state each
+time they show, offers Undo on the latest live reply and keeps the token in the page's memory, the
+same as in a browser; a peer's agent goes through `/api/peers/<peer>/agents/cards/*` there too. The
+client draws no card natively, because nothing native shows an agent's replies: the notification
+area lists who is working with the run's one-line status, Home's command box and the floating ball
+only open the chat page. A card's link opens a new window (`target=_blank`), which `PanelView`
+hands to `AppModel.OpenLink`: an app's address opens in that app's tab, one of the Space's pages in
+its place, anything else in the browser. New card styles reach this client with the web panel,
+without a release of the app. A native chat surface, when there is one, draws them by the contract.
+
 ## How it is built
 
 C# on .NET 10, WPF in its Fluent theme (it follows the system's light or dark mode and accent
@@ -499,7 +510,8 @@ saving and its developer tools (outside a debug build) are off.
 
 ## What the Mac client has and this one does not (yet)
 
-- Native chat and terminals: the window shows the Space's own pages in tabs.
+- Native chat and terminals: the window shows the Space's own pages in tabs (chat cards with
+  them, [above](#how-the-app-opens-the-spaces-pages)).
 - The desk pet on the desktop: it walks along the bottom of Home only.
 - The Share extension.
 - Updating itself from the published releases; a newer download replaces the installed copy when
