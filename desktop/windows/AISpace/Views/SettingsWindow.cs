@@ -114,9 +114,103 @@ internal sealed class SettingsWindow : Window
             Ui.Text(L.T("Quick Chat"), 14, bold: true),
             Ui.Text(L.T("A small chat window over every app, from anywhere with this shortcut, the notification area or the jump list."), 13, secondary: true),
             shortcut, _shortcutNote,
+            VoiceSettings(),
             FloatingBallSettings(),
             Ui.Column(8, [.. install]),
             Ui.Row(logs), about);
+    }
+
+    /// <summary>
+    /// Voice input (the Mac's Hold fn to talk, Transcribe with and Voice language): holding a key in
+    /// any app, the one Space it goes to, and the language spoken, which the microphones beside
+    /// the fields use too.
+    /// </summary>
+    private UIElement VoiceSettings()
+    {
+        var p = _model.Prefs;
+        var keyRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(24, 0, 0, 0) };
+        var keyNote = Ui.Text("", 12, secondary: true);
+        keyNote.Margin = new Thickness(24, 0, 0, 0);
+        var key = new ComboBox { MinWidth = 160 };
+        key.Items.Add(new ComboBoxItem { Content = L.T("Right Ctrl"), Tag = HoldToTalkKey.RightCtrl });
+        key.Items.Add(new ComboBoxItem { Content = L.T("Right Alt"), Tag = HoldToTalkKey.RightAlt });
+        key.SelectedItem = key.Items.OfType<ComboBoxItem>().First(i => (HoldToTalkKey)i.Tag == p.VoiceInputKey);
+        var keyLabel = Ui.Text(L.T("Key"), 13);
+        keyLabel.VerticalAlignment = VerticalAlignment.Center;
+        keyLabel.Margin = new Thickness(0, 0, 12, 0);
+        keyRow.Children.Add(keyLabel);
+        keyRow.Children.Add(key);
+
+        var spaces = new ComboBox { MinWidth = 260, HorizontalAlignment = HorizontalAlignment.Left };
+        spaces.Items.Add(new ComboBoxItem { Content = L.T("The selected Space"), Tag = Guid.Empty });
+        foreach (var c in _model.Store.Connections) spaces.Items.Add(new ComboBoxItem { Content = c.DisplayNameOr(), Tag = c.Id });
+        spaces.SelectedItem = spaces.Items.OfType<ComboBoxItem>().FirstOrDefault(i => (Guid)i.Tag == (p.VoiceInputSpace ?? Guid.Empty)) ?? spaces.Items[0];
+        spaces.SelectionChanged += (_, _) =>
+        {
+            if (spaces.SelectedItem is not ComboBoxItem { Tag: Guid id }) return;
+            p.VoiceInputSpace = id == Guid.Empty ? null : id;
+            _model.SavePrefs();
+        };
+        var transcribe = Ui.Column(6,
+            Ui.Text(L.T("Transcribe with"), 13),
+            spaces,
+            Ui.Text(L.T("What you say is sent to this Space and to no other. When it cannot transcribe, voice input says so and sends nothing."), 12, secondary: true));
+        transcribe.Margin = new Thickness(24, 0, 0, 0);
+
+        void Sync()
+        {
+            var on = p.VoiceInput;
+            keyRow.Visibility = on ? Visibility.Visible : Visibility.Collapsed;
+            transcribe.Visibility = on && _model.Store.Connections.Count > 1 ? Visibility.Visible : Visibility.Collapsed;
+            var notes = new List<string>();
+            if (on && !_app.VoiceKeyWatched) notes.Add(L.T("Windows did not let AI Space watch the keyboard, so holding the key does nothing. The log says why."));
+            if (on && p.VoiceInputKey == HoldToTalkKey.RightAlt) notes.Add(L.T("Right Alt does nothing on a keyboard layout that uses it as AltGr."));
+            keyNote.Text = string.Join(" ", notes);
+            keyNote.Visibility = notes.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        var hold = new CheckBox { Content = L.T("Hold a key to talk in any app"), IsChecked = p.VoiceInput };
+        hold.Click += (_, _) =>
+        {
+            p.VoiceInput = hold.IsChecked == true;
+            _model.SavePrefs();
+            _app.ApplyVoiceInput();
+            Sync();
+        };
+        key.SelectionChanged += (_, _) =>
+        {
+            if (key.SelectedItem is not ComboBoxItem { Tag: HoldToTalkKey k }) return;
+            p.VoiceInputKey = k;
+            _model.SavePrefs();
+            _app.ApplyVoiceInput();
+            Sync();
+        };
+        Sync();
+
+        var language = new ComboBox { MinWidth = 220, HorizontalAlignment = HorizontalAlignment.Left };
+        void Option(string label, string value) => language.Items.Add(new ComboBoxItem { Content = label, Tag = value });
+        Option(L.T("Same as AI Space"), VoiceLanguage.SameAsApp);
+        Option(L.T("Detect automatically"), VoiceLanguage.Detect);
+        Option(L.T("Chinese"), "zh");
+        Option(L.T("English"), "en");
+        Option(L.T("Japanese"), "ja");
+        Option(L.T("Korean"), "ko");
+        language.SelectedItem = language.Items.OfType<ComboBoxItem>().FirstOrDefault(i => (string)i.Tag == p.VoiceLanguage) ?? language.Items[0];
+        language.SelectionChanged += (_, _) =>
+        {
+            if (language.SelectedItem is not ComboBoxItem { Tag: string value }) return;
+            p.VoiceLanguage = value;
+            _model.SavePrefs();
+        };
+
+        return Ui.Column(8,
+            Ui.Text(L.T("Voice Input"), 14, bold: true),
+            hold,
+            Ui.Text(L.T("Hold the key in any app and talk: the words show at the bottom of the screen as you speak, and when you let go the text goes into the field you are typing in. A tap, or the key pressed with another key, does nothing."), 13, secondary: true),
+            keyRow, keyNote, transcribe,
+            Ui.Text(L.T("Voice language"), 13),
+            language,
+            Ui.Text(L.T("The language you speak, for holding the key and for the microphone beside a field. Naming it makes the transcript faster and more accurate; by default it is the language AI Space is shown in."), 12, secondary: true));
     }
 
     /// <summary>

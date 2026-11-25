@@ -32,7 +32,8 @@ struct ChatView: View {
                                        retry: message.id == chat.messages.last?.id && chat.retryableMessage != nil ? { chat.retry() } : nil,
                                        grant: message.id == chat.messages.last?.id && !chat.busy ? { chat.grantAndRetry() } : nil,
                                        grantPermission: preferences.chatPermission.granting(message.denied),
-                                       answer: message.live ? { id, allow, answers in await chat.answer(id, allow: allow, answers: answers) } : nil)
+                                       answer: message.live ? { id, allow, answers in await chat.answer(id, allow: allow, answers: answers) } : nil,
+                                       cardsActionable: !message.cards.isEmpty && chat.cardsActionable(message), cardStores: chat.cardStores)
                         }
                         if let error = chat.error {
                             // An earlier chat that would not open; a failed turn shows in its own reply.
@@ -230,6 +231,10 @@ struct MessageRow: View {
     let grantPermission: ChatPermission
     /// Answers an approval or a question of the running turn; nil once the turn is over.
     let answer: ChatAnswer?
+    /// The reply is the conversation's latest, so its cards may act while their token is good.
+    var cardsActionable = false
+    /// The conversation's card stores; nil draws no cards.
+    var cardStores: ChatCardStores? = nil
 
     var body: some View {
         switch message.role {
@@ -251,6 +256,10 @@ struct MessageRow: View {
             VStack(alignment: .leading, spacing: 8) {
                 if !message.tools.isEmpty || !message.text.isEmpty || message.activity != nil || !message.steps.isEmpty || !message.pending.isEmpty {
                     reply
+                }
+                if !message.cards.isEmpty, let cardStores {
+                    ChatCardsView(cards: message.cards, actionable: cardsActionable, stores: cardStores)
+                        .padding(.trailing, 24)
                 }
                 // With live chat a refusal is an approval card; the old banner is only for runtimes
                 // that cannot ask (and for a turn that was refused before the card could appear).
@@ -873,5 +882,18 @@ extension ChatController {
         }
         images.append(image)
         imageError = nil
+    }
+}
+
+extension AppModel {
+    /// What a conversation's chat cards need on this Mac: the connection's icons, the agent's app
+    /// (its icon and name from the connection's app list, on the same machine) and the way a link
+    /// opens: an app of the connection as its tab, anything else in the browser.
+    func chatCards(_ connection: UUID, agent: AgentInfo) -> ChatCardsContext {
+        let app = lives[connection]?.apps.first { $0.name == agent.app && $0.peer == agent.peer }
+        return ChatCardsContext(icons: icons(connection), app: ChatCardApp(icon: app?.icon, name: app?.displayTitle)) { [weak self] url in
+            guard let self, let c = self.store.connection(connection) else { return }
+            self.openLink(url, from: c)
+        }
     }
 }

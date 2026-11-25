@@ -963,14 +963,17 @@ struct ChatStored: Decodable, Hashable {
     var text: String?
     var tools: [Tool]?
     var steps: [Step]?
+    /// An `ai` message's chat cards (docs/chat-cards.md), without a token: read-only.
+    var cards: [ChatCard] = []
 
-    private enum CodingKeys: String, CodingKey { case role, text, tools, steps }
+    private enum CodingKeys: String, CodingKey { case role, text, tools, steps, cards }
 
-    init(role: String, text: String?, tools: [Tool]? = nil, steps: [Step]? = nil) {
+    init(role: String, text: String?, tools: [Tool]? = nil, steps: [Step]? = nil, cards: [ChatCard] = []) {
         self.role = role
         self.text = text
         self.tools = tools
         self.steps = steps
+        self.cards = cards
     }
 
     init(from decoder: Decoder) throws {
@@ -979,6 +982,7 @@ struct ChatStored: Decodable, Hashable {
         text = try c.decodeIfPresent(String.self, forKey: .text)
         tools = try? c.decodeIfPresent([Tool].self, forKey: .tools)
         steps = try? c.decodeIfPresent([Step].self, forKey: .steps)
+        cards = (try? c.decodeIfPresent(ChatCardsField.self, forKey: .cards))?.cards ?? []
     }
 }
 

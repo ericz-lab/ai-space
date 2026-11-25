@@ -28,6 +28,7 @@ internal sealed class QuickChatWindow : Window
     private readonly ComboBox _agents = new() { MinWidth = 120 };
     private readonly Grid _host = new();
     private PanelView? _view;
+    private readonly VoiceButton? _mic;
     private bool _filling;
     private bool _placed;
 
@@ -70,9 +71,23 @@ internal sealed class QuickChatWindow : Window
         DockPanel.SetDock(_spaces, Dock.Left);
         bar.Children.Add(close);
         bar.Children.Add(open);
+        var controls = new List<FrameworkElement> { close, open, _spaces, _agents };
+        if (model.Voice is { } voice)
+        {
+            // What is said goes into the chat's message field (the page's draft link), never sent.
+            _mic = new VoiceButton(voice, () => _view is { } v && _model.Store.Get(v.Connection.Id) is { } c ? _model.Api(c) : null, text =>
+            {
+                if (_view is not { } v) return;
+                v.Navigate(PanelLink.Chat(v.Connection.Uri, AgentId(), text));
+                v.FocusPage();
+            });
+            DockPanel.SetDock(_mic, Dock.Right);
+            bar.Children.Add(_mic);
+            controls.Add(_mic);
+        }
         bar.Children.Add(_spaces);
         bar.Children.Add(_agents);
-        foreach (var c in new FrameworkElement[] { close, open, _spaces, _agents })
+        foreach (var c in controls)
         {
             c.VerticalAlignment = VerticalAlignment.Center;
             WindowChrome.SetIsHitTestVisibleInChrome(c, true);
@@ -165,6 +180,7 @@ internal sealed class QuickChatWindow : Window
         if (agent is not null) Remember(id, agent);
         Fill();
         Select(agent ?? Remembered()?.Agent);
+        _mic?.Check();
     }
 
     private void Fill()

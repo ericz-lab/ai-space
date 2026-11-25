@@ -148,6 +148,60 @@ export class ChatSteps {
   snapshot(): ChatStep[] { return this.steps.map((step) => ({ ...step })); }
 }
 
+/** What a live reply's status line says: a message key, and the tool for `chat.running`. */
+export type ReplyStatus = { key: "chat.thinking" } | { key: "chat.running"; name: string } | null;
+type StreamEvent = Event & { event?: { type?: string; index?: number; content_block?: { type?: string; name?: string } } };
+
+/**
+ * Keeps a live reply's status line up while the turn runs, so a pause between a finished paragraph
+ * and the next tool call does not look like a stalled reply. Only streaming text clears it: the
+ * text is the sign then. Claude's partial messages mark where each block starts and ends, so a tool
+ * call shows as running while its input is still being written. An approval the agent waits for
+ * keeps its own line (Chat.tsx sets it on `approval_request`).
+ */
+export class ReplyActivity {
+  private blocks = new Map<number, string>();
+  private generating: string | undefined;
+
+  /** The status after `event`, given the steps with it applied; undefined leaves it as it is. */
+  next(event: StreamEvent, steps: ChatStep[]): ReplyStatus | undefined {
+    const stream = event.type === "stream_event" ? event.event : undefined;
+    if (stream?.delta?.type === "text_delta") return null;
+    if (stream?.type === "message_start") {
+      this.blocks.clear();
+      this.generating = undefined;
+      return undefined;
+    }
+    if (stream?.type === "content_block_start") {
+      const kind = stream.content_block?.type ?? "";
+      if (typeof stream.index === "number") this.blocks.set(stream.index, kind);
+      if (kind !== "tool_use") return undefined;
+      this.generating = stream.content_block?.name || "tool";
+      return this.resumed(steps);
+    }
+    if (stream?.type === "content_block_stop") {
+      return typeof stream.index === "number" && this.blocks.get(stream.index) === "text" ? this.resumed(steps) : undefined;
+    }
+    const blocks = Array.isArray(event.message?.content) ? event.message.content : [];
+    if (event.type === "assistant") {
+      if (blocks.some((b) => b.type === "tool_use")) this.generating = undefined;
+      else if (!blocks.some((b) => b.type === "text" && b.text)) return undefined;
+      return this.resumed(steps);
+    }
+    if (event.type === "user" && blocks.some((b) => b.type === "tool_result")) return this.resumed(steps);
+    if (event.type === "approval_resolved") return this.resumed(steps);
+    return undefined;
+  }
+
+  /** The call being written, else the last tool still running, else thinking; unchanged while an approval waits. */
+  private resumed(steps: ChatStep[]): ReplyStatus | undefined {
+    if (steps.some((s) => s.kind === "approval" && s.state === "waiting")) return undefined;
+    if (this.generating) return { key: "chat.running", name: this.generating };
+    const tool = steps.findLast((s) => s.kind === "tool" && s.state === "running");
+    return tool ? { key: "chat.running", name: tool.name } : { key: "chat.thinking" };
+  }
+}
+
 /**
  * A conversation's job list applied to its tool rows: a row still `background` takes its job's
  * end. Returns the same array when nothing changed.

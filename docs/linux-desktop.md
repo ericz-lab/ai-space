@@ -13,11 +13,12 @@ below where it does less.
 | Part | What it does |
 | --- | --- |
 | Home | Pages side by side, as on the Mac ([macos-desktop.md](macos-desktop.md)): a sideways swipe on the touchpad, the dots above them, or Ctrl+Page Up and Ctrl+Page Down. The first page is the **Library**: every app (with the panel's own tiles, `builtin:<name>`: App Store, Inbox, Shortcuts, Terminal and Settings, and this client's Panel tile; [below](#built-in-tiles)), agent and widget under the command box ([panel.md](panel.md#omnibox)). Then the **screens**, one page each; the window opens on the first, the **home screen** (主屏幕, "Main" in the app), which carries the command box too ([below](#the-home-screen-at-first)). Typing filters every app, agent and widget, best names first (the web panel's ranking, `src/space/shortcuts/ranking.ts`), and while the box holds a query that page shows the matches. When the Space reads the text as a shortcut it can run (`POST /api/shortcuts/resolve`: arithmetic, a conversion, an action named at its start such as `待办 明天下午3点 写周报`), a row above Ask Space Assistant shows it with what the text filled, and Return opens the panel's Shortcuts page on it, its form filled from the text (`/?page=shortcuts&run=<text>`, `core/shortcuts.ts`); otherwise Return opens the best match when its name holds the whole query, else asks Space Assistant in a new conversation; Ctrl+Return always asks. An agent the Space lists once per machine (the same `app/name` on this machine and on peers) is one tile, standing for the local variant, else the first peer that answers; a screen pinned with one machine's variant shows that tile (`core/agents.ts`, the web's `agent-groups.ts`). A screen shows its tiles, then its **widget cards**, drawn as the panel draws them (`core/widgets.ts`, from `src/web/WidgetBlocks.tsx`): the first block large (value, change, line or bar chart, progress bar, gauge), the next ones as rows, as many as the card's size holds; a list widget its items with their age; an `embed` widget the app's own page in a web view. The screens are this computer's (`~/.config/ai-space/screens.json`, `core/screens.ts`): copied from the panel's once, then changed here and never written to the Space; the one thing that still follows the panel is an app installed from the App Store, which lands on the home screen here as it does there ([below](#apps-installed-from-the-app-store)). Right-click a tile or a card for Open, the screens it is on, Remove from This Screen, Open in Browser and Copy Link; the ⋯ button, or a right-click on a screen's empty part, for New Screen, Rename, Edit (reorder and remove), Copy the Panel's Layout and Delete |
-| Chat | Native conversations with the Space's agents: the agents and recent conversations in a sidebar, messages drawn natively (Markdown, one quiet row per tool call that opens to its input and output, approval and question cards, a failed turn with its reason and Try Again, Grant and retry after a refusal for lack of permission), the permission picker, and, for an agent on several machines, a machine menu naming each machine's agent CLIs (`GET /api/model/inventory`): each machine keeps its own conversations, an offline one is listed but cannot be picked or sent to, and the choice is remembered per agent and opened next time from its tile; pictures attached by button, paste or drop, Stop. A message sent while a turn runs joins it (steering) or waits its turn. A turn survives a dropped connection (it reattaches from the last event) and an app restart (running turns are picked up again). The logic is the Mac's `ChatController`, ported to `core/conversation.ts` |
+| Chat | Native conversations with the Space's agents: the agents and recent conversations in a sidebar, messages drawn natively (Markdown, one quiet row per tool call that opens to its input and output, approval and question cards, a failed turn with its reason and Try Again, Grant and retry after a refusal for lack of permission), the permission picker, and, for an agent on several machines, a machine menu naming each machine's agent CLIs (`GET /api/model/inventory`): each machine keeps its own conversations, an offline one is listed but cannot be picked or sent to, and the choice is remembered per agent and opened next time from its tile; pictures attached by button, paste or drop, Stop. A message sent while a turn runs joins it (steering) or waits its turn. A turn survives a dropped connection (it reattaches from the last event) and an app restart (running turns are picked up again). The logic is the Mac's `ChatController`, ported to `core/conversation.ts`. What an app agent's tools did shows as chat cards under the reply ([below](#chat-cards)) |
 | Inbox | The Space's open threads; opening one marks it read and goes to its page; Mark as Read, Done, Mark All as Read. New unread threads arrive as desktop notifications with Mark as Read and Done, from every saved Space |
 | Terminal | Shells on the Space's machine and its peers, one tab each: xterm.js in a web view whose page counts as the Space's origin, speaking the panel's protocol ([terminal.md](terminal.md)); a passphrase is asked natively and kept in memory |
 | Apps | The Space's pages in tabs: apps, the web panel, links from the inbox or a chat. A link to another app opens in that app's tab, a link off the Space in the browser. A tab moves to a window of its own and back |
 | Quick Chat | A small window with one conversation: `ai-space --quick-chat` shows it or hides it. GNOME and KDE let no app register a global shortcut, so Settings shows the command to bind under Keyboard › Custom Shortcuts |
+| Voice input | A microphone beside Home's command box and the chat's message field (Quick Chat's too): the words appear in the field as they are heard and nothing is sent. `ai-space --dictate`, bound to a key the same way, talks into any app: the words show in a capsule at the bottom of the screen, and the text goes into AI Space's own field when it has the keyboard, else onto the clipboard for Ctrl+V ([below](#voice-input)) |
 | Floating ball | A small round ball over every window and every workspace, off until Settings › General › Floating Ball turns it on ([below](#floating-ball)). Resting the pointer on it opens a dial of four sections around a hub; each Space sets its own sections on this computer (an app or an agent, Default, or None; the defaults are Keep, Space Assistant, Todo and Design Studio). Clicking a section opens Quick Chat on its agent (an app's own agent, else Space Assistant told where the work goes); a picture dropped on a section opens it with the picture attached, one dropped on the hub opens Space Assistant with it. Drag the ball to move it (its place is remembered); right-click for Quick Chat, Settings and Hide |
 | Desk pet | The web panel's Claude walking along the bottom of Home, or of the screen over every app ([below](#desk-pet)); on by default, set in Settings › General › Desk Pet. It shows what the current Space is doing: it looks on while agents work, hops in its corner while one waits for an approval, spins when a turn is done and sleeps when all is quiet, with a line about it in a bubble. A click opens that agent's chat or the inbox; right-click to move it between the window and the desktop, or hide it |
 | Settings | Laid out as the web panel's Settings, in its words: the sections on the left, one on the right, and the pages a section opens inside it with Back ([below](#settings)). Then This Computer (the Local edition) and Peer, this computer as a peer of a Space used elsewhere ([below](#peer)) |
@@ -150,14 +151,16 @@ dialogs.
 desktop/linux/
   src/core/       runtime-neutral logic, typed and tested with bun test: URLs, connections,
                   the catalogue and search, Space checks, SSE, chat turns and conversations,
+                  chat cards (`cards.ts`),
                   the inbox, deep links, Markdown to Pango markup, navigation rules, Home's screens
                   and widget cards, the first launch (the look for a Space here, the installer's
                   address and command), strings (en, zh)
-  src/app/        GTK glue (GJS only): window, views, HTTP (libsoup), web views (WebKit),
-                  the Local manager, notifications
+  src/app/        GTK glue (GJS only): window, views, chat cards (`chat-cards.ts`), HTTP
+                  (libsoup), web views (WebKit), the Local manager, notifications
   src/main.ts     the entry point (`gjs -m main.js`)
   src/ball/       the floating ball's own process (`gjs -m ball.js`, GTK 3 on X11)
   src/pet/        the desk pet's own process on the desktop (`gjs -m pet.js`, GTK 3 on X11)
+  src/hud/        the capsule of `--dictate` (`gjs -m hud.js`, GTK 3 on X11)
   terminal/       the terminal page: xterm.js and the session glue, bundled for the browser
   share/          the desktop entry and AppStream metadata
   build.ts        the build (below)
@@ -189,6 +192,16 @@ sudo apt install gjs gir1.2-adw-1 gir1.2-webkit-6.0 gir1.2-soup-3.0 gir1.2-secre
 sudo dnf install gjs libadwaita webkitgtk6.0 libsoup3 libsecret                          # Fedora
 ```
 
+Voice input ([below](#voice-input)) also needs GStreamer's bindings and an audio source plugin.
+WebKitGTK already brings GStreamer itself and its base and good plugins; GNOME Shell brings the
+bindings, so a GNOME desktop usually has all of it. Without the bindings the app runs and only the
+microphone buttons are missing; `install.sh` says so, and so does Settings › General:
+
+```sh
+sudo apt install gir1.2-gstreamer-1.0 gstreamer1.0-plugins-good gstreamer1.0-pulseaudio   # Debian, Ubuntu
+sudo dnf install gstreamer1 gstreamer1-plugins-good                                        # Fedora
+```
+
 Unpack a release tarball (or build one) and run `./install.sh` in it. It installs for the user,
 with no root:
 
@@ -210,11 +223,47 @@ What the app keeps:
 | --- | --- |
 | `~/.config/ai-space/connections.json` | the saved Spaces (an unreadable file is set aside as `connections.unreadable.json` and the app says so) |
 | `~/.config/ai-space/screens.json` | Home's screens, per saved Space, with the apps each Space has had (to tell a newly installed one) |
-| `~/.config/ai-space/preferences.json` | keep running, notifications, the chat permission, the window's size, agent CLIs chosen by hand, the machine chosen for each agent on several machines, appearance, language, widgets on screens, the Settings section shown last, the floating ball (on or off, its place, each Space's sections), the desk pet (on or off, where, its size, its place on the desktop) |
+| `~/.config/ai-space/preferences.json` | keep running, notifications, the chat permission, the window's size, agent CLIs chosen by hand, the machine chosen for each agent on several machines, appearance, language, widgets on screens, the Settings section shown last, the floating ball (on or off, its place, each Space's sections), the desk pet (on or off, where, its size, its place on the desktop), voice input's language and the Space it transcribes with |
 | `~/.local/share/ai-space/desktop/<connection>/` | each Space's web data: cookies (its sign-in), storage, cache |
 | `~/.cache/ai-space/catalogue-<connection>.json` | the last catalogue, shown marked as such while the Space cannot be reached |
 | `~/.config/autostart/dev.ai_space.Desktop.desktop` | Start at login (`ai-space --background`) |
 | `~/.config/systemd/user/ai-space-peer-tunnel.service` | the peer tunnel, when one was started in Settings › Peer (remove it there) |
+
+## Chat cards
+
+When a person talks with an app's agent, what its tools did this turn shows as cards under the
+reply, as the web panel draws them (`src/web/ChatCards.tsx`; the contract and its five styles in
+[chat-cards.md](chat-cards.md)). ai-space extracts and checks the cards; the client only decodes,
+draws and calls two routes. `core/cards.ts` holds the rules, unit-tested; `app/chat-cards.ts` the
+widgets; `core/conversation.ts` the calls and each card's state.
+
+- **Where they come from**: a live turn's `{"type":"cards","cards":[...],"token":"..."}` events,
+  and the `cards` of an `ai` message in a restored session (no token). The token stays in memory,
+  on the conversation; nothing of a card is written to disk.
+- **State**: each card with a `state` capability asks `POST /api/agents/cards/state` (the card as
+  received and the agent) when it arrives, when the conversation is shown again (another agent
+  picked, back to Chat) and when a session is opened; the answer lays over what was printed.
+- **Undo**: only on the conversation's latest reply (no message of the person after it) that came
+  live with a token, and only on a `receipt` with an undo. The header's button takes back every
+  item still open ("Undo", "Undo all", "Undo the other N", the web's `chat.card.*` words in both
+  languages); with several items, `rows`, `agenda` and `gallery` items have their own.
+  `POST /api/agents/cards/action` sends the token, the card's index in its event and the ids; a
+  409 `{ readOnly: true }` makes the card read-only with a note. A peer's agent uses
+  `/api/peers/<peer>/agents/cards/*`.
+- **Styles**: `rows` (the first version's look: state circle, or the item's picture or icon,
+  title, a secondary line of time, detail, tags and id, a progress bar), `compact` (one 36 px line
+  per item with a state dot and a short value), `gallery` (4:3 pictures, three columns, two when the
+  card's content is narrower than 360 px), `agenda` (a day block, blank for the same day again,
+  with the month when it is not this month) and `stat` (big values side by side). An unknown style,
+  or one whose required field (`image`, `date`, `value`) is missing on any item, is drawn as
+  `rows`; `stat` on a `receipt` too. The choice is made on the card as printed, so a state answer
+  never moves the layout.
+- **Look**: a card is at most 460 px wide, on the left under the reply (narrower in Quick Chat),
+  in the theme's colours (`app/style.ts`, light and dark). Item icons are symbolic icons of the
+  Adwaita theme, each with a fallback name. Pictures load as app icons do (with the Space's
+  session on its origin), with the divider colour and an image icon until they load or when they
+  do not. A secondary line wraps with `Adw.WrapBox` on libadwaita 1.7 and later, a flow box before.
+- **Links**: an item's link opens as any link of a chat does: the app's tab, or the browser.
 
 ## Floating ball
 
@@ -313,6 +362,88 @@ as the Mac hides it under Reduce Motion.
 The rules, the build and the desktop pet's drawing (`AISPACE_PET_SHOT`, [below](#debugging)) are
 checked; the two pets have not been tried by hand on a desktop yet.
 
+## Voice input
+
+The Mac's two forms ([macos-desktop.md](macos-desktop.md#voice-input)), as far as Linux lets an
+app go. The rules are the Mac's, ported to `src/core/voice.ts` and tested with `bun test`
+(`voice.test.ts`); `src/app/voice.ts` records and talks to the Space, `src/app/dictation.ts` is the
+`--dictate` side and `src/hud/hud.ts` its capsule.
+
+**In the app's own fields.** A microphone sits beside Home's command box (on the library and the
+home screen) and the chat's message field, Quick Chat's included. It shows only when the field's
+Space answers `GET /api/voice` with `transcribe: true` (asked once per Space; a failed request is
+asked again after 30 seconds). A click records, a second click stops; the words appear in the field
+as they are heard, after what it already held (with no space between Chinese characters), and the
+final text stays there. Nothing is sent or submitted: Return in the chat field does nothing while
+the microphone listens. A failure puts the field back as it was and says why in a bubble beside the
+button.
+
+**In any app: `ai-space --dictate`.** GNOME and KDE let no app register a global shortcut, and a
+Wayland client never sees another app's keys, so, as for Quick Chat, Settings › General › Voice
+Input shows the command to bind under Keyboard › Custom Shortcuts. A shortcut runs a command when
+the key goes down, never when it comes back up, so the key toggles: the first press starts
+recording, the second stops it (the Mac holds fn instead). While it listens a capsule at the bottom
+of the primary screen shows the live words (the last 90 characters), then a grey dot while the
+text is on its way, or a note for four seconds. Recording ends by itself after 90
+seconds. The capsule is a process of its own, `hud.js`, built as the floating ball is ([Floating
+ball](#floating-ball) says why): an override-redirect X11 window through XWayland, which never takes
+the keyboard, so the app being typed in keeps it, and lets clicks through. Then the text goes:
+
+- **into AI Space's own field** when a window of this app has the keyboard and a text field is
+  focused (the command box, the chat field, Quick Chat): inserted at the cursor;
+- **else onto the clipboard**, and the capsule says to press Ctrl+V (Ctrl+Shift+V in a terminal).
+  The clipboard is set through XWayland's display (or X11's on an X11 session): a Wayland client may
+  set the selection only while it has the keyboard, an X11 client may own it at any time, and the
+  desktop hands it on to Wayland apps.
+
+It is not typed or pasted into the other app. Wayland lets no client send keys to another. The one
+sanctioned way, the RemoteDesktop portal, asks the person in a dialog the first time, and that
+dialog takes the keyboard from the very field the text is for; a restored session then runs with
+the desktop's remote-control indicator on; text other than the keyboard's own characters
+(Chinese) cannot be typed as keys, so it would have to post Ctrl+V, which a terminal reads as
+something else; and none of it could be tried here. Tools that type through `uinput` need root or
+a daemon and are not shipped. So the clipboard it is, and the paste is the person's.
+
+A press while the text is on its way does nothing; a press while the Space is still being asked
+cancels. Started by `--dictate` alone, the app holds itself only while a recording runs (Start at
+login keeps it running, so the first press is not slowed by starting it). Without XWayland (rare;
+`DISPLAY` unset) `--dictate` shows a desktop notification that it cannot run, and Settings says so.
+
+**One Space only.** Speech goes to one Space: for a field, the field's (the selected Space); for
+`--dictate`, the one chosen under Settings › General › Voice Input › **Transcribe with** (转写使用;
+shown when more than one Space is saved; **The selected Space**, 当前选中的 Space, by default), else
+the selected one. When it cannot transcribe (or cannot be reached) the capsule says so and nothing
+is sent; it never falls over to another saved Space, which may not be the person's own.
+
+**Live, then a clip.** Recording starts at once, with GStreamer (`autoaudiosrc`, converted to
+16 kHz mono PCM16, pulled from the sink every 50 ms on the main loop), and the live route
+`WS /api/voice/realtime` ([speech.md](speech.md#live-protocol)) opens beside it, through libsoup with
+the Space's session cookies and its origin. What is said before it answers `ready` (a cold model
+load takes about 15 seconds) is held, up to 50 seconds, and sent first, in frames of at most 100 ms;
+`partial` and `final` events update the field or the capsule by `segment_id`. The stop sends the
+rest and `stop`; the text goes in once, after `done` (at most 70 seconds later). Until `ready` the
+whole recording is also kept, so when the live route is refused (a Space whose transcriber has no
+live socket answers 503), fails or never gets ready, the recording goes up on the stop as a WAV to
+`POST /api/voice/transcribe` instead. An error after `ready` ends the recording with the reason.
+
+**Language.** Both routes are told the language spoken ([speech.md](speech.md#languages)):
+Settings › General › Voice Input › **Voice language** (语音输入语言), the web panel's choices and
+words: Same as AI Space (与 AI Space 相同, the default: the app's language, English or Chinese),
+Detect automatically (自动识别, sends none), or 中文, English, 日本語, 한국어. Read when a recording
+starts.
+
+**The microphone.** Before recording, GStreamer's device monitor is asked for a source that is not
+an output's monitor; with none the field or the capsule says "No microphone found" and nothing is
+recorded. A source that fails to start, or fails while recording, ends it with GStreamer's reason.
+A desktop app outside a sandbox needs no permission for the microphone on Linux; PipeWire's own
+access rules, where someone set them, show up as that failure.
+
+**Not tried on a desktop yet.** The rules, the live route, the fallback to a clip, the language,
+the cookies and origin, and the missing-microphone message were run in GJS against a stand-in Space,
+with `audiotestsrc` as the source, on a machine with no display. The buttons, recording from a real
+microphone, the capsule, the clipboard handed to a Wayland app and the insertion into a focused
+field have not been run on a desktop.
+
 ## Settings
 
 The sections and pages are the web panel's (`src/web/App.tsx`, `SettingsNav.tsx`), with the
@@ -324,7 +455,7 @@ panel's Gateway section (the built-in model gateway's providers, keys and tiers,
 
 | Section | What |
 | --- | --- |
-| General | Widgets (cards on Home's screens, on or off), Language (the desktop's, English or 中文; read at start), then this app's own: the saved Spaces (switch, edit the address and name, make default, remove, add; a new address is checked as when connecting), keep running when the window is closed, start at login, notifications, the Quick Chat command, WebKit's sandbox, About |
+| General | Widgets (cards on Home's screens, on or off), Language (the desktop's, English or 中文; read at start), then this app's own: the saved Spaces (switch, edit the address and name, make default, remove, add; a new address is checked as when connecting), keep running when the window is closed, start at login, notifications, the Quick Chat command, Voice Input (the `--dictate` command, Transcribe with, Voice language; [below](#voice-input)), the floating ball, the desk pet, WebKit's sandbox, About |
 | Appearance | Follow system, Light or Dark, for the app and the pages in it. The web panel's themes and colours stay in its own Settings, on the Panel page |
 | Models | The default model of app requests and new Space Assistant chats; AI CLIs by machine (each machine's agent CLIs with version, sign-in and runtime, Check Again, and Add to runtimes.yaml for one found here); App models, a page with each app's and purpose's model and the layer that chose it, changed in place, then each peer's apps under its name, saved on the peer with its own choices. In every model picker a choice that is not signed in or on an offline peer is greyed with the reason, and a saved choice no longer offered stays shown, marked |
 | Automation | Scheduled tasks (schedule, triggers, last and next run; a task unfolds to its model and its last 20 runs) and Events and calls (the catalogue of what apps provide, publish and consume; the last 100 events, each unfolding to its deliveries) |
@@ -357,7 +488,11 @@ session's cookies, so signing in on the panel's page signs in everything. No ope
 used. A redirect, 401 or 403 means "sign in"; native writes name the Space's origin as the page's
 do. The web views follow the Mac's navigation rules (`core/navigation.ts`): links that leave the
 Space open in the browser, new windows never open inside the app, and only the microphone (never
-the camera) is granted, to pages of the view's own origin or the connection's. A remote Space
+the camera) is granted, to pages of the view's own origin or the connection's. The app's own voice
+input ([below](#voice-input)) records only between a click on a microphone (or a `--dictate`) and
+the stop, at most 90 seconds, and sends the audio to one Space, the field's or the one Transcribe
+with names, with that Space's session, never to another saved Space and never anywhere else; it
+keeps no recording on disk. A remote Space
 needs https; plain http is accepted for loopback only. A page whose web process ends is loaded
 again after 1, 2 and then 4 seconds; a fourth crash within a minute stops there and shows the page
 as failed, with Try Again on an app's tab (`crashReload`).
@@ -384,7 +519,10 @@ floating ball had sent it, such as `ball={"type":"open","section":"todo"}`; repe
 `AISPACE_BALL_SHOT=<file.png>` makes the floating ball draw itself and its open dial into a PNG
 whenever the app sends it the dial, which needs no screenshot permission from the desktop.
 `AISPACE_PET_SHOT=<file.png>` makes the desktop pet draw three poses (resting with its bubble,
-walking, the jump) into a PNG once the app sends it a mood, and quit without showing a window. `AISPACE_LOCAL_BUNDLE` points the Local
+walking, the jump) into a PNG once the app sends it a mood, and quit without showing a window.
+`AISPACE_VOICE_SOURCE=<GStreamer source>` records from that instead of the microphone, such as
+`audiotestsrc is-live=true` or `filesrc location=speech.wav ! decodebin`, and `--action app.dictate`
+starts and stops `--dictate`. `AISPACE_LOCAL_BUNDLE` points the Local
 manager at another release tree.
 
 ## Memory
@@ -415,7 +553,7 @@ build it runs. `AISPACE_MEMSTAT=<seconds>` makes any run print its RSS and threa
 
 ## What the Mac client has and this one does not (yet)
 
-- Voice input in the message field.
+- Voice input typed straight into another app, and a key held to talk: the text of `--dictate` goes onto the clipboard, and the key presses it once to start and once to stop ([Voice input](#voice-input) says why).
 - Dragging tiles and cards into order (Edit This Screen moves them with buttons), and a card two columns wide.
 - The web panel's theme presets and colour adjustments in Settings › Appearance (the Panel page's own Settings has them), the hover-details switch and the panel's own desk-pet switch, which only the panel draws (the app's desk pet is set in General), and the panel's 30-second refresh of the Settings pages (here, Reload).
 - Updating the app itself. AI Space installed from the welcome screen is updated with `space upgrade`, not by the app; the Local edition updates its service from the release the app carries.

@@ -88,6 +88,14 @@ public sealed class Preferences
     [JsonPropertyName("floatingBallOrigin")] public double[]? FloatingBallOrigin { get; set; }
     /// <summary>The Claude desk pet walking along the bottom of Home; on until hidden from its menu or Settings › General.</summary>
     [JsonPropertyName("deskPet")] public bool DeskPet { get; set; } = true;
+    /// <summary>Hold a key to talk in any app (the Mac's Hold fn to talk); off until turned on in Settings › General.</summary>
+    [JsonPropertyName("voiceInput")] public bool VoiceInput { get; set; }
+    /// <summary>The key held to talk.</summary>
+    [JsonPropertyName("voiceInputKey")] public HoldToTalkKey VoiceInputKey { get; set; } = HoldToTalkKey.RightCtrl;
+    /// <summary>The saved Space holding the key transcribes with (Transcribe with); unset: the selected Space.</summary>
+    [JsonPropertyName("voiceInputSpace")] public Guid? VoiceInputSpace { get; set; }
+    /// <summary>The language spoken (<see cref="Core.VoiceLanguage"/>): "" Same as AI Space, "auto" Detect automatically, or a code.</summary>
+    [JsonPropertyName("voiceLanguage")] public string VoiceLanguage { get; set; } = Core.VoiceLanguage.SameAsApp;
 
     [JsonIgnore]
     public ScreenPoint? BallOrigin

@@ -29,13 +29,14 @@ public sealed class SpaceApiException(SpaceApiFailure kind, string message, int 
 public sealed partial class SpaceApi
 {
     private readonly HttpClient _http;
+    private readonly HttpMessageHandler _handler;
     private readonly Func<Uri, Task<string?>> _cookies;
 
     public SpaceApi(Uri baseUrl, Func<Uri, Task<string?>> cookies, HttpMessageHandler? handler = null, string? userAgent = null)
     {
         Base = ConnectionRules.Origin(baseUrl);
         _cookies = cookies;
-        handler ??= new SocketsHttpHandler { AllowAutoRedirect = false, UseCookies = false, PooledConnectionLifetime = TimeSpan.FromMinutes(5) };
+        _handler = handler ??= new SocketsHttpHandler { AllowAutoRedirect = false, UseCookies = false, PooledConnectionLifetime = TimeSpan.FromMinutes(5) };
         _http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(30) };
         _http.DefaultRequestHeaders.UserAgent.ParseAdd(userAgent ?? "ai-space-windows");
     }

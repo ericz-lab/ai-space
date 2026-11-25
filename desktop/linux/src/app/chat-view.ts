@@ -5,7 +5,7 @@ import GLib from "gi://GLib";
 import Gtk from "gi://Gtk?version=4.0";
 import Pango from "gi://Pango";
 import { machinesOf } from "../core/agents.ts";
-import { type Agent, pickText } from "../core/catalogue.ts";
+import { type Agent, cardApp, pickText } from "../core/catalogue.ts";
 import { type MachineInventory, decodeInventory, usableClis } from "../core/inventory.ts";
 import { type ChatImage, type ChatStep, MAX_IMAGE_BYTES, MAX_IMAGES, MAX_IMAGES_BYTES, PERMISSIONS, type Permission, granting, imageType, questionAnswer, retryable } from "../core/chat.ts";
 import type { ChatMessage, Conversation } from "../core/conversation.ts";
@@ -13,9 +13,11 @@ import { markdownBlocks } from "../core/markdown.ts";
 import { allCommands, stepGroups, toolSummary, toolVariant } from "../../../../src/web/chat-steps.ts";
 import type { Key } from "../core/i18n.ts";
 import { coalesce, lang, prefs, savePrefs, t, tw } from "./env.ts";
+import { chatCards } from "./chat-cards.ts";
 import { iconWidget } from "./icons.ts";
 import { collectSoon } from "./memory.ts";
 import type { AppModel, Space } from "./model.ts";
+import { VoiceButton } from "./voice.ts";
 
 /**
  * One conversation drawn natively, shared by the main window's chat and Quick Chat: the person's
@@ -117,6 +119,8 @@ export class ChatView {
   private readonly offline: any;
   private readonly placeholder: any;
   private readonly sendHint: any;
+  /** The microphone: the words go into the field as they are heard, and are never sent by themselves. */
+  private readonly voice: VoiceButton;
   private machines: Agent[] = [];
   private machinesKey = "";
   private space: Space | undefined;
@@ -229,6 +233,8 @@ export class ChatView {
     this.machine.connect("notify::selected", () => this.pickMachine(this.machines[this.machine.get_selected()]));
     bar.append(this.machine);
     bar.append(new Gtk.Box({ hexpand: true }));
+    this.voice = new VoiceButton({ read: () => this.draft(), write: (text) => this.input.get_buffer().set_text(text, -1), space: () => this.space });
+    bar.append(this.voice.widget);
     this.stopButton = new Gtk.Button({ icon_name: "media-playback-stop-symbolic", tooltip_text: t("stop"), visible: false });
     this.stopButton.add_css_class("circular");
     this.stopButton.connect("clicked", () => this.conv?.stop());
@@ -243,6 +249,9 @@ export class ChatView {
       const row = new Gtk.Box({ spacing: 6 });
       row.add_css_class("qc-field");
       row.append(field);
+      bar.remove(this.voice.widget);
+      this.voice.widget.set_valign(Gtk.Align.END);
+      row.append(this.voice.widget);
       row.append(this.sendHint);
       bar.remove(this.stopButton);
       this.stopButton.remove_css_class("circular");
@@ -284,6 +293,8 @@ export class ChatView {
       for (const r of this.rows) this.list.remove(r.widget);
       this.rows = [];
       this.stick = true;
+      // A card says its items' current state each time it is shown.
+      this.conv?.refreshCards();
     }
     const name = agent ? pickText(agent.title, agent.i18n, "title", lang) : "";
     this.emptyTitle.set_text(name);
@@ -292,6 +303,7 @@ export class ChatView {
     if (old) this.emptyAvatar.remove(old);
     if (agent) this.emptyAvatar.append(iconWidget(agent.avatar, 72, space?.client, "avatar-default-symbolic", false, true));
     this.renderMachines();
+    this.voice.refresh();
     this.render();
   }
 
@@ -362,6 +374,8 @@ export class ChatView {
 
   send(): void {
     const text = this.draft();
+    // While the microphone listens the field is still being written: stop it first.
+    if (this.voice.busy) return;
     if (!this.conv || this.agent?.stale || (!text.trim() && !this.images.length)) return;
     this.conv.send(text, this.images);
     this.input.get_buffer().set_text("", -1);
@@ -474,12 +488,16 @@ export class ChatView {
       if (this.rows.length) collectSoon();
       this.rows = [];
     }
+    // A reply's cards may act while no message of the person follows it (Conversation.cardsActionable).
+    const lastUser = messages.reduce((at, m, i) => (m.role === "user" ? i : at), -1);
     messages.forEach((m, i) => {
       const last = i === messages.length - 1;
-      const sig = JSON.stringify([m.text, m.steps, m.failure, m.pending, m.activity, m.denied, m.note, m.stopped, m.images.length, last && !conv!.busy]);
+      const actionable = i > lastUser;
+      const cards = m.cards?.map((c) => [c.index, Boolean(c.token), c.states, c.busy, c.readOnly, c.note ?? ""]);
+      const sig = JSON.stringify([m.text, m.steps, m.failure, m.pending, m.activity, m.denied, m.note, m.stopped, m.images.length, last && !conv!.busy, cards, cards && actionable]);
       const row = this.rows[i];
       if (row && row.sig === sig) return;
-      const widget = this.message(m, last);
+      const widget = this.message(m, last, actionable);
       if (row) {
         this.list.insert_child_after(widget, row.widget);
         this.list.remove(row.widget);
@@ -509,7 +527,7 @@ export class ChatView {
     return true;
   };
 
-  private message(m: ChatMessage, last: boolean): any {
+  private message(m: ChatMessage, last: boolean, actionable = false): any {
     if (m.role === "user") {
       const box = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL, spacing: 6, halign: Gtk.Align.END, margin_start: 64 });
       if (m.images.length) {
@@ -550,6 +568,10 @@ export class ChatView {
       const text = a.kind === "starting" ? t("starting") : a.kind === "reconnecting" ? t("reconnecting") : a.kind === "thinking" ? t("thinking") : t("running", { tool: toolTitle(a.tool) });
       row.append(label(text, { classes: ["dim-label", "activity-line"], selectable: false }));
       box.append(row);
+    }
+    // What the agent's tools did this turn, under the reply (docs/chat-cards.md).
+    if (m.cards?.length && this.conv && this.agent) {
+      box.append(chatCards(m.cards, { conv: this.conv, actionable, client: this.space?.client, app: cardApp(this.space?.catalogue, this.agent, lang), onLink: this.o.onLink }));
     }
     if (m.failure) box.append(this.failure(m, last));
     if (last && m.denied.length && !this.conv?.busy) {

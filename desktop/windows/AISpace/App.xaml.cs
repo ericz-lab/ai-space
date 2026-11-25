@@ -26,6 +26,7 @@ public partial class App
     private HotKey? _hotKey;
     private Notifier? _notifier;
     private FloatingBall? _ball;
+    private VoiceInput? _voice;
 
     public static bool Quitting { get; private set; }
 
@@ -71,6 +72,8 @@ public partial class App
         model.PostNotifications = _notifier.Post;
         model.OpenAppSettings = tab => OpenSettings(tab);
         model.OpenQuickChat = (space, agent, text) => Chat().Present(agent, text, space);
+        _voice = model.Voice = new VoiceInput(model, Dispatcher);
+        ApplyVoiceInput();
 
         _main = new MainWindow(model, () => Quitting, () => SettingsWindow.AddSpace(_main, model), () => WelcomeView.Create(model));
         _main.HiddenByClose += OnMainHidden;
@@ -118,6 +121,17 @@ public partial class App
 
     /// <summary>The floating ball (Settings › General turns it on).</summary>
     internal FloatingBall? Ball => _ball;
+
+    /// <summary>Whether the hold-to-talk key is watched as Settings › General asks (false: Windows refused the keyboard hook).</summary>
+    public bool VoiceKeyWatched { get; private set; } = true;
+
+    /// <summary>(Re)installs or removes the hold-to-talk key from the preferences.</summary>
+    public bool ApplyVoiceInput()
+    {
+        if (_voice is null) return false;
+        VoiceKeyWatched = _voice.Apply();
+        return VoiceKeyWatched;
+    }
 
     /// <summary>A short notice from the notification area icon (a picture the floating ball could not take).</summary>
     public void Notice(string title, string text) => _tray?.Notice(title, text);
@@ -180,6 +194,7 @@ public partial class App
         _ball?.Close();
         _tray?.Dispose();
         _hotKey?.Dispose();
+        _voice?.Dispose();
         _instance?.Dispose();
         _instance = null;
         foreach (Window w in Windows) w.Close();

@@ -11,7 +11,7 @@ import { claudeProjectDir } from "../runtimes/transcripts.ts";
 import { loadManifest } from "../scheduler/manifest.ts";
 import { workspacePaths } from "../workspace.ts";
 import { createAgentRoutes } from "./api.ts";
-import { CHANGES_NOTE_PREFIX, extractCards, parseCard, transcriptCards, withoutChangesNote } from "./cards.ts";
+import { CARD_ICONS, CARD_STYLES, CARD_TONES, CHANGES_NOTE_PREFIX, extractCards, parseCard, parseItemStates, resolveCard, transcriptCards, withoutChangesNote } from "./cards.ts";
 import { RunRegistry } from "./runs.ts";
 import { SessionStore } from "./sessions.ts";
 
@@ -64,6 +64,85 @@ describe("card lines", () => {
   test("the note before a message comes off again", () => {
     expect(withoutChangesNote(`${CHANGES_NOTE_PREFIX}Since your last reply the person undid these: x (#1).\n\nhello`)).toBe("hello");
     expect(withoutChangesNote("hello")).toBe("hello");
+  });
+});
+
+describe("card styles and item fields (v2)", () => {
+  const list = (extra: Record<string, unknown> = {}, item: Record<string, unknown> = {}) => ({ v: 1, kind: "list", items: [{ id: "1", title: "x", ...item }], ...extra });
+  const itemOf = (item: Record<string, unknown>) => parseCard(list({}, item))?.items[0];
+
+  test("the names are exported for clients", () => {
+    expect([...CARD_STYLES]).toEqual(["rows", "compact", "gallery", "agenda", "stat"]);
+    expect([...CARD_TONES]).toEqual(["neutral", "accent", "positive", "warning", "negative"]);
+    expect(CARD_ICONS).toHaveLength(12);
+  });
+
+  test("a known style is kept, an unknown one is left out, a style that is not a string drops the card", () => {
+    for (const style of CARD_STYLES) expect(parseCard(list({ style }))?.style).toBe(style);
+    const c = parseCard(list({ style: "timeline" }));
+    expect(c).not.toBeNull();
+    expect(c).not.toHaveProperty("style");
+    expect(parseCard(list({ style: 3 }))).toBeNull();
+    expect(parseCard(list({ style: null }))).toBeNull();
+    expect(parseCard(list({ style: ["rows"] }))).toBeNull();
+  });
+
+  test("a v1 card parses exactly as before, with no new keys", () => {
+    expect(parseCard(card())).toEqual({ v: 1, kind: "receipt", title: "Added 2 todos", items: [{ id: "128", title: "Write the report", detail: "tomorrow 15:00", url: "/?todo=128", version: 1 }, { id: "129", title: "Call Ann", version: 1 }], state: "card-state", actions: { undo: "card-undo" } });
+  });
+
+  test("every item field that keeps its rule is kept", () => {
+    const item = { when: "后天 周四 08:00", date: "2026-12-03T08:00", tags: [{ text: "高", tone: "warning" }, { text: "work" }], image: "/files/a.png", icon: "bell", value: "¥3,200", progress: 0.4 };
+    expect(itemOf(item) as unknown).toEqual({ id: "1", title: "x", ...item });
+    expect(itemOf({ date: "2026-02-28" })?.date).toBe("2026-02-28");
+    expect(itemOf({ date: "2024-02-29" })?.date).toBe("2024-02-29");
+    expect(itemOf({ progress: 0 })?.progress).toBe(0);
+    expect(itemOf({ progress: 1 })?.progress).toBe(1);
+    expect(itemOf({ image: "https://cdn.example.com/a.jpg" })?.image).toBe("https://cdn.example.com/a.jpg");
+    expect(itemOf({ tags: [] })).toEqual({ id: "1", title: "x" });
+    expect(itemOf({ when: "  " })).toEqual({ id: "1", title: "x" });
+  });
+
+  test("a field of the wrong type or too long drops the whole card", () => {
+    const bad: Record<string, unknown>[] = [
+      { when: 5 }, { when: "x".repeat(41) },
+      { date: "2026-12-3" }, { date: "2026-02-30" }, { date: "2026-13-01" }, { date: "2026-12-03T24:00" }, { date: "2026-12-03T08:60" }, { date: "2026-12-03T08:00:00" }, { date: "2026-12-03T08:00Z" }, { date: 20261203 },
+      { tags: "high" }, { tags: { text: "x" } }, { tags: ["high"] }, { tags: [{ tone: "accent" }] }, { tags: [{ text: "x".repeat(25) }] }, { tags: [{ text: "x", tone: 1 }] }, { tags: Array.from({ length: 5 }, (_, i) => ({ text: String(i) })) },
+      { image: "javascript:alert(1)" }, { image: "//evil.example/a.png" }, { image: `/${"a".repeat(2000)}` }, { image: 1 },
+      { icon: 1 }, { icon: ["bell"] },
+      { value: 12 }, { value: "x".repeat(25) },
+      { progress: 1.2 }, { progress: -0.1 }, { progress: "50%" }, { progress: Number.NaN },
+    ];
+    for (const item of bad) expect([item, parseCard(list({}, item))]).toEqual([item, null]);
+  });
+
+  test("an unknown tone or icon name degrades: left off, the card kept", () => {
+    expect(itemOf({ tags: [{ text: "a", tone: "purple" }, { text: "b", tone: "neutral" }] })?.tags).toEqual([{ text: "a" }, { text: "b", tone: "neutral" }]);
+    expect(itemOf({ icon: "rocket" })).toEqual({ id: "1", title: "x" });
+  });
+
+  test("image resolves against the app's public URL like url, and is left out when it does not resolve", () => {
+    const resolve = (u: string) => new URL(u, "https://todo.example.com/app/").toString();
+    const c = resolveCard(parseCard(list({}, { url: "/?todo=1", image: "/files/a.png" }))!, resolve);
+    expect(c.items[0]).toEqual({ id: "1", title: "x", url: "https://todo.example.com/?todo=1", image: "https://todo.example.com/files/a.png" });
+    const gone = resolveCard(parseCard(list({}, { url: "/?todo=1", image: "/files/a.png" }))!, (u) => (u.startsWith("/files") ? "about:blank" : resolve(u)));
+    expect(gone.items[0]).toEqual({ id: "1", title: "x", url: "https://todo.example.com/?todo=1" });
+  });
+
+  test("a state or undo answer carries the same fields; an item that breaks their rules is skipped", () => {
+    const resolve = (u: string) => new URL(u, "https://todo.example.com/").toString();
+    const items = parseItemStates([
+      { id: "1", status: "active", when: "明天", date: "2026-12-01", tags: [{ text: "高", tone: "negative" }, { text: "x", tone: "pink" }], image: "/i/1.png", icon: "flag", value: "3", progress: 0.5 },
+      { id: "2", status: "done", progress: 2 },
+      { id: "3", status: "active", tags: "x" },
+      { id: "4", status: "active", icon: "rocket", title: 7 },
+      { id: "5", status: "removed" },
+    ], resolve);
+    expect(items).toEqual([
+      { id: "1", status: "active", when: "明天", date: "2026-12-01", tags: [{ text: "高", tone: "negative" }, { text: "x" }], image: "https://todo.example.com/i/1.png", icon: "flag", value: "3", progress: 0.5 },
+      { id: "4", status: "active" },
+      { id: "5", status: "removed" },
+    ]);
   });
 });
 

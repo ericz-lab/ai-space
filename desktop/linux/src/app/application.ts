@@ -6,6 +6,7 @@ import Gtk from "gi://Gtk?version=4.0";
 import { parseDeepLink } from "../core/desktop.ts";
 import type { Detail, Section } from "../core/settings.ts";
 import { DeskPet } from "./desk-pet.ts";
+import { Dictation } from "./dictation.ts";
 import { APP_ID, APP_ROOT, log, logError, path, prefs, readTextSync, t } from "./env.ts";
 import { FloatingBall } from "./floating-ball.ts";
 import { Notifier } from "./inbox.ts";
@@ -19,7 +20,7 @@ import { MainWindow, type View } from "./window.ts";
 
 /**
  * The application: one instance per user (a second launch hands its arguments to the first),
- * `aispace://` links, `--quick-chat` for a desktop shortcut, `--background` for the login item.
+ * `aispace://` links, `--quick-chat` and `--dictate` for desktop shortcuts, `--background` for the login item.
  * With "keep running" on, closing the window hides it and notifications keep arriving.
  */
 
@@ -39,11 +40,13 @@ export class Application {
   private quick!: QuickChat;
   private ball!: FloatingBall;
   private deskPet!: DeskPet;
+  private dictation!: Dictation;
   private started = false;
 
   constructor() {
     this.app = new Adw.Application({ application_id: APP_ID, flags: Gio.ApplicationFlags.HANDLES_COMMAND_LINE });
     this.app.add_main_option("quick-chat", 0, GLib.OptionFlags.NONE, GLib.OptionArg.NONE, "Show or hide Quick Chat", null);
+    this.app.add_main_option("dictate", 0, GLib.OptionFlags.NONE, GLib.OptionArg.NONE, "Start or stop voice input (into this app's field, else the clipboard)", null);
     this.app.add_main_option("background", 0, GLib.OptionFlags.NONE, GLib.OptionArg.NONE, "Start without showing the window (for login)", null);
     this.app.add_main_option("screenshot", 0, GLib.OptionFlags.HIDDEN, GLib.OptionArg.FILENAME, "Debug: save the window as a PNG after a few seconds, then quit", "FILE");
     this.app.add_main_option("page", 0, GLib.OptionFlags.HIDDEN, GLib.OptionArg.STRING, "Debug: the view to show (home, chat, inbox, terminal)", "VIEW");
@@ -89,7 +92,9 @@ export class Application {
       },
       () => this.app.lookup_action("pet-sync")?.activate(null),
     );
+    this.dictation = new Dictation(this.app, this.model);
     this.app.connect("shutdown", () => {
+      this.dictation.stop();
       this.ball.stop();
       this.deskPet.stop();
     });
@@ -104,6 +109,7 @@ export class Application {
     };
     act("quit", () => this.app.quit(), ["<Control>q"]);
     act("quick-chat", () => this.quick.toggle(), ["<Control><Shift>space"]);
+    act("dictate", () => this.dictation.toggle());
     act("settings", () => showSettings(this.window().window, this.model, this.local), ["<Control>comma"]);
     act("peer-settings", () => showSettings(this.window().window, this.model, this.local, "peer"));
     act("about", () => this.about());
@@ -154,6 +160,10 @@ export class Application {
     const has = (k: string) => options.contains(k);
     if (has("quick-chat")) {
       this.quick.toggle();
+      return;
+    }
+    if (has("dictate")) {
+      this.dictation.toggle();
       return;
     }
     const links = args.filter((a) => a.startsWith("aispace:"));
