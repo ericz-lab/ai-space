@@ -4,7 +4,7 @@ using AISpace.Core;
 
 namespace AISpace.Views;
 
-/// <summary>The main window's native pages, one set per saved Space (the bar's Home, Inbox, Shortcuts and Settings).</summary>
+/// <summary>The main window's native pages, one set per saved Space (the bar's Home, Inbox, Shortcuts, Settings and Chat).</summary>
 internal enum PageKind
 {
     Home,
@@ -12,6 +12,8 @@ internal enum PageKind
     Shortcuts,
     /// <summary>The Space's own settings (<see cref="SpaceSettingsPage"/>), not the app's (<see cref="SettingsWindow"/>).</summary>
     Settings,
+    /// <summary>A native conversation with one of the Space's agents (<see cref="ChatPage"/>); the bar shows its tab while it is open.</summary>
+    Chat,
 }
 
 /// <summary>
@@ -51,7 +53,7 @@ internal sealed class PageContext(AppModel model, Guid space)
     /// <summary>An app of the Space in its tab, at <paramref name="url"/> when given (else its own page).</summary>
     public void OpenApp(AppInfo app, Uri? url = null) => Model.OpenApp(app, SpaceId, url);
 
-    /// <summary>An agent's chat (the Space's chat page in its in-app tab); <paramref name="text"/> fills the message field and is never sent.</summary>
+    /// <summary>An agent's chat (the native Chat page); <paramref name="text"/> fills the message field and is never sent.</summary>
     public void OpenChat(string? agent, string? text = null) => Model.ShowChat(SpaceId, agent, text);
 
     /// <summary>The Space's terminal (its xterm.js page in an in-app tab).</summary>

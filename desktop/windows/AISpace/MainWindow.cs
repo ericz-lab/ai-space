@@ -14,8 +14,8 @@ namespace AISpace;
 
 /// <summary>
 /// The main window. Its bar holds the Space picker, Home's places (the Library, then a tab per
-/// screen, <see cref="HomePage.Places"/>: each opens Home there), then the web tabs (the apps
-/// opened, the chat, the terminal, the web panel), then, while a web tab is shown, Back, Forward,
+/// screen, <see cref="HomePage.Places"/>: each opens Home there), then the native Chat's tab while
+/// it is open and the web tabs (the apps opened, the terminal, the web panel), then, while a web tab is shown, Back, Forward,
 /// Reload and Open in Browser, and the Inbox with its count while something is unread. The
 /// Space's other pages are its tiles on Home and Ctrl+2 to Ctrl+5; Quick Chat and the app's
 /// settings are the notification area's and Settings › This Computer's. Below, the selected
@@ -409,11 +409,17 @@ internal sealed class MainWindow : Window
         _ => L.T("Connecting…"),
     };
 
-    /// <summary>The web tabs in the order they opened; past five, the rest under More.</summary>
+    /// <summary>The native Chat's tab while it is open, then the web tabs in the order they opened; past five, the rest under More.</summary>
     private void FillTabs()
     {
         _tabs.Children.Clear();
         if (_model.SelectedConnection is not { } c) return;
+        if (_model.ChatOpen(c.Id))
+        {
+            var page = _model.Page(c, PageKind.Chat);
+            var on = _model.SelectedTab is null && _model.SelectedPage == PageKind.Chat && !_model.NeedsSignIn(c.Id);
+            _tabs.Children.Add(TabButton(page.Title, Ui.Chat, on, () => _model.ShowPage(c.Id, PageKind.Chat), () => _model.CloseChat(c.Id), null));
+        }
         var tabs = _model.Tabs(c.Id);
         var visible = OpenTabLayout.Visible(tabs.Select(t => t.Key).ToList(), _model.SelectedTab);
         foreach (var tab in tabs.Where(t => visible.Contains(t.Key))) _tabs.Children.Add(Tab(c, tab));
@@ -438,23 +444,28 @@ internal sealed class MainWindow : Window
 
     private ToggleButton Tab(Connection c, WebTab tab)
     {
-        var close = new Button { Content = Ui.Glyph(Ui.Close, 10), Padding = new Thickness(4), Margin = new Thickness(6, 0, 0, 0), Background = Brushes.Transparent, BorderThickness = new Thickness(0), ToolTip = L.T("Close Tab") };
-        close.Click += (_, e) =>
-        {
-            e.Handled = true;
-            _model.CloseTab(c.Id, tab.Key);
-        };
         var title = tab.View.State.Kind == SpaceStateKind.Unreachable ? $"{tab.Title} ⚠" : tab.Title;
         var glyph = tab.Kind switch
         {
             WebTabKind.Terminal => Ui.Terminal,
-            WebTabKind.Chat => Ui.Chat,
             WebTabKind.Panel => Ui.Web,
             WebTabKind.Store => Ui.Store,
             _ => null,
         };
+        return TabButton(title, glyph, _model.SelectedTab == tab.Key, () => _model.ShowTab(c.Id, tab.Key), () => _model.CloseTab(c.Id, tab.Key), tab.View.Current?.ToString());
+    }
+
+    /// <summary>A tab of the bar: its glyph, title and Close; a middle click closes it too.</summary>
+    private static ToggleButton TabButton(string title, string? glyph, bool selected, Action show, Action closeTab, string? tooltip)
+    {
+        var close = new Button { Content = Ui.Glyph(Ui.Close, 10), Padding = new Thickness(4), Margin = new Thickness(6, 0, 0, 0), Background = Brushes.Transparent, BorderThickness = new Thickness(0), ToolTip = L.T("Close Tab") };
+        close.Click += (_, e) =>
+        {
+            e.Handled = true;
+            closeTab();
+        };
         var label = glyph is null ? Ui.Row(Ui.Text(title, wrap: false), close) : Ui.Row(Ui.Glyph(glyph, 12), Ui.Text(title, wrap: false), close);
-        if (_model.SelectedTab == tab.Key)
+        if (selected)
         {
             // The checked tab is drawn on the accent fill: its words and icons in the colour made for it.
             foreach (var word in new[] { label }.Concat(LogicalTreeHelper.GetChildren(label).OfType<object>()).Append(close.Content).OfType<TextBlock>()) word.SetResourceReference(TextBlock.ForegroundProperty, "TextOnAccentFillColorPrimaryBrush");
@@ -462,16 +473,16 @@ internal sealed class MainWindow : Window
         var t = new ToggleButton
         {
             Content = label,
-            IsChecked = _model.SelectedTab == tab.Key,
+            IsChecked = selected,
             Padding = new Thickness(10, 4, 4, 4),
             Margin = new Thickness(0, 0, 4, 0),
             MaxWidth = 220,
-            ToolTip = tab.View.Current?.ToString(),
+            ToolTip = tooltip ?? title,
         };
-        t.Click += (_, _) => _model.ShowTab(c.Id, tab.Key);
+        t.Click += (_, _) => show();
         t.MouseUp += (_, e) =>
         {
-            if (e.ChangedButton == MouseButton.Middle) _model.CloseTab(c.Id, tab.Key);
+            if (e.ChangedButton == MouseButton.Middle) closeTab();
         };
         return t;
     }
@@ -482,6 +493,11 @@ internal sealed class MainWindow : Window
         if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.W && _model.SelectedConnection is { } c && _model.SelectedTab is { } tab)
         {
             _model.CloseTab(c.Id, tab);
+            e.Handled = true;
+        }
+        else if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.W && _model.SelectedConnection is { } chat && _model.ShownPage() is ChatPage)
+        {
+            _model.CloseChat(chat.Id);
             e.Handled = true;
         }
         else if (e.Key == Key.F5)

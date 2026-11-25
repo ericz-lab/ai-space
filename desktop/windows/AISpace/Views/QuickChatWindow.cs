@@ -4,31 +4,27 @@ using System.Windows.Controls;
 using System.Windows.Shell;
 using AISpace.Core;
 using AISpace.Shell;
-using AISpace.Web;
 
 namespace AISpace.Views;
 
 /// <summary>
-/// Quick Chat (the Mac's <c>QuickChat</c>): a small window over every app with one agent's chat,
-/// opened by the shortcut, the notification area, the jump list or an <c>aispace://chat</c> link.
-/// It shows the Space's own chat, so a conversation here is the same one the panel shows; text
-/// from a link is put in the message field and waits for the person to send it. Closing it only
-/// hides it: an answer being written goes on.
+/// Quick Chat (the Mac's <c>QuickChat</c>): a small window over every app with one agent's native
+/// chat (<see cref="ChatView"/>), opened by the shortcut, the notification area, the jump list or an
+/// <c>aispace://chat</c> link. The conversation is the app's, so it is the same one the main
+/// window's Chat shows; text from a link is put in the message field and waits for the person to
+/// send it. Closing it only hides it: an answer being written goes on.
 ///
 /// Drawn to the Mac's size (Design Studio's design 12): 380 wide, no title bar, a 40 high header
-/// to drag it by with the Space, the agent, "Open in Main Window" and Close; the page's own chat
-/// header below holds the model and the permission choice. A section of the floating ball opens
-/// it beside the ball (<see cref="FloatingBallRules.ChatOrigin"/>), a dropped picture attached;
-/// the shortcut opens it in the upper middle of the screen.
+/// to drag it by with the Space, the agent, Earlier Conversations, New Conversation, "Open in Main
+/// Window" and Close; the permission and model pickers sit above the field. A section of the
+/// floating ball opens it beside the ball (<see cref="FloatingBallRules.ChatOrigin"/>), a dropped
+/// picture attached; the shortcut opens it in the upper middle of the screen.
 /// </summary>
 internal sealed class QuickChatWindow : Window
 {
     private readonly AppModel _model;
-    private readonly ComboBox _spaces = new() { Width = 110, Margin = new Thickness(0, 0, 6, 0), Visibility = Visibility.Collapsed };
-    private readonly ComboBox _agents = new() { MinWidth = 120 };
-    private readonly Grid _host = new();
-    private PanelView? _view;
-    private readonly VoiceButton? _mic;
+    private readonly ComboBox _spaces = new() { Width = 100, Margin = new Thickness(0, 0, 6, 0), Visibility = Visibility.Collapsed };
+    private readonly ChatView _chat;
     private bool _filling;
     private bool _placed;
 
@@ -48,60 +44,56 @@ internal sealed class QuickChatWindow : Window
         WindowChrome.SetWindowChrome(this, new WindowChrome { CaptionHeight = 40, ResizeBorderThickness = new Thickness(6), GlassFrameThickness = new Thickness(0, 0, 0, 1), UseAeroCaptionButtons = false });
         SourceInitialized += (_, _) => Native.MakeToolWindow(this, noActivate: false);
 
+        _chat = new ChatView(model, compact: true);
+        _chat.AgentPicked += Remember;
         var open = Ui.IconButton(Ui.OpenOutside, L.T("Open in Main Window"), () =>
         {
-            if (_view is { } v) _model.ShowChat(v.Connection.Id, AgentId());
+            // The same conversation in the main window, with what is being written.
+            if (_chat.Space is { } space)
+            {
+                var draft = _chat.TakeDraft();
+                _model.ShowChat(space, _chat.AgentId, draft.Length > 0 ? draft : null);
+            }
             Hide();
         });
         _spaces.SelectionChanged += (_, _) =>
         {
             if (_filling || _spaces.SelectedItem is not ComboBoxItem { Tag: Guid id }) return;
-            Open(id, null, null);
-        };
-        _agents.SelectionChanged += (_, _) =>
-        {
-            if (_filling || _view is null || AgentId() is not { } agent) return;
-            Remember(_view.Connection.Id, agent);
-            _view.Navigate(PanelLink.Chat(_view.Connection.Uri, agent));
+            Open(id, Remembered() is { } r && r.Connection == id ? r.Agent : null, null);
         };
         var close = Ui.IconButton(Ui.Close, L.T("Close (Esc)"), Hide);
         var bar = new DockPanel { Height = 40, Margin = new Thickness(8, 0, 4, 0) };
         DockPanel.SetDock(close, Dock.Right);
         DockPanel.SetDock(open, Dock.Right);
+        DockPanel.SetDock(_chat.NewChat, Dock.Right);
+        DockPanel.SetDock(_chat.History, Dock.Right);
         DockPanel.SetDock(_spaces, Dock.Left);
         bar.Children.Add(close);
         bar.Children.Add(open);
-        var controls = new List<FrameworkElement> { close, open, _spaces, _agents };
-        if (model.Voice is { } voice)
-        {
-            // What is said goes into the chat's message field (the page's draft link), never sent.
-            _mic = new VoiceButton(voice, () => _view is { } v && _model.Store.Get(v.Connection.Id) is { } c ? _model.Api(c) : null, text =>
-            {
-                if (_view is not { } v) return;
-                v.Navigate(PanelLink.Chat(v.Connection.Uri, AgentId(), text));
-                v.FocusPage();
-            });
-            DockPanel.SetDock(_mic, Dock.Right);
-            bar.Children.Add(_mic);
-            controls.Add(_mic);
-        }
+        bar.Children.Add(_chat.NewChat);
+        bar.Children.Add(_chat.History);
         bar.Children.Add(_spaces);
-        bar.Children.Add(_agents);
-        foreach (var c in controls)
+        _chat.Agents.HorizontalAlignment = HorizontalAlignment.Left;
+        bar.Children.Add(_chat.Agents);
+        foreach (FrameworkElement c in bar.Children)
         {
             c.VerticalAlignment = VerticalAlignment.Center;
             WindowChrome.SetIsHitTestVisibleInChrome(c, true);
         }
+        var barLine = new Border { Child = bar, BorderThickness = new Thickness(0, 0, 0, 1) };
+        barLine.SetResourceReference(Border.BorderBrushProperty, "DividerStrokeColorDefaultBrush");
         var root = new DockPanel();
-        DockPanel.SetDock(bar, Dock.Top);
-        root.Children.Add(bar);
-        root.Children.Add(_host);
+        DockPanel.SetDock(barLine, Dock.Top);
+        root.Children.Add(barLine);
+        root.Children.Add(_chat);
         Ui.Background(root);
         Content = root;
         _model.Changed += Fill;
+        IsVisibleChanged += (_, _) =>
+        {
+            if (IsVisible) _chat.Shown();
+        };
     }
-
-    private string? AgentId() => _agents.SelectedItem is ComboBoxItem { Tag: string id } ? id : null;
 
     /// <summary>The agent last talked to here, as <c>&lt;connection&gt; &lt;agent&gt;</c> in the preferences.</summary>
     private (Guid Connection, string Agent)? Remembered()
@@ -124,20 +116,21 @@ internal sealed class QuickChatWindow : Window
 
     /// <summary>
     /// Shows the window on <paramref name="agent"/> (or the one last used) of <paramref name="space"/>
-    /// (or the one it shows), with <paramref name="text"/> added to its message field; beside
+    /// (or the one it shows), with <paramref name="text"/> in its message field; beside
     /// <paramref name="near"/> (the floating ball) when given, with <paramref name="picture"/> attached.
     /// </summary>
     public void Present(string? agent, string? text, Guid? space = null, ScreenRect? near = null, BallPicture? picture = null)
     {
         var remembered = Remembered();
         var connection = (space is { } wanted && _model.Store.Get(wanted) is not null ? wanted : (Guid?)null)
-            ?? _view?.Connection.Id ?? remembered?.Connection ?? _model.Selected ?? _model.Store.Default?.Id;
+            ?? (_chat.Space is { } shown && _model.Store.Get(shown) is not null ? shown : (Guid?)null)
+            ?? remembered?.Connection ?? _model.Selected ?? _model.Store.Default?.Id;
         if (connection is not { } id)
         {
             _model.ShowMainWindow();
             return;
         }
-        Open(id, agent ?? (remembered?.Connection == id ? remembered?.Agent : null), text);
+        Open(id, agent ?? (_chat.Space == id ? null : remembered?.Connection == id ? remembered?.Agent : null), text);
         if (near is { } ball)
         {
             var area = Native.WorkArea(this, new Point(ball.X + ball.Width / 2, ball.Y + ball.Height / 2));
@@ -156,86 +149,39 @@ internal sealed class QuickChatWindow : Window
         }
         Show();
         Activate();
-        _view?.FocusPage();
-        if (picture is not null && _view is { } v) _ = v.DropPicture(picture.Name, picture.Type, picture.Bytes);
+        if (picture is not null) _chat.AddImage(new ChatImage(picture.Name, picture.Type, picture.Bytes));
+        _chat.FocusComposer();
     }
 
     private void Open(Guid id, string? agent, string? text)
     {
-        if (_model.Store.Get(id) is not { } c) return;
-        var link = PanelLink.Chat(c.Uri, agent, text);
-        if (_view is { IsDisposed: false } v && v.Connection.Id == id && ConnectionRules.SameOrigin(v.Home, c.Uri))
-        {
-            v.Navigate(link);
-        }
-        else
-        {
-            _view?.Close();
-            _host.Children.Clear();
-            v = _model.NewView(c, c.Uri, verifiesSpace: true, app: null);
-            _view = v;
-            _host.Children.Add(v);
-            v.Load(link);
-        }
+        if (_model.Store.Get(id) is null) return;
+        _chat.Show(id, agent, text);
         if (agent is not null) Remember(id, agent);
         Fill();
-        Select(agent ?? Remembered()?.Agent);
-        _mic?.Check();
     }
 
     private void Fill()
     {
-        if (_spaces.IsDropDownOpen || _agents.IsDropDownOpen) return;
+        // A Space or agent picked elsewhere may have new agents: the view lists them again.
+        if (_chat.Space is { } space && _model.Lives.TryGetValue(space, out _)) _chat.LiveChanged();
+        if (_spaces.IsDropDownOpen) return;
         _filling = true;
         try
         {
-            var current = _view?.Connection.Id;
             _spaces.Items.Clear();
             foreach (var c in _model.Store.Connections)
             {
                 var item = new ComboBoxItem { Content = c.DisplayNameOr(), Tag = c.Id };
                 _spaces.Items.Add(item);
-                if (c.Id == current) _spaces.SelectedItem = item;
+                if (c.Id == _chat.Space) _spaces.SelectedItem = item;
             }
             _spaces.Visibility = _model.Store.Connections.Count > 1 ? Visibility.Visible : Visibility.Collapsed;
-            var selected = AgentId();
-            _agents.Items.Clear();
-            if (current is { } id && _model.Lives.TryGetValue(id, out var live))
-            {
-                // One entry per agent, the local machine's, as the panel's agent list.
-                foreach (var a in live.Agents.Where(a => a.Peer is null || !live.Agents.Any(b => b.Peer is null && b.App == a.App && b.Name == a.Name)))
-                {
-                    var title = a.Peer is null ? a.DisplayTitle() : $"{a.DisplayTitle()} · {a.Peer}";
-                    _agents.Items.Add(new ComboBoxItem { Content = title, Tag = a.Id, IsEnabled = !a.Stale });
-                }
-            }
-            if (selected is not null) SelectQuiet(selected);
-            _agents.Visibility = _agents.Items.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
         }
         finally
         {
             _filling = false;
         }
-    }
-
-    private void Select(string? agent)
-    {
-        _filling = true;
-        try
-        {
-            SelectQuiet(agent);
-        }
-        finally
-        {
-            _filling = false;
-        }
-    }
-
-    private void SelectQuiet(string? agent)
-    {
-        var match = _agents.Items.OfType<ComboBoxItem>().FirstOrDefault(i => (string)i.Tag == agent)
-            ?? _agents.Items.OfType<ComboBoxItem>().FirstOrDefault(i => (string)i.Tag == "space/assistant");
-        _agents.SelectedItem = match;
     }
 
     protected override void OnClosing(CancelEventArgs e)

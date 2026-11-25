@@ -15,8 +15,6 @@ internal enum WebTabKind
     App,
     /// <summary>The Space's terminal page (<c>/?page=terminal</c>).</summary>
     Terminal,
-    /// <summary>The Space's chat page (<c>/?page=chat&amp;agent=…</c>).</summary>
-    Chat,
     /// <summary>The web panel itself, for what has no native page yet and for signing in.</summary>
     Panel,
     /// <summary>The Space's App Store page (<c>/?page=store</c>).</summary>
@@ -25,8 +23,8 @@ internal enum WebTabKind
 
 /// <summary>
 /// A web tab of the main window: an app of the Space, or one of the Space's own pages (terminal,
-/// chat, the App Store, the web panel). <see cref="Key"/> names it among the Space's tabs: <c>app:&lt;id&gt;</c>,
-/// <c>terminal</c>, <c>chat</c>, <c>store</c>, <c>panel</c>.
+/// the App Store, the web panel). <see cref="Key"/> names it among the Space's tabs: <c>app:&lt;id&gt;</c>,
+/// <c>terminal</c>, <c>store</c>, <c>panel</c>.
 /// </summary>
 internal sealed record WebTab(string Key, WebTabKind Kind, AppInfo? App, PanelView View)
 {
@@ -37,8 +35,7 @@ internal sealed record WebTab(string Key, WebTabKind Kind, AppInfo? App, PanelVi
         WebTabKind.App => App!.DisplayTitle(),
         WebTabKind.Terminal => L.T("Terminal"),
         WebTabKind.Panel => L.T("Web Panel"),
-        WebTabKind.Store => L.T("App Store"),
-        _ => View.PageTitle is { Length: > 0 } t ? t.Replace(" · ai-space", "", StringComparison.Ordinal) : L.T("Chat"),
+        _ => L.T("App Store"),
     };
 }
 
@@ -48,7 +45,7 @@ internal sealed record WebTab(string Key, WebTabKind Kind, AppInfo? App, PanelVi
 /// every Space for the inbox and the notification area, and where links go. Runs on the UI thread.
 ///
 /// The main window shows, for the selected Space, either one of its native pages
-/// (<see cref="SelectedPage"/>: Home, Inbox, Shortcuts, Settings) or one of its web tabs
+/// (<see cref="SelectedPage"/>: Home, Inbox, Shortcuts, Settings, Chat) or one of its web tabs
 /// (<see cref="SelectedTab"/>). While the Space needs a sign-in, its web panel (where the sign-in
 /// page appears) stands in for every native page, until the panel has signed in.
 /// </summary>
@@ -63,6 +60,10 @@ internal sealed class AppModel
     private readonly Dictionary<Guid, Dictionary<PageKind, NativePage>> _pages = [];
     private readonly Dictionary<Guid, SpaceApi> _apis = [];
     private readonly Dictionary<Guid, IconStore> _icons = [];
+    /// <summary>Every native conversation, by Space and agent id: the main window's Chat and Quick Chat share them.</summary>
+    private readonly Dictionary<(Guid Space, string Agent), ChatConversation> _chats = [];
+    /// <summary>The Spaces whose Chat tab is open in the bar.</summary>
+    private readonly HashSet<Guid> _chatOpen = [];
 
     public AppModel(Dispatcher ui, AppPaths paths)
     {
@@ -159,6 +160,7 @@ internal sealed class AppModel
             PageKind.Home => new HomePage(context),
             PageKind.Inbox => new InboxPage(context),
             PageKind.Shortcuts => new ShortcutsPage(context),
+            PageKind.Chat => new ChatPage(context),
             _ => new SpaceSettingsPage(context),
         };
         pages[kind] = page;
@@ -299,12 +301,7 @@ internal sealed class AppModel
             var view = kind == WebTabKind.Panel ? Panel(c) : NewView(c, url, verifiesSpace: false, app: null);
             if (kind != WebTabKind.Panel)
             {
-                var own = kind switch
-                {
-                    WebTabKind.Terminal => SpacePageKind.Terminal,
-                    WebTabKind.Store => SpacePageKind.Store,
-                    _ => SpacePageKind.Chat,
-                };
+                var own = kind == WebTabKind.Terminal ? SpacePageKind.Terminal : SpacePageKind.Store;
                 view.Leaves = u => SpacePages.LeavesTab(u, c.Uri, own);
             }
             tab = new WebTab(key, kind, null, view);
@@ -319,15 +316,81 @@ internal sealed class AppModel
         ShowTab(c.Id, key);
     }
 
-    /// <summary>An agent's chat in the Space's chat tab (its chat page); the text fills the message field and is never sent.</summary>
-    public void ShowChat(Guid? connection = null, string? agent = null, string? text = null)
+    /// <summary>
+    /// An agent's chat on the Space's native Chat page, its tab opened in the bar; the text fills
+    /// the message field and is never sent; a session opens that stored conversation.
+    /// </summary>
+    public void ShowChat(Guid? connection = null, string? agent = null, string? text = null, string? session = null)
     {
         if (Target(connection) is not { } c)
         {
             ShowMainWindow();
             return;
         }
-        ShowSpaceTab(c, WebTabKind.Chat, SpacePages.ChatUrl(c.Uri, agent, text));
+        _chatOpen.Add(c.Id);
+        ((ChatPage)Page(c, PageKind.Chat)).Open(agent, text, session);
+        ShowPage(c.Id, PageKind.Chat);
+    }
+
+    /// <summary>Whether the Space's Chat tab is in the bar.</summary>
+    public bool ChatOpen(Guid connection) => _chatOpen.Contains(connection);
+
+    /// <summary>Closes the Space's Chat tab: the page is hidden (Home is shown in its place) and its conversations go on.</summary>
+    public void CloseChat(Guid connection)
+    {
+        _chatOpen.Remove(connection);
+        if (Selected == connection && SelectedTab is null && SelectedPage == PageKind.Chat) SelectedPage = PageKind.Home;
+        Changed?.Invoke();
+    }
+
+    // Native chat
+
+    /// <summary>The permission and the model pickers of every chat changed.</summary>
+    public event Action? ChatPrefsChanged;
+
+    /// <summary>The permission new messages are sent with, shared by every chat and remembered.</summary>
+    public ChatPermission ChatPermission => ChatPermissions.Parse(Prefs.ChatPermission) ?? Core.ChatPermission.ReadOnly;
+
+    public void SetChatPermission(ChatPermission permission)
+    {
+        if (permission == ChatPermission) return;
+        Prefs.ChatPermission = permission.Wire();
+        SavePrefs();
+        ChatPrefsChanged?.Invoke();
+    }
+
+    private static string ChatKey(Guid space, string agent) => $"{space} {agent}";
+
+    /// <summary>The model picked for an agent's chat; null for its default.</summary>
+    public string? ChatModel(Guid space, string agent) => Prefs.ChatModels.GetValueOrDefault(ChatKey(space, agent)) is { Length: > 0 } m ? m : null;
+
+    public void SetChatModel(Guid space, string agent, string model)
+    {
+        if ((ChatModel(space, agent) ?? "") == model) return;
+        if (model.Length == 0) Prefs.ChatModels.Remove(ChatKey(space, agent));
+        else Prefs.ChatModels[ChatKey(space, agent)] = model;
+        SavePrefs();
+        ChatPrefsChanged?.Invoke();
+    }
+
+    /// <summary>The app's conversation with an agent of a Space, made on first use and kept until the Space is discarded.</summary>
+    public ChatConversation Conversation(Connection c, AgentInfo agent)
+    {
+        if (_chats.TryGetValue((c.Id, agent.Id), out var chat)) return chat;
+        var id = c.Id;
+        chat = new ChatConversation(ChatAgents.LocalId(agent), ChatAgents.Base(agent), agent.Peer is null, Api(c), ChatText.Words)
+        {
+            Permission = () => ChatPermission,
+            SetPermission = SetChatPermission,
+            Model = () => ChatModel(id, agent.Id),
+        };
+        // A turn may have installed or changed apps: Home and the bar learn of it at once.
+        chat.TurnEnded += () =>
+        {
+            if (Lives.TryGetValue(id, out var live)) _ = live.Refresh(catalogue: true);
+        };
+        _chats[(c.Id, agent.Id)] = chat;
+        return chat;
     }
 
     /// <summary>The Space's terminal in its tab.</summary>
@@ -392,8 +455,8 @@ internal sealed class AppModel
                 ShowStore(connection);
                 break;
             default:
-                // The chat page on the linked agent and session; a fragment link's text becomes its draft.
-                ShowSpaceTab(c, WebTabKind.Chat, SpacePages.ChatUrl(c.Uri, page.Agent, page.Text, page.Session));
+                // The chat on the linked agent and session; a fragment link's text becomes its draft.
+                ShowChat(c.Id, page.Agent, page.Text, page.Session);
                 break;
         }
     }
@@ -566,6 +629,13 @@ internal sealed class AppModel
             foreach (var page in pages.Values) page.Close();
         }
         if (_icons.Remove(id, out var icons)) icons.Clear();
+        foreach (var key in _chats.Keys.Where(k => k.Space == id).ToList())
+        {
+            _chats[key].Close();
+            _chats.Remove(key);
+        }
+        _chatOpen.Remove(id);
+        if (Selected == id && SelectedPage == PageKind.Chat) SelectedPage = PageKind.Home;
         if (!keepLive && Lives.Remove(id, out var live)) live.Stop();
     }
 
@@ -611,5 +681,6 @@ internal sealed class AppModel
         foreach (var live in Lives.Values) live.Stop();
         foreach (var page in Pages().ToList()) page.Close();
         foreach (var v in Views().ToList()) v.Close();
+        foreach (var chat in _chats.Values) chat.Close();
     }
 }

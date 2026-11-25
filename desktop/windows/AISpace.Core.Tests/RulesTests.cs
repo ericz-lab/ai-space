@@ -260,16 +260,6 @@ public class DesktopRulesTests
     }
 
     [Fact]
-    public void PanelLinksOpenThePanelsOwnWindows()
-    {
-        var panel = new Uri("https://space.example.com/");
-        Assert.Equal("https://space.example.com/#inbox", PanelLink.Inbox(panel).AbsoluteUri);
-        Assert.Equal("https://space.example.com/#chat", PanelLink.Chat(panel, null).AbsoluteUri);
-        Assert.Equal("https://space.example.com/#chat=ai-todo%2Fplanner&text=hi%20there", PanelLink.Chat(panel, "ai-todo/planner", "hi there").AbsoluteUri);
-        Assert.Equal("http://127.0.0.1:8700/#terminal", PanelLink.Terminal(new Uri("http://127.0.0.1:8700/?x=1")).AbsoluteUri);
-    }
-
-    [Fact]
     public void ManifestTextFollowsTheLanguage()
     {
         var i18n = new Dictionary<string, LocalizedText> { ["zh"] = new("待办", null), ["ja-JP"] = new("やること", null) };
