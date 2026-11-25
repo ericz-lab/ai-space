@@ -364,11 +364,11 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   const loadSpeechState = async () => {
     const loaded = await loadSpeech(ws.home, env).then((l) => ({ ...l, error: undefined as string | undefined }), (e: Error) => ({ config: undefined, source: "file" as const, warnings: [] as string[], error: e.message }));
     if (loaded.error) console.error(`[speech] ${loaded.error}; speech calls answer 503 until it is fixed`);
-    // A provider through the built-in model gateway names one of gateway.yaml's providers with an openai base (docs/model-gateway.md#speech).
+    // A provider through the built-in model gateway names one of gateway.yaml's providers: openai-compatible needs its openai base, minimax either base (docs/model-gateway.md#speech).
     if (loaded.config) loaded.warnings.push(...checkGatewayProviders(loaded.config, (name) => {
       const p = modelGateway.link.provider(name);
       const off = modelGateway.providerOff(name);
-      return p ? { openai: Boolean(p.openai), ...(off ? { off } : {}) } : undefined;
+      return p ? { openai: Boolean(p.openai), messages: Boolean(p.messages), ...(off ? { off } : {}) } : undefined;
     }, modelGateway.enabled));
     for (const p of loaded.config?.providers ?? []) if (p.kind === "voice-studio" && p.machine && !peers.get(p.machine)) console.error(`[speech] provider ${p.name} names machine ${p.machine}, which is not a peer here`);
     return {

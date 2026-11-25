@@ -15,21 +15,22 @@ export const SPEECH_ROLES = ["asr", "tts", "live"] as const;
 export type SpeechRole = (typeof SPEECH_ROLES)[number];
 export const ROLE_CAPABILITY: Record<SpeechRole, SpeechCapability> = { asr: "transcribe", tts: "speak", live: "live" };
 
-export const SPEECH_KINDS = ["voice-studio", "openai-compatible", "dashscope"] as const;
+export const SPEECH_KINDS = ["voice-studio", "openai-compatible", "minimax", "dashscope"] as const;
 export type SpeechKind = (typeof SPEECH_KINDS)[number];
 
 /** The capabilities of each kind, known without calling it, so the file can be checked when it loads. */
 export const KIND_CAPABILITIES: Record<SpeechKind, readonly SpeechCapability[]> = {
   "voice-studio": ["transcribe", "live", "speak"],
   "openai-compatible": ["transcribe", "speak"],
+  minimax: ["transcribe", "speak"],
   // Reserved: a file naming it loads, the provider is off (docs/speech.md#later).
   dashscope: [],
 };
 
 export const PROVIDER_NAME_PATTERN = /^[a-z0-9][a-z0-9._-]*$/;
 export const TAG_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/;
-/** A voice as a provider names it: `zh-Xinran_woman`, `alloy`. */
-export const VOICE_PATTERN = /^[\p{L}\p{N}][\p{L}\p{N}._ -]{0,79}$/u;
+/** A voice as a provider names it: `zh-Xinran_woman`, `alloy`, `Chinese (Mandarin)_News_Anchor`. */
+export const VOICE_PATTERN = /^[\p{L}\p{N}][\p{L}\p{N}._ ()-]{0,79}$/u;
 
 export type Price = { transcribePerMinute?: number; speakPerMillionChars?: number };
 
@@ -65,9 +66,30 @@ export type OpenAiSpec = {
   gateway?: { via: "space" | "magpie"; provider: string };
 };
 
+/**
+ * MiniMax's own speech API (docs/speech.md#kinds): `/v1/t2a_v2` and `/v1/speech_to_text` under its
+ * host. Through the built-in model gateway's provider (`gateway: space`, `provider:`) the key and the
+ * host are that provider's, read when a call is made; the call itself does not pass through the gateway.
+ */
+export type MinimaxSpec = {
+  name: string;
+  kind: "minimax";
+  /** The API's origin (`https://api.minimaxi.com`, `https://api.minimax.io`); "" through a gateway provider. */
+  url: string;
+  apiKeyEnv?: string;
+  /** The key read from `apiKeyEnv` at load; never written anywhere. */
+  apiKey?: string;
+  asrModel: string;
+  ttsModel: string;
+  voice?: string;
+  voices?: string[];
+  price?: Price;
+  gateway?: { via: "space"; provider: string };
+};
+
 export type DashscopeSpec = { name: string; kind: "dashscope"; apiKeyEnv?: string };
 
-export type ProviderSpec = VoiceStudioSpec | OpenAiSpec | DashscopeSpec;
+export type ProviderSpec = VoiceStudioSpec | OpenAiSpec | MinimaxSpec | DashscopeSpec;
 
 export type SpeechConfig = {
   providers: ProviderSpec[];

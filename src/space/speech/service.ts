@@ -1,6 +1,7 @@
 import type { GatewayLink } from "../gateway/types.ts";
 import { classifyFailure, type Failure, REST_KINDS } from "../model/failure.ts";
 import { RuntimeHealth } from "../model/health.ts";
+import { MinimaxAdapter } from "./minimax.ts";
 import { OpenAiAdapter } from "./openai.ts";
 import type { SpeechStore, SpeechUsage, SpeechWindow } from "./store.ts";
 import {
@@ -289,7 +290,7 @@ export class SpeechService {
         } else if (first) own.push(v.voice);
         else return { skip: `voice ${v.voice} is ${pinned ?? config?.default.tts}'s own`, status: 400, code: "invalid_request" };
       }
-      if (!own.length && !a.defaultVoice && a.kind === "openai-compatible") return { skip: "no voice named and no default voice", status: 400, code: "invalid_request" };
+      if (!own.length && !a.defaultVoice && (a.kind === "openai-compatible" || a.kind === "minimax")) return { skip: "no voice named and no default voice", status: 400, code: "invalid_request" };
       return { data: own };
     });
     const out = await this.run(plan, "speak", input.signal, async (a, voices) => {
@@ -467,7 +468,7 @@ export type LiveSession = {
 };
 
 /** One adapter per configured provider; a provider that is off still has one, for its cell and its refusals. */
-/** `gateway`: the built-in model gateway, for an openai-compatible provider with `gateway: space`. */
+/** `gateway`: the built-in model gateway, for an openai-compatible or minimax provider with `gateway: space`. */
 export function buildAdapters(config: SpeechConfig, deps: { voiceStudio: VoiceStudioDeps; fetch?: typeof fetch; gateway?: GatewayLink }): SpeechAdapter[] {
   return config.providers.map((spec) => adapterFor(spec, deps));
 }
@@ -478,6 +479,8 @@ function adapterFor(spec: ProviderSpec, deps: { voiceStudio: VoiceStudioDeps; fe
       return new VoiceStudioAdapter(spec, deps.voiceStudio);
     case "openai-compatible":
       return new OpenAiAdapter(spec, { ...(deps.fetch ? { fetch: deps.fetch } : {}), ...(deps.gateway ? { gateway: deps.gateway } : {}) });
+    case "minimax":
+      return new MinimaxAdapter(spec, { ...(deps.fetch ? { fetch: deps.fetch } : {}), ...(deps.gateway ? { gateway: deps.gateway } : {}) });
     case "dashscope":
       return {
         name: spec.name, kind: "dashscope", capabilities: new Set(KIND_CAPABILITIES.dashscope), selfHosted: false, limits: {},

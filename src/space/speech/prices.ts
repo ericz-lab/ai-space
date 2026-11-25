@@ -7,7 +7,8 @@ import type { Price } from "./types.ts";
  * a self-hosted server may serve a model under the same name for nothing.
  */
 
-export const SPEECH_PRICES = table as { asOf: string; transcribePerMinute: Record<string, number>; speakPerMillionChars: Record<string, number> };
+type Table = { asOf: string; transcribePerMinute: Record<string, number>; speakPerMillionChars: Record<string, number> };
+export const SPEECH_PRICES = table as Table & { minimax: Table & { hosts: string[] } };
 
 /** The host whose models the built-in table prices. */
 export const OPENAI_HOST = "api.openai.com";
@@ -41,4 +42,21 @@ export function costOf(price: Price | undefined, capability: string, figures: { 
     : price.transcribePerMinute !== undefined && figures.audioSeconds !== undefined ? (figures.audioSeconds / 60) * price.transcribePerMinute
     : undefined;
   return usd === undefined ? undefined : Math.round(usd * 1e6) / 1e6;
+}
+
+/** MiniMax's list prices, on the host they are listed for (its international site); undefined elsewhere. */
+export function minimaxPriceFor(opts: { url: string; asrModel: string; ttsModel: string; price?: Price }): Price | undefined {
+  if (opts.price) return opts.price;
+  let host = "";
+  try {
+    host = new URL(opts.url).hostname;
+  } catch {
+    return undefined;
+  }
+  const t = SPEECH_PRICES.minimax;
+  if (!t.hosts.includes(host)) return undefined;
+  const transcribe = t.transcribePerMinute[opts.asrModel];
+  const speak = t.speakPerMillionChars[opts.ttsModel];
+  if (transcribe === undefined && speak === undefined) return undefined;
+  return { ...(transcribe !== undefined ? { transcribePerMinute: transcribe } : {}), ...(speak !== undefined ? { speakPerMillionChars: speak } : {}) };
 }
