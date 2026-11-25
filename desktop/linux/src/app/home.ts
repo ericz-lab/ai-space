@@ -14,6 +14,7 @@ import { collectSoon } from "./memory.ts";
 import type { AppModel, Space } from "./model.ts";
 import { ScreenStore } from "./screen-store.ts";
 import { WidgetCards } from "./widget-card.ts";
+import { VoiceButton } from "./voice.ts";
 
 /**
  * Home, laid out as the Mac's launcher: pages side by side, moved through with a sideways swipe
@@ -61,7 +62,7 @@ const PLACE_TRIES = 30;
 type Tile = { entry: Entry } | { builtin: (typeof BUILTINS)[number] };
 
 /** `key` is what the page draws now: it is drawn again only when that changes. */
-type Page = { id: string; widget: any; body: any; entry?: any; key?: string; note?: any };
+type Page = { id: string; widget: any; body: any; entry?: any; voice?: VoiceButton; key?: string; note?: any };
 
 function flow(min: number, max: number, spacing = 4, homogeneous = true): any {
   return new Gtk.FlowBox({ selection_mode: Gtk.SelectionMode.NONE, homogeneous, min_children_per_line: min, max_children_per_line: max, column_spacing: spacing, row_spacing: spacing, valign: Gtk.Align.START });
@@ -193,6 +194,7 @@ export class HomePage {
       if (this.shownId !== first && this.pageOf(first)) this.showPage(first, false);
       else this.shownId = first;
     }
+    for (const p of this.pages) p.voice?.refresh();
     this.render();
   }
 
@@ -214,9 +216,17 @@ export class HomePage {
   private makePage(id: string): Page {
     const column = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL, spacing: 4 });
     let entry: any;
+    let voice: VoiceButton | undefined;
     if (id === LIBRARY || id === HOME) {
       entry = this.searchEntry();
-      column.append(entry);
+      // The microphone beside the box: the words are typed into it as they are heard, never submitted.
+      const box = entry;
+      voice = new VoiceButton({ read: () => box.get_text(), write: (text) => box.set_text(text), space: () => this.space });
+      const row = new Gtk.Box({ spacing: 6, margin_bottom: 8 });
+      row.append(entry);
+      row.append(voice.widget);
+      column.append(row);
+      voice.refresh();
     }
     const body = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL, spacing: 2 });
     column.append(body);
@@ -228,7 +238,7 @@ export class HomePage {
       click.connect("pressed", (g: any, _n: number, x: number, y: number) => this.screenMenu(g.get_widget(), { x, y }));
       scroller.add_controller(click);
     }
-    return { id, widget: scroller, body, entry };
+    return { id, widget: scroller, body, entry, ...(voice ? { voice } : {}) };
   }
 
   /** One page per screen after the library; rebuilt only when the screens themselves change. */
@@ -309,7 +319,7 @@ export class HomePage {
   // The command box
 
   private searchEntry(): any {
-    const entry = new Gtk.SearchEntry({ placeholder_text: t("searchPlaceholder"), hexpand: true, margin_bottom: 8 });
+    const entry = new Gtk.SearchEntry({ placeholder_text: t("searchPlaceholder"), hexpand: true });
     entry.add_css_class("home-search");
     entry.connect("search-changed", () => {
       const q = entry.get_text();

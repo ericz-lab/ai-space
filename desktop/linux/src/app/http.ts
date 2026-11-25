@@ -163,11 +163,34 @@ export class SpaceClient implements ChatApi {
     return { ...(runId ? { runId } : {}), messages: read(), close: () => cancel.cancel() };
   }
 
-  /** A multipart upload, as the panel's page sends a file (voice clips, pictures). */
-  async upload(path: string, field: string, filename: string, type: string, data: Uint8Array): Promise<unknown> {
+  /**
+   * A WebSocket to the Space (voice input's live route), with the session's cookies and the
+   * Space's origin, as the panel's page opens one. A refused upgrade (a 503: no live provider)
+   * throws. `cancel` gives up while it is still connecting.
+   */
+  async socket(path: string, cancel: any): Promise<any> {
+    const target = this.url(path).replace(/^http/, "ws");
+    const msg = Soup.Message.new("GET", target);
+    if (!msg) throw new SpaceError("invalid", `not a URL: ${target}`);
+    msg.set_flags(Soup.MessageFlags.NO_REDIRECT);
+    const cookie = await this.cookies(this.url(path));
+    if (cookie) msg.get_request_headers().replace("Cookie", cookie);
+    try {
+      return await this.streams.websocket_connect_async(msg, this.base, null, GLib.PRIORITY_DEFAULT, cancel);
+    } catch (e) {
+      const status = msg.get_status();
+      throw new SpaceError("network", status ? `HTTP ${status}` : e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  /** A multipart upload, as the panel's page sends a file (voice clips, pictures), with plain `fields` before the file. */
+  async upload(path: string, field: string, filename: string, type: string, data: Uint8Array, fields: Record<string, string> = {}): Promise<unknown> {
     const boundary = `aispace-${GLib.uuid_string_random()}`;
     const enc = new TextEncoder();
-    const head = enc.encode(`--${boundary}\r\nContent-Disposition: form-data; name="${field}"; filename="${filename}"\r\nContent-Type: ${type}\r\n\r\n`);
+    const plain = Object.entries(fields)
+      .map(([k, v]) => `--${boundary}\r\nContent-Disposition: form-data; name="${k}"\r\n\r\n${v}\r\n`)
+      .join("");
+    const head = enc.encode(`${plain}--${boundary}\r\nContent-Disposition: form-data; name="${field}"; filename="${filename}"\r\nContent-Type: ${type}\r\n\r\n`);
     const tail = enc.encode(`\r\n--${boundary}--\r\n`);
     const body = new Uint8Array(head.length + data.length + tail.length);
     body.set(head, 0);

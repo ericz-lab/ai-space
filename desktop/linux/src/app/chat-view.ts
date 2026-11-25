@@ -16,6 +16,7 @@ import { coalesce, lang, prefs, savePrefs, t, tw } from "./env.ts";
 import { iconWidget } from "./icons.ts";
 import { collectSoon } from "./memory.ts";
 import type { AppModel, Space } from "./model.ts";
+import { VoiceButton } from "./voice.ts";
 
 /**
  * One conversation drawn natively, shared by the main window's chat and Quick Chat: the person's
@@ -117,6 +118,8 @@ export class ChatView {
   private readonly offline: any;
   private readonly placeholder: any;
   private readonly sendHint: any;
+  /** The microphone: the words go into the field as they are heard, and are never sent by themselves. */
+  private readonly voice: VoiceButton;
   private machines: Agent[] = [];
   private machinesKey = "";
   private space: Space | undefined;
@@ -229,6 +232,8 @@ export class ChatView {
     this.machine.connect("notify::selected", () => this.pickMachine(this.machines[this.machine.get_selected()]));
     bar.append(this.machine);
     bar.append(new Gtk.Box({ hexpand: true }));
+    this.voice = new VoiceButton({ read: () => this.draft(), write: (text) => this.input.get_buffer().set_text(text, -1), space: () => this.space });
+    bar.append(this.voice.widget);
     this.stopButton = new Gtk.Button({ icon_name: "media-playback-stop-symbolic", tooltip_text: t("stop"), visible: false });
     this.stopButton.add_css_class("circular");
     this.stopButton.connect("clicked", () => this.conv?.stop());
@@ -243,6 +248,9 @@ export class ChatView {
       const row = new Gtk.Box({ spacing: 6 });
       row.add_css_class("qc-field");
       row.append(field);
+      bar.remove(this.voice.widget);
+      this.voice.widget.set_valign(Gtk.Align.END);
+      row.append(this.voice.widget);
       row.append(this.sendHint);
       bar.remove(this.stopButton);
       this.stopButton.remove_css_class("circular");
@@ -292,6 +300,7 @@ export class ChatView {
     if (old) this.emptyAvatar.remove(old);
     if (agent) this.emptyAvatar.append(iconWidget(agent.avatar, 72, space?.client, "avatar-default-symbolic", false, true));
     this.renderMachines();
+    this.voice.refresh();
     this.render();
   }
 
@@ -362,6 +371,8 @@ export class ChatView {
 
   send(): void {
     const text = this.draft();
+    // While the microphone listens the field is still being written: stop it first.
+    if (this.voice.busy) return;
     if (!this.conv || this.agent?.stale || (!text.trim() && !this.images.length)) return;
     this.conv.send(text, this.images);
     this.input.get_buffer().set_text("", -1);

@@ -24,6 +24,7 @@ Gio._promisify(Gio.InputStream.prototype, "close_async", "close_finish");
 Gio._promisify(Gio.DataInputStream.prototype, "read_line_async", "read_line_finish");
 Gio._promisify(Soup.Session.prototype, "send_and_read_async", "send_and_read_finish");
 Gio._promisify(Soup.Session.prototype, "send_async", "send_finish");
+Gio._promisify(Soup.Session.prototype, "websocket_connect_async", "websocket_connect_finish");
 Gio._promisify(WebKit.CookieManager.prototype, "get_cookies", "get_cookies_finish");
 Gio._promisify(WebKit.CookieManager.prototype, "add_cookie", "add_cookie_finish");
 Gio._promisify(WebKit.CookieManager.prototype, "get_all_cookies", "get_all_cookies_finish");
@@ -155,6 +156,10 @@ export type Prefs = {
   petSize?: PetSize;
   /** Where the desktop pet was left, as a fraction of the screen's width; unset until it was dragged. */
   deskPetSpot?: number;
+  /** Settings › General › Voice language: "" the app's language (the default), "auto" detect, or zh, en, ja, ko. */
+  voiceLanguage?: string;
+  /** Settings › General › Transcribe with: the saved Space (connection id) `--dictate` sends speech to; unset, the selected one. */
+  voiceSpace?: string;
   /** The Settings section shown last, so they reopen there (the panel's `settings-section`). */
   settingsSection?: Section;
 };

@@ -214,7 +214,7 @@ A browser socket must come from the panel's origin, as for `/api/voice/realtime`
 
 What every provider path takes as it is: `zh`, `en`, `ja` and `ko` (voice-studio's Qwen3-ASR names and Whisper's codes, MiniMax's documented hints, OpenAI's ISO-639-1). These are the languages the clients offer.
 
-**The clients' voice input** sends one: the language the client is shown in when it is one of those four, else nothing (detect), unless the person chose otherwise in Settings › General › **Voice language** (语音输入语言): Same as AI Space (the default), Detect automatically (sends nothing), or one of the four. The web panel keeps the choice in the browser (`panel-voice-language`, `src/web/voice.ts`), the Mac and iPhone clients in their user defaults (`voiceLanguage`, `VoiceLanguage` in `desktop/macos/AISpace/Services/SpaceModels.swift`, shared by both). The value sent is always a bare code, so an older Space, which passes it on untouched, works the same.
+**The clients' voice input** sends one: the language the client is shown in when it is one of those four, else nothing (detect), unless the person chose otherwise in Settings › General › **Voice language** (语音输入语言): Same as AI Space (the default), Detect automatically (sends nothing), or one of the four. The web panel keeps the choice in the browser (`panel-voice-language`, `src/web/voice.ts`), the Mac and iPhone clients in their user defaults (`voiceLanguage`, `VoiceLanguage` in `desktop/macos/AISpace/Services/SpaceModels.swift`, shared by both), the Linux client in its `preferences.json` (`voiceLanguage`, read by `desktop/linux/src/core/voice.ts` with the web panel's rule). The value sent is always a bare code, so an older Space, which passes it on untouched, works the same.
 
 ## Ledger
 
