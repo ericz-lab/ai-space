@@ -110,6 +110,7 @@ import dev.aispace.android.HubPage
 import dev.aispace.android.R
 import dev.aispace.android.core.Connection
 import dev.aispace.android.core.Lang
+import dev.aispace.android.core.VoiceLanguage
 import dev.aispace.android.core.ModelChoices
 import dev.aispace.android.core.ModelPreferences
 import dev.aispace.android.core.PeerStatus
@@ -387,7 +388,7 @@ private fun RowScope.SpaceRow(model: AppModel, c: Connection, selected: Boolean,
 
 // This phone's display
 
-/** General: what the panel's General section has that a phone has too (widgets, the language). */
+/** General: what the panel's General section has that a phone has too (widgets, the language, the voice's). */
 private fun LazyListScope.general(model: AppModel) {
     section(
         "general",
@@ -411,8 +412,51 @@ private fun LazyListScope.general(model: AppModel) {
                     Labeled(stringResource(R.string.settings_language), name)
                 }
             }),
+            SettingsRow("voice-language", content = { VoiceLanguageRow(model) }),
         ),
     )
+}
+
+/**
+ * What voice input is transcribed in (docs/speech.md#languages), as on the iPhone: Same as AI Space
+ * (the default), Detect automatically, or one of the languages every speech provider takes. The
+ * languages are named in the app's language.
+ */
+@Composable
+private fun RowScope.VoiceLanguageRow(model: AppModel) {
+    val t = AiTheme.tokens
+    var open by remember { mutableStateOf(false) }
+    val same = stringResource(R.string.settings_voice_same_as_app)
+    val detect = stringResource(R.string.settings_voice_detect)
+    val choices = remember(Lang.current, same, detect) {
+        val shown = Locale.getDefault()
+        listOf(VoiceLanguage.SAME_AS_APP to same, VoiceLanguage.DETECT to detect) + VoiceLanguage.codes.map { code ->
+            code to Locale.forLanguageTag(code).getDisplayLanguage(shown).replaceFirstChar { it.titlecase(shown) }
+        }
+    }
+    val label = stringResource(R.string.settings_voice_language)
+    Box(Modifier.weight(1f)) {
+        Row(Modifier.fillMaxWidth().clickable { open = true }, verticalAlignment = Alignment.CenterVertically) {
+            Labeled(label, choices.firstOrNull { it.first == model.voiceLanguage }?.second ?: same)
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            for ((value, name) in choices) {
+                val on = value == model.voiceLanguage
+                DropdownMenuItem(
+                    text = { Text(name) },
+                    onClick = {
+                        open = false
+                        model.updateVoiceLanguage(value)
+                    },
+                    trailingIcon = if (on) {
+                        { Icon(Icons.Filled.Check, contentDescription = stringResource(R.string.settings_selected), tint = t.accent) }
+                    } else {
+                        null
+                    },
+                )
+            }
+        }
+    }
 }
 
 /** Appearance: light or dark, and the panel's themes. */

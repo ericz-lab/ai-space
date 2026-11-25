@@ -10,6 +10,7 @@ import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.CookieJar
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -195,6 +196,30 @@ class SpaceApi(
         val r = fetch(client, built.build())
         if (r.finalUrl != null && !ConnectionRules.sameOrigin(r.finalUrl, base)) throw SpaceApiError.AuthenticationRequired
         return Answer(r.status, String(r.body, StandardCharsets.UTF_8))
+    }
+
+    /**
+     * A file as `multipart/form-data`, with plain [fields] before it (`POST /api/voice/transcribe`);
+     * the answer's text. A write, so it names the Space's origin. Read with the event streams'
+     * patience: a cold transcriber loads its model before it answers.
+     */
+    suspend fun upload(
+        path: String,
+        field: String,
+        filename: String,
+        mimeType: String,
+        data: ByteArray,
+        fields: List<Pair<String, String>> = emptyList(),
+    ): String {
+        val body = MultipartBody.Builder().setType(MultipartBody.FORM).apply {
+            for ((name, value) in fields) addFormDataPart(name, value)
+            addFormDataPart(field, filename, data.toRequestBody(mimeType.toMediaType()))
+        }.build()
+        val b = request("POST", path).newBuilder().post(body)
+        ConnectionRules.originHeader(url(path))?.let { b.header("Origin", it) }
+        val r = fetch(streamClient, b.build())
+        check(r.status, r.finalUrl, r.body, base)
+        return String(r.body, StandardCharsets.UTF_8)
     }
 
     /** Bytes of an icon or avatar, or any route's answer. */
