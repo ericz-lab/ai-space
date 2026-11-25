@@ -2,7 +2,8 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { need, noMore, parseArgs } from "./args.ts";
 import { installPackageVerb } from "./package.ts";
-import { ApiError, type Ctx } from "./types.ts";
+import { progress } from "./common.ts";
+import { ApiError, type Ctx, UsageError } from "./types.ts";
 
 /**
  * `space app catalog`, and `space app install|upgrade NAME`: apps from the app catalog
@@ -63,11 +64,13 @@ const catalogChange = (upgrade: boolean) => async (ctx: Ctx, argv: string[]): Pr
   const p = parseArgs(argv, { source: { kind: "bool" }, package: { kind: "bool" }, ref: { kind: "value" }, "with-source": { kind: "bool" }, "no-source": { kind: "bool" }, "replace-source": { kind: "bool" }, trust: { kind: "bool" } });
   const name = need(p.positional, 0, "NAME");
   noMore(p.positional, 1);
-  if (p.flags.source && p.flags.package) throw new Error("--source and --package exclude each other");
+  if (p.flags.source && p.flags.package) throw new UsageError("--source and --package exclude each other");
   const from = p.flags.source ? "source" : p.flags.package ? "package" : undefined;
   const body = { ...(from ? { from } : {}), ...(p.flags["with-source"] ? { withSource: true } : {}), ...(p.flags["no-source"] ? { withSource: false } : {}), ...(p.flags["replace-source"] ? { replaceSource: true } : {}), ...(p.flags.ref ? { ref: String(p.flags.ref), from: "source" } : {}), ...(p.flags.trust ? { trust: true } : {}) };
   const c = await ctx.client();
   const path = `/api/app-catalog/${encodeURIComponent(name)}/${upgrade ? "upgrade" : "install"}`;
+  const fromSource = from === "source" || Boolean(p.flags.ref);
+  progress(ctx, `${upgrade ? "upgrading" : "installing"} ${name}${fromSource ? " from source; building can take a few minutes" : ""}...`);
   let res: { result: Result };
   try {
     res = await c.post<{ result: Result }>(path, body, { timeoutMs: 15 * 60_000 });

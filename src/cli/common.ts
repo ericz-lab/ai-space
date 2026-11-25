@@ -101,7 +101,14 @@ export async function confirm(ctx: Ctx, yes: boolean | undefined, question: stri
   if (yes) return true;
   if (!ctx.io.isTTY) throw new UsageError(`${question} --yes to proceed without a terminal`);
   const a = (await ctx.io.prompt(`${question} [y/N] `)).trim().toLowerCase();
-  return a === "y" || a === "yes";
+  const ok = a === "y" || a === "yes";
+  if (!ok) ctx.io.err("nothing done");
+  return ok;
+}
+
+/** One line on stderr before a request that takes a while, so the wait is not silent; `-q` drops it. */
+export function progress(ctx: Ctx, line: string): void {
+  if (!ctx.flags.quiet) ctx.io.err(line);
 }
 
 /** The app a command acts as: `--app`, then `SPACE_APP` (set inside a task). */

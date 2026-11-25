@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { ALIASES, NOUNS, expandAlias, help, nounHelp } from "./main.ts";
+import { ALIASES, NOUNS, didYouMean, editDistance, expandAlias, help, nounHelp } from "./main.ts";
 import { runCli } from "./testing.ts";
 import { EXIT } from "./types.ts";
 
@@ -45,6 +45,41 @@ describe("help and dispatch", () => {
     const b = await runCli(["task", "frob"]);
     expect(b.code).toBe(EXIT.usage);
     expect(b.err[0]).toContain("unknown verb: task frob");
+  });
+
+  test("a mistyped command or verb names the nearest one, only when it is close", async () => {
+    expect((await runCli(["stauts"])).err).toEqual(["space: unknown command: stauts; did you mean: space status?"]);
+    expect((await runCli(["help", "tsk"])).err).toEqual(["space: unknown command: tsk; did you mean: space help task?"]);
+    const verb = await runCli(["task", "lss"]);
+    expect(verb.code).toBe(EXIT.usage);
+    expect(verb.err).toEqual(["space: unknown verb: task lss; did you mean: space task ls?"]);
+    expect((await runCli(["frobnicate"])).err).toEqual(["space: unknown command: frobnicate (space help lists them)"]);
+    expect(editDistance("status", "stauts")).toBe(2);
+    expect(didYouMean("zzzz", ["task", "app"], (w) => w)).toBe("");
+  });
+
+  test("unreachable names the next step: the service here, the address elsewhere", async () => {
+    const here = await runCli(["task", "ls"], (t) => t.scripted.reply(new Error("ECONNREFUSED")));
+    expect(here.code).toBe(EXIT.unreachable);
+    expect(here.err[1]).toContain("space service status");
+    expect(here.err[1]).toContain("space service start");
+    const there = await runCli(["task", "ls", "--url", "https://space.example.com"], (t) => t.scripted.reply(new Error("ECONNREFUSED")));
+    expect(there.err[1]).toContain("--url or SPACE_API_URL");
+  });
+
+  test("a 401 names the token, and status stops on it instead of showing an empty machine", async () => {
+    const r = await runCli(["task", "ls"], (t) => t.scripted.reply({ status: 401, body: { ok: false, error: "unauthorized" } }));
+    expect(r.code).toBe(EXIT.failed);
+    expect(r.err[0]).toBe("space: task ls: 401: unauthorized (pass the operator token with --token or SPACE_API_TOKEN)");
+    const unauthorized = { status: 401, body: { ok: false, error: "unauthorized" } };
+    const s = await runCli(["status"], (t) => t.scripted.reply({ status: 200, body: { ok: true } }, ...Array(6).fill(unauthorized)));
+    expect(s.code).toBe(EXIT.failed);
+    expect(s.out).toEqual([]);
+    expect(s.err[0]).toContain("401");
+    // Any other failure of one part still leaves that line away.
+    const partial = await runCli(["status"], (t) => t.scripted.reply({ status: 200, body: { ok: true } }, ...Array(6).fill({ status: 500, body: { ok: false } })));
+    expect(partial.code).toBe(0);
+    expect(partial.out[0]).toContain("ok");
   });
 
   test("a usage error prints the message and the verb's usage", async () => {
@@ -240,6 +275,9 @@ describe("other nouns", () => {
     expect(started.calls[1]!.body).toEqual({ action: "start" });
     expect(started.code).toBe(0);
     expect(started.out.join("\n")).toContain("running pid 7 port 4100");
+    // The wait is announced on stderr, never on stdout; -q drops it.
+    expect(started.err).toEqual(["starting a..."]);
+    expect((await runCli(["app", "start", "a", "-q"], (t) => t.scripted.reply(found, found))).err).toEqual([]);
     const refused = await runCli(["app", "restart", "a"], (t) => t.scripted.reply(found, { status: 409, body: { ok: false, error: "a is changing version", runtime: runtime("idle") } }));
     expect(refused.code).toBe(EXIT.failed);
     expect(refused.err.join("\n")).toContain("a is changing version");
@@ -262,7 +300,7 @@ describe("other nouns", () => {
     const back = await runCli(["app", "supervise", "a", "operator"], (t) => t.scripted.reply({ status: 502, body: { ok: false, handover: { ok: false, steps: ["removed space-a.service"], error: "a.service failed to start", rolledBack: true } } }));
     expect(back.calls[0]!.body).toEqual({ action: "supervise", to: "operator" });
     expect(back.code).toBe(1);
-    expect(back.err[0]).toBe("a: hand-over failed: a.service failed to start (rolled back)");
+    expect(back.err).toEqual(["handing a over to operator; this waits for its health (up to 30 s)...", "a: hand-over failed: a.service failed to start (rolled back)"]);
     const bad = await runCli(["app", "supervise", "a", "nobody"]);
     expect(bad.code).toBe(EXIT.usage);
   });
@@ -335,4 +373,13 @@ test("model run forwards completion modes and system instructions", async () => 
   const bad = await runCli(["model", "run", "--app", "demo", "--mode", "wrong", "hello"]);
   expect(bad.code).toBe(EXIT.usage);
   expect(bad.calls).toHaveLength(0);
+});
+
+test("model run --timeout takes a duration or plain milliseconds", async () => {
+  const reply = (t: Parameters<NonNullable<Parameters<typeof runCli>[1]>>[0]) => t.scripted.reply({ status: 200, body: { ok: true, text: "hi" } });
+  expect((await runCli(["model", "run", "--app", "demo", "--json", "--timeout", "10m", "hello"], reply)).calls[0]!.body).toMatchObject({ timeoutMs: 600_000 });
+  expect((await runCli(["model", "run", "--app", "demo", "--json", "--timeout", "90000", "hello"], reply)).calls[0]!.body).toMatchObject({ timeoutMs: 90_000 });
+  const soon = await runCli(["model", "run", "--app", "demo", "--timeout", "soon", "hello"]);
+  expect(soon.code).toBe(EXIT.usage);
+  expect(soon.calls).toHaveLength(0);
 });

@@ -3,6 +3,7 @@ import { AuthService } from "../space/auth/service.ts";
 import { AuthStore, OwnerExists } from "../space/auth/store.ts";
 import { operatorTokenPath } from "../space/auth/operator-token.ts";
 import { noMore, parseArgs } from "./args.ts";
+import { confirm } from "./common.ts";
 import { type Ctx, type Noun, UsageError } from "./types.ts";
 
 /**
@@ -12,6 +13,7 @@ import { type Ctx, type Noun, UsageError } from "./types.ts";
  */
 
 const PIPE = { "password-stdin": { kind: "bool" as const } };
+const YES = { yes: { kind: "bool" as const, alias: "y" } };
 
 async function open(ctx: Ctx): Promise<{ service: AuthService; mode: string; home: string; close: () => void }> {
   const { ws, config } = await ctx.workspace();
@@ -91,9 +93,14 @@ const resetPassword = async (ctx: Ctx, argv: string[]) => {
 };
 
 const revokeSessions = async (ctx: Ctx, argv: string[]) => {
-  noMore(parseArgs(argv, {}).positional, 0);
+  const p = parseArgs(argv, YES);
+  noMore(p.positional, 0);
   const { service, close } = await open(ctx);
   try {
+    const live = service.sessions().length;
+    // Nothing to sign out is not a question.
+    if (!live && !ctx.flags.json) return ctx.print.line("no session is signed in"), 0;
+    if (live && !(await confirm(ctx, p.flags.yes, `Sign all ${live} session(s) out? Every browser signed in to the panel must sign in again.`))) return 1;
     const revoked = service.revokeAll();
     if (ctx.flags.json) return ctx.print.data({ revoked }), 0;
     ctx.print.line(`${revoked} session(s) signed out`);
@@ -108,7 +115,7 @@ const deviceAdd = async (ctx: Ctx, argv: string[]) => {
   const p = parseArgs(argv, {});
   noMore(p.positional, 1);
   const name = p.positional[0];
-  if (!name) throw new UsageError("usage: space auth device-add <name>");
+  if (!name) throw new UsageError("a device name is required");
   const { service, mode, close } = await open(ctx);
   try {
     const { device, token } = service.addDevice(name);
@@ -137,14 +144,18 @@ const devices = async (ctx: Ctx, argv: string[]) => {
 };
 
 const deviceRevoke = async (ctx: Ctx, argv: string[]) => {
-  const p = parseArgs(argv, {});
+  const p = parseArgs(argv, YES);
   noMore(p.positional, 1);
   const id = Number(p.positional[0]);
-  if (!Number.isInteger(id)) throw new UsageError("usage: space auth device-revoke <id>");
+  if (!p.positional[0] || !Number.isInteger(id)) throw new UsageError("the device id is a whole number (space auth devices lists them)");
   const { service, close } = await open(ctx);
   try {
+    const device = service.devices().find((d) => d.id === id);
+    if (!device) return ctx.io.err(`error: no live device ${id}`), 1;
+    if (!(await confirm(ctx, p.flags.yes, `Revoke device ${id} "${device.name}"? The client using it is signed out and cannot connect again without a new credential.`))) return 1;
     if (!service.revokeDevice(id)) return ctx.io.err(`error: no live device ${id}`), 1;
-    ctx.print.line(`device ${id} revoked`);
+    if (ctx.flags.json) return ctx.print.data({ id, name: device.name, revoked: true }), 0;
+    ctx.print.line(`device ${id} "${device.name}" revoked`);
     return 0;
   } finally {
     close();
@@ -158,10 +169,10 @@ export const authNoun: Noun = {
     status: { usage: "", summary: "mode, whether the owner is set, live sessions", run: status },
     init: { usage: "[--password-stdin]", summary: "set the owner's password the first time", run: init },
     "reset-password": { usage: "[--password-stdin]", summary: "set a new password and sign every session out", run: resetPassword },
-    "revoke-sessions": { usage: "", summary: "sign every session out", run: revokeSessions },
+    "revoke-sessions": { usage: "[--yes]", summary: "sign every session out (asks unless --yes)", run: revokeSessions },
     "device-add": { usage: "<name>", summary: "make a device credential for one client (printed once)", run: deviceAdd },
     devices: { usage: "", summary: "list live device credentials", run: devices },
-    "device-revoke": { usage: "<id>", summary: "revoke one device credential", run: deviceRevoke },
+    "device-revoke": { usage: "<id> [--yes]", summary: "revoke one device credential (asks unless --yes)", run: deviceRevoke },
   },
   defaultVerb: "status",
 };

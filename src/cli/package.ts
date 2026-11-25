@@ -7,8 +7,9 @@ import { assertPackageCompatibility } from "../space/packages/manifest.ts";
 import { inspectPackage, packApplication, readPackageFile } from "../space/packages/pack.ts";
 import { buildRelease, ReleaseError } from "../space/packages/release.ts";
 import { need, noMore, parseArgs } from "./args.ts";
-import type { Ctx } from "./types.ts";
+import { type Ctx, UsageError } from "./types.ts";
 import { confirm } from "./common.ts";
+import { ago } from "./output.ts";
 
 export async function packVerb(ctx: Ctx, argv: string[]): Promise<number> {
   const { flags, positional } = parseArgs(argv, {
@@ -20,7 +21,7 @@ export async function packVerb(ctx: Ctx, argv: string[]): Promise<number> {
   noMore(positional, 1);
   const output = resolve(ctx.io.cwd, need(flags.output ? [flags.output] : [], 0, "--output FILE"));
   const [os, arch, extra] = String(flags.target ?? "any/any").split("/");
-  if (extra !== undefined) throw new Error("target must be OS/ARCH");
+  if (extra !== undefined) throw new UsageError("--target must be OS/ARCH");
   const result = await packApplication({
     dir, output, include: flags.include ? String(flags.include).split(",") : [],
     target: { os: choice(os, "target.os", ["any", "linux", "darwin"]), arch: choice(arch, "target.arch", ["any", "x64", "arm64"]) },
@@ -58,16 +59,33 @@ export const installPackageVerb = (upgrade = false) => async (ctx: Ctx, argv: st
   const bytes = await readPackageFile(file);
   const id = String(flags["operation-id"] ?? crypto.randomUUID());
   ctx.io.err(`operation: ${id} (reuse --operation-id if the response is interrupted)`);
-  const result = await (await ctx.client()).json("POST", "/api/packages", bytes, { binary: true, timeoutMs: 300_000, headers: {
+  const result = await (await ctx.client()).json<{ operation?: Operation; change?: { app: string } }>("POST", "/api/packages", bytes, { binary: true, timeoutMs: 300_000, headers: {
     "content-type": "application/octet-stream", "idempotency-key": id,
     ...(flags["allow-unsigned"] ? { "x-space-allow-unsigned": "true" } : {}), ...(upgrade ? { "x-space-upgrade": "true" } : {}),
   } });
-  ctx.print.data(result); return 0;
+  if (ctx.flags.json) return ctx.print.data(result), 0;
+  if (result.operation) ctx.print.line(`${result.operation.app} ${result.operation.version} ${result.operation.state}`);
+  else if (result.change) ctx.print.line(`${result.change.app} upgraded`);
+  return 0;
 };
+
+type Operation = { id: string; app: string; version: string; state: string; error: string | null; updatedAt: string };
 
 export async function packagesVerb(ctx: Ctx, argv: string[]): Promise<number> {
   noMore(parseArgs(argv, {}).positional, 0);
-  ctx.print.data(await (await ctx.client()).get("/api/packages")); return 0;
+  const res = await (await ctx.client()).get<{ spaceId: string; operations: Operation[] }>("/api/packages");
+  if (ctx.flags.json) return ctx.print.data(res), 0;
+  ctx.print.line(`this Space: ${res.spaceId}`);
+  const now = Date.now();
+  ctx.print.table(res.operations ?? [], [
+    { title: "app", get: (o) => o.app },
+    { title: "version", get: (o) => o.version },
+    { title: "state", get: (o) => o.state },
+    { title: "operation", get: (o) => o.id },
+    { title: "updated", get: (o) => ago(o.updatedAt, now) },
+    { title: "error", get: (o) => (o.error ?? "").slice(0, 60) },
+  ], "no packages");
+  return 0;
 }
 
 export async function openPackageVerb(ctx: Ctx, argv: string[]): Promise<number> {
@@ -81,14 +99,19 @@ export async function openPackageVerb(ctx: Ctx, argv: string[]): Promise<number>
 }
 
 export const packageChangeVerb = (kind: "rollback" | "remove") => async (ctx: Ctx, argv: string[]): Promise<number> => {
-  const { flags, positional } = parseArgs(argv, { yes: { kind: "bool" }, "operation-id": { kind: "value" } });
+  const { flags, positional } = parseArgs(argv, { yes: { kind: "bool", alias: "y" }, "operation-id": { kind: "value" } });
   const app = need(positional, 0, "APP");
   const operationId = kind === "rollback" ? need(positional, 1, "RETAINED_OPERATION_ID") : undefined;
   noMore(positional, kind === "rollback" ? 2 : 1);
-  if (!await confirm(ctx, !!flags.yes, `${kind} package ${app}? User data will be retained.`)) return 1;
+  const question = kind === "rollback"
+    ? `Roll package ${app} back to operation ${operationId}? Its current code is replaced; user data is kept.`
+    : `Remove package ${app}? It stops and is unregistered; its code and user data are kept.`;
+  if (!await confirm(ctx, !!flags.yes, question)) return 1;
   const id = String(flags["operation-id"] ?? crypto.randomUUID());
   ctx.io.err(`operation: ${id}`);
-  ctx.print.data(await (await ctx.client()).json(kind === "rollback" ? "POST" : "DELETE", `/api/packages/apps/${encodeURIComponent(app)}${kind === "rollback" ? "/rollback" : ""}`, operationId ? { operationId } : undefined, { headers: { "idempotency-key": id }, timeoutMs: 120_000 }));
+  const res = await (await ctx.client()).json(kind === "rollback" ? "POST" : "DELETE", `/api/packages/apps/${encodeURIComponent(app)}${kind === "rollback" ? "/rollback" : ""}`, operationId ? { operationId } : undefined, { headers: { "idempotency-key": id }, timeoutMs: 120_000 });
+  if (ctx.flags.json) return ctx.print.data(res), 0;
+  ctx.print.line(kind === "rollback" ? `${app} rolled back to operation ${operationId}` : `${app} removed; its data is kept`);
   return 0;
 };
 

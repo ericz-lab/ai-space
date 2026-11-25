@@ -1,6 +1,6 @@
 import { openStorage } from "../space/config.ts";
 import { parseArgs, need, noMore } from "./args.ts";
-import { type TaskView, confirm, listTasks, scheduleText, taskRef } from "./common.ts";
+import { type TaskView, confirm, listTasks, progress, scheduleText, taskRef } from "./common.ts";
 import { deployVerb } from "./deploy.ts";
 import { newApp } from "./newapp.ts";
 import { buildVerb, createVerb } from "./studio.ts";
@@ -133,6 +133,7 @@ const uninstall = async (ctx: Ctx, argv: string[]) => {
   if (!(await confirm(ctx, flags.yes, `Uninstall ${name}: stop its service, take its directory out of the workspace and forget it (data is kept)?`))) return 1;
   const c = await ctx.client();
   // Without --force the space refuses while a task of the app is running (409 with their names).
+  progress(ctx, `uninstalling ${name}...`);
   const res = await c.delete<{ app: string; stopped: string; dir: unknown; data: string }>(`/api/apps/${name}${flags.force ? "?force=1" : ""}`, { timeoutMs: 120_000 });
   if (ctx.flags.json) return ctx.print.data(res), 0;
   const dir = res.dir as { kind: string; to?: string; reason?: string };
@@ -192,6 +193,7 @@ function printRuntime(ctx: Ctx, r: PackageRuntimeStatus) {
 async function packageControl(ctx: Ctx, c: Client, name: string, body: { action?: string; mode?: string }): Promise<number> {
   type Answer = { ok: boolean; error?: string; runtime?: PackageRuntimeStatus };
   let res: Answer;
+  progress(ctx, body.action ? `${ING[body.action] ?? body.action} ${name}...` : `setting ${name}'s mode to ${body.mode}...`);
   try { res = await c.post<Answer>(`/api/packages/apps/${encodeURIComponent(name)}/runtime`, body, { timeoutMs: 120_000 }); }
   catch (e) {
     const answer = (e as ApiError).body as Answer | undefined;
@@ -226,6 +228,8 @@ const service = async (ctx: Ctx, argv: string[]) => {
   return 0;
 };
 
+const ING: Record<string, string> = { start: "starting", stop: "stopping", restart: "restarting" };
+
 // Under SPACE_SUPERVISOR=operator the space answers 409 with the command to run instead.
 const control = (action: "start" | "stop" | "restart") => async (ctx: Ctx, argv: string[]) => {
   const { positional } = parseArgs(argv, {});
@@ -233,6 +237,7 @@ const control = (action: "start" | "stop" | "restart") => async (ctx: Ctx, argv:
   noMore(positional, 1);
   const c = await ctx.client();
   if (await packageRuntime(c, name)) return packageControl(ctx, c, name, { action });
+  progress(ctx, `${ING[action]} ${name}...`);
   const res = await c.post<{ service: ServiceStatus }>(`/api/apps/${name}/service`, { action }, { timeoutMs: 120_000 });
   if (ctx.flags.json) return ctx.print.data(res), 0;
   printService(ctx, res.service);
@@ -249,6 +254,7 @@ const supervise = async (ctx: Ctx, argv: string[]) => {
   const c = await ctx.client();
   type Answer = { ok: boolean; error?: string; handover?: { ok: boolean; steps: string[]; error?: string; rolledBack?: boolean }; service?: ServiceStatus };
   let res: Answer;
+  progress(ctx, `handing ${name} over to ${to}; this waits for its health (up to 30 s)...`);
   try {
     res = await c.post<Answer>(`/api/apps/${name}/service`, { action: "supervise", to }, { timeoutMs: 180_000 });
   } catch (e) {

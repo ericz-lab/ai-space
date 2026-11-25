@@ -28,35 +28,38 @@ const ls = async (ctx: Ctx, argv: string[]) => {
   return 0;
 };
 const create = async (ctx: Ctx, argv: string[]) => {
-  const { flags, positional } = parseArgs(argv, { endpoint: { kind: "value" }, "token-env": { kind: "value" }, "headers-env": { kind: "value" }, apps: { kind: "value" }, scopes: { kind: "value" }, "full-trust": { kind: "bool" }, alias: { kind: "value" }, yes: { kind: "bool" } });
+  const { flags, positional } = parseArgs(argv, { endpoint: { kind: "value" }, "token-env": { kind: "value" }, "headers-env": { kind: "value" }, apps: { kind: "value" }, scopes: { kind: "value" }, "full-trust": { kind: "bool" }, alias: { kind: "value" }, yes: { kind: "bool", alias: "y" } });
   const direction = need(positional, 0, "incoming|outgoing"), remoteSpaceId = need(positional, 1, "REMOTE_SPACE_ID"); noMore(positional, 2);
-  if (!["incoming", "outgoing"].includes(direction)) throw new Error("direction must be incoming or outgoing");
-  if (flags["full-trust"] && !await confirm(ctx, !!flags.yes, FULL_TRUST_QUESTION)) return 1;
-  ctx.print.data(await (await ctx.client()).post("/api/connections", {
+  if (!["incoming", "outgoing"].includes(direction)) throw new UsageError("direction must be incoming or outgoing");
+  if (flags["full-trust"] && !await confirm(ctx, !!flags.yes, fullTrustQuestion(remoteSpaceId))) return 1;
+  const res = await (await ctx.client()).post<{ connection?: { id: string }; token?: string }>("/api/connections", {
     direction, remoteSpaceId, apps: names(flags.apps),
     ...(flags.endpoint ? { url: flags.endpoint } : {}), ...(flags["token-env"] ? { tokenEnv: flags["token-env"] } : {}), ...(flags["headers-env"] ? { headersEnv: flags["headers-env"] } : {}),
     ...(flags.scopes !== undefined ? { scopes: names(flags.scopes) } : {}), ...(flags["full-trust"] ? { fullTrust: true } : {}), ...(flags.alias ? { alias: flags.alias } : {}),
-  }));
+  });
+  if (ctx.flags.json) return ctx.print.data(res), 0;
+  ctx.print.line(`${direction} connection ${res.connection?.id ?? `to ${remoteSpaceId}`} created`);
+  if (res.token) ctx.print.line(`token (shown only now; store it on the other Space): ${res.token}`);
   return 0;
 };
 const grant = async (ctx: Ctx, argv: string[]) => {
   const { flags, positional } = parseArgs(argv, { apps: { kind: "value" } });
   const id = need(positional, 0, "CONNECTION_ID"); noMore(positional, 1);
-  if (flags.apps === undefined) throw new Error("--apps is required (empty string revokes all local apps)");
-  ctx.print.data(await (await ctx.client()).patch(`/api/connections/${encodeURIComponent(id)}`, { apps: names(flags.apps) })); return 0;
+  if (flags.apps === undefined) throw new UsageError("--apps is required (empty string revokes all local apps)");
+  const apps = names(flags.apps);
+  return change(ctx, id, { apps }, apps.length ? `connection ${id} now shares ${apps.join(", ")}` : `connection ${id} now shares no apps`);
 };
 /** `scopes ID [--scopes S,...] [--full-trust on|off]`: what the other Space may do through this one's peer API (docs/app-packages.md#peer-scopes). */
 const scopes = async (ctx: Ctx, argv: string[]) => {
-  const { flags, positional } = parseArgs(argv, { scopes: { kind: "value" }, "full-trust": { kind: "value" }, yes: { kind: "bool" } });
+  const { flags, positional } = parseArgs(argv, { scopes: { kind: "value" }, "full-trust": { kind: "value" }, yes: { kind: "bool", alias: "y" } });
   const id = need(positional, 0, "CONNECTION_ID"); noMore(positional, 1);
   if (flags.scopes === undefined && flags["full-trust"] === undefined) throw new UsageError("--scopes S,... or --full-trust on|off is required (an empty --scopes grants none)");
   const trust = flags["full-trust"];
   if (trust !== undefined && trust !== "on" && trust !== "off") throw new UsageError("--full-trust takes on or off");
-  if (trust === "on" && !await confirm(ctx, !!flags.yes, FULL_TRUST_QUESTION)) return 1;
-  ctx.print.data(await (await ctx.client()).patch(`/api/connections/${encodeURIComponent(id)}`, {
+  if (trust === "on" && !await confirm(ctx, !!flags.yes, fullTrustQuestion(id))) return 1;
+  return change(ctx, id, {
     ...(flags.scopes !== undefined ? { scopes: names(flags.scopes) } : {}), ...(trust !== undefined ? { fullTrust: trust === "on" } : {}),
-  }));
-  return 0;
+  }, `connection ${id} scopes updated`);
 };
 /** `alias ID NAME | --clear`: the name the other Space goes by here as a peer (its `<name>/` prefix and what is kept under it). */
 const alias = async (ctx: Ctx, argv: string[]) => {
@@ -64,18 +67,28 @@ const alias = async (ctx: Ctx, argv: string[]) => {
   const id = need(positional, 0, "CONNECTION_ID");
   const name = flags.clear ? null : need(positional, 1, "NAME");
   noMore(positional, flags.clear ? 1 : 2);
-  ctx.print.data(await (await ctx.client()).patch(`/api/connections/${encodeURIComponent(id)}`, { alias: name })); return 0;
+  return change(ctx, id, { alias: name }, name === null ? `connection ${id} alias cleared` : `connection ${id} is now called ${name}`);
 };
 const enabled = (value: boolean) => async (ctx: Ctx, argv: string[]) => {
   const { positional } = parseArgs(argv, {}); const id = need(positional, 0, "CONNECTION_ID"); noMore(positional, 1);
-  ctx.print.data(await (await ctx.client()).patch(`/api/connections/${encodeURIComponent(id)}`, { enabled: value })); return 0;
+  return change(ctx, id, { enabled: value }, `connection ${id} ${value ? "enabled" : "disabled"}`);
 };
 const rm = async (ctx: Ctx, argv: string[]) => {
-  const { flags, positional } = parseArgs(argv, { yes: { kind: "bool" } }); const id = need(positional, 0, "CONNECTION_ID"); noMore(positional, 1);
-  if (!await confirm(ctx, !!flags.yes, `remove connection ${id}? Its grants and incoming credential are deleted.`)) return 1;
-  ctx.print.data(await (await ctx.client()).json("DELETE", `/api/connections/${encodeURIComponent(id)}`)); return 0;
+  const { flags, positional } = parseArgs(argv, { yes: { kind: "bool", alias: "y" } }); const id = need(positional, 0, "CONNECTION_ID"); noMore(positional, 1);
+  if (!await confirm(ctx, !!flags.yes, `Remove connection ${id}? It disconnects, and its grants and incoming credential are deleted.`)) return 1;
+  const res = await (await ctx.client()).json("DELETE", `/api/connections/${encodeURIComponent(id)}`);
+  if (ctx.flags.json) return ctx.print.data(res), 0;
+  ctx.print.line(`connection ${id} removed`);
+  return 0;
 };
-const FULL_TRUST_QUESTION = "full trust lets the other Space use this machine's agents, models and terminal, change its apps, and do whatever a later version adds. Grant it?";
+/** One PATCH of a connection: the answer under `--json`, else one sentence. */
+async function change(ctx: Ctx, id: string, body: Record<string, unknown>, done: string): Promise<number> {
+  const res = await (await ctx.client()).patch(`/api/connections/${encodeURIComponent(id)}`, body);
+  if (ctx.flags.json) return ctx.print.data(res), 0;
+  ctx.print.line(done);
+  return 0;
+}
+const fullTrustQuestion = (who: string) => `Grant full trust to ${who}? It lets that Space use this machine's agents, models and terminal, change its apps, and do whatever a later version adds.`;
 function names(raw: unknown): string[] { return String(raw ?? "").split(",").map((v) => v.trim()).filter(Boolean); }
 function scopeText(g: { scopes: string[]; fullTrust: boolean }): string { return g.fullTrust ? "full trust" : g.scopes.join(",") || "-"; }
 export const connectionNoun: Noun = { name: "connection", summary: "package Hub connections, directional local-app grants and peer scopes", verbs: {
