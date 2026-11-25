@@ -30,6 +30,59 @@ struct ChatStreamTests {
         #expect(r.text == "Hello\n\nDone." && r.sessionID == "s2" && r.finished)
     }
 
+    @Test func aFinishedParagraphKeepsTheTurnVisible() {
+        var r = ChatReply()
+        r.apply(#"{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"Plan:"}}}"#)
+        #expect(r.activity == nil)
+        // The paragraph is done but the turn goes on: the row says so until the next step.
+        r.apply(#"{"type":"assistant","message":{"content":[{"type":"text","text":"Plan:"}]}}"#)
+        #expect(r.activity == .thinking(model: ""))
+        // Text and a new tool call in one message: the tool wins.
+        r.apply(#"{"type":"assistant","message":{"content":[{"type":"text","text":"Writing it."},{"type":"tool_use","id":"w1","name":"Write","input":{}}]}}"#)
+        #expect(r.activity == .running(tool: "Write"))
+        r.apply(#"{"type":"done"}"#)
+        #expect(r.activity == nil)
+    }
+
+    @Test func aToolCallShowsWhileItsInputIsWritten() {
+        var r = ChatReply()
+        r.apply(#"{"type":"stream_event","event":{"type":"message_start","message":{}}}"#)
+        r.apply(#"{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}}"#)
+        r.apply(#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Now the file."}}}"#)
+        #expect(r.activity == nil)
+        r.apply(#"{"type":"stream_event","event":{"type":"content_block_stop","index":0}}"#)
+        #expect(r.activity == .thinking(model: ""))
+        r.apply(#"{"type":"stream_event","event":{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"w1","name":"Write","input":{}}}}"#)
+        #expect(r.activity == .running(tool: "Write"))
+        // A late copy of the paragraph does not hide the call being written.
+        r.apply(#"{"type":"assistant","message":{"content":[{"type":"text","text":"Now the file."}]}}"#)
+        #expect(r.activity == .running(tool: "Write"))
+        r.apply(#"{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"file_path\""}}}"#)
+        r.apply(#"{"type":"stream_event","event":{"type":"content_block_stop","index":1}}"#)
+        #expect(r.activity == .running(tool: "Write"))
+        r.apply(#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"w1","name":"Write","input":{"file_path":"a.md"}}]}}"#)
+        #expect(r.activity == .running(tool: "Write") && r.steps.last?.text == "a.md")
+        r.apply(#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"w1","content":"ok"}]}}"#)
+        #expect(r.activity == .thinking(model: ""))
+    }
+
+    @Test func anAnsweredApprovalResumesTheTurn() {
+        var r = ChatReply()
+        r.apply(#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"b1","name":"Bash","input":{"command":"make"}}]}}"#)
+        r.apply(#"{"type":"approval_request","id":"req-1","tool":"Bash","title":"make"}"#)
+        r.apply(#"{"type":"approval_request","id":"req-2","tool":"Bash","title":"make test"}"#)
+        #expect(r.activity == nil)
+        r.apply(#"{"type":"approval_resolved","id":"req-1","decision":"allow"}"#)
+        // Still waiting for the other answer.
+        #expect(r.activity == nil)
+        r.apply(#"{"type":"approval_resolved","id":"req-2","decision":"allow"}"#)
+        #expect(r.activity == .running(tool: "Bash"))
+        var q = ChatReply()
+        q.apply(#"{"type":"approval_request","id":"ask","tool":"AskUserQuestion","questions":[{"id":"q","question":"Which?"}]}"#)
+        q.apply(#"{"type":"approval_resolved","id":"ask","decision":"allow","answers":{"q":["A"]}}"#)
+        #expect(q.activity == .thinking(model: ""))
+    }
+
     @Test func errorsAndStops() {
         var r = ChatReply()
         r.apply(#"{"type":"error","error":"timeout","status":"timeout"}"#)
