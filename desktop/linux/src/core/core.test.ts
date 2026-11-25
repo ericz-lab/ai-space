@@ -6,7 +6,7 @@ import { ConnectionList, decodeConnections, encodeConnections, localToClaim } fr
 import { agentBase, allEntries, decodeCatalogue, ICON_RADIUS_MAX, iconShape, NotASpaceError, opensFirst, pageUrl, panelScreens, pickText, search, widgetLines } from "./catalogue.ts";
 import { checkResponse, classifyIdentity, classifyLayout, SpaceError } from "./check.ts";
 import { LineSplitter, SSEParser } from "./sse.ts";
-import { appForUrl, decodeInbox, InboxSeen, parseDeepLink, visibleTabs } from "./desktop.ts";
+import { appForUrl, decodeInbox, inboxClick, InboxSeen, inboxShown, parseDeepLink, visibleTabs } from "./desktop.ts";
 import { decodeLocal, hasSession, LocalFailure, needsDeviceCredential, newer, runtimeArgs, updateAvailable } from "./local.ts";
 import { markdownBlocks, inlineMarkup } from "./markdown.ts";
 import { crashReload, decideNavigation, grantsMicrophone } from "./navigation.ts";
@@ -190,6 +190,25 @@ describe("desktop rules", () => {
     expect(seen.fresh([item("1", "a"), item("2", "b")]).map((i) => i.thread)).toEqual(["2"]);
     expect(seen.fresh([item("1", "c"), item("2", "b", false)]).map((i) => i.thread)).toEqual(["1"]);
     expect(decodeInbox({ items: [item("x", "y"), { bad: 1 }] })).toMatchObject({ items: [{ thread: "x" }], summary: { unread: 1, open: 1 } });
+  });
+
+  test("the inbox page says when it could not be read instead of showing it empty", () => {
+    const item = (thread: string, done = false) => ({ thread, app: "a", level: "info", text: "t", count: 1, lastAt: "x", unread: true, done });
+    expect(inboxShown([], undefined)).toEqual({ kind: "empty" });
+    expect(inboxShown([item("1", true)], undefined)).toEqual({ kind: "empty" });
+    expect(inboxShown([], "502 Bad Gateway")).toEqual({ kind: "error", message: "502 Bad Gateway" });
+    // Threads already known stay on show when a later look fails.
+    expect(inboxShown([item("1"), item("2", true)], "timed out")).toEqual({ kind: "list", items: [item("1")] });
+  });
+
+  test("a click on a thread opens its link, or unfolds its whole text, one thread at a time", () => {
+    const item = (thread: string, unread: boolean, url?: string) => ({ thread, app: "a", level: "info", text: "t", count: 1, lastAt: "x", unread, done: false, ...(url ? { url } : {}) });
+    expect(inboxClick(item("1", true, "/apps/todo/"), "2")).toEqual({ open: "/apps/todo/", unfolded: "2", markRead: true });
+    expect(inboxClick(item("1", false, "/apps/todo/"), undefined)).toEqual({ open: "/apps/todo/", unfolded: undefined, markRead: false });
+    expect(inboxClick(item("1", true), undefined)).toEqual({ unfolded: "1", markRead: true });
+    expect(inboxClick(item("1", true), "2")).toEqual({ unfolded: "1", markRead: true });
+    // A second click folds it back and marks nothing.
+    expect(inboxClick(item("1", true), "1")).toEqual({ unfolded: undefined, markRead: false });
   });
 
   test("links fill in a message but never send it", () => {

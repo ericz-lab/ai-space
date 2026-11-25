@@ -192,7 +192,7 @@ export class WebTabs {
     );
   }
 
-  /** Every tab of a Space, for when the Space is removed or another one is shown. */
+  /** Every tab of a Space (every tab, with none named), for when the Space is removed or replaced. */
   closeSpace(space: Space | undefined): void {
     for (const [page, tab] of [...this.tabs]) if (!space || tab.space === space) this.view.close_page(page);
   }

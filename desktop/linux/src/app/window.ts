@@ -10,6 +10,7 @@ import type { DeepLink, InboxItem } from "../core/desktop.ts";
 import { signature } from "../core/change.ts";
 import { relativeTime } from "../core/format.ts";
 import { type PetOpen, shownMood } from "../core/pet.ts";
+import { PerSpace } from "../core/per-space.ts";
 import { builtinPage } from "../core/screens.ts";
 import { shortcutsRunHref } from "../core/shortcuts.ts";
 import { sameOrigin } from "../core/url.ts";
@@ -41,8 +42,10 @@ export class MainWindow {
   readonly chat: ChatPage;
   readonly inbox: InboxPage;
   readonly terminal: TerminalPage;
-  readonly tabs: WebTabs;
   readonly pet: WindowPet;
+  /** Each Space's web tabs, kept while another Space is shown (core/per-space.ts); one shows at a time. */
+  private readonly spaceTabs: PerSpace<Space, WebTabs>;
+  private readonly tabsStack: any;
   private readonly stack: any;
   private readonly root: any;
   private readonly banner: any;
@@ -85,19 +88,18 @@ export class MainWindow {
       openLink: (space, url) => this.openUrl(space, url),
       runShortcut: (space, text) => {
         // The one Shortcuts tab, taken to the sentence's action (core/shortcuts.ts).
-        this.tabs.open({ space, url: `${space.client.base}${shortcutsRunHref(text)}`, title: t("shortcuts"), key: "url:/?page=shortcuts" });
+        this.tabsFor(space).open({ space, url: `${space.client.base}${shortcutsRunHref(text)}`, title: t("shortcuts"), key: "url:/?page=shortcuts" });
         this.show("pages");
       },
     });
     this.chat = new ChatPage(model, openLink);
     this.inbox = new InboxPage(model, (space, url) => this.openUrl(space, url));
     this.terminal = new TerminalPage(model);
-    this.tabs = new WebTabs(model);
-    this.tabs.onEmpty = () => {
-      this.pages.pages.set_visible(false);
-      if (this.stack.get_visible_child_name() === "pages") this.show("home");
-    };
-    this.tabs.detach = (page) => this.detachTab(page);
+    this.tabsStack = new Gtk.Stack({ vexpand: true });
+    this.spaceTabs = new PerSpace<Space, WebTabs>((tabs) => {
+      tabs.closeSpace(undefined);
+      this.tabsStack.remove(tabs.widget);
+    });
 
     // The desk pet over Home; Settings › General and its own menu move it or hide it (app.pet-sync).
     const petSync = () => this.app.lookup_action("pet-sync")?.activate(null);
@@ -131,7 +133,7 @@ export class MainWindow {
     add("chat", this.chat.widget, t("chat"), "chat-message-new-symbolic");
     add("inbox", this.inbox.widget, t("inbox"), "mail-unread-symbolic");
     add("terminal", this.terminal.widget, t("terminal"), "utilities-terminal-symbolic");
-    add("pages", this.tabs.widget, t("apps"), "view-grid-symbolic");
+    add("pages", this.tabsStack, t("apps"), "view-grid-symbolic");
     this.pages.pages.set_visible(false);
     this.stack.connect("notify::visible-child-name", () => this.onView());
 
@@ -237,7 +239,7 @@ export class MainWindow {
     act("chat", () => this.show("chat"), ["<Control>2"]);
     act("inbox", () => this.show("inbox"), ["<Control>3"]);
     act("terminal", () => this.show("terminal"), ["<Control>4"]);
-    act("pages", () => this.tabs.count && this.show("pages"), ["<Control>5"]);
+    act("pages", () => this.tabs?.count && this.show("pages"), ["<Control>5"]);
     act("search", () => {
       this.show("home");
       this.home.focusSearch();
@@ -313,9 +315,13 @@ export class MainWindow {
     }
     this.root.set_visible_child_name("main");
     if (this.shown !== space) {
-      // Pages and terminals belong to the Space they were opened on.
-      this.tabs.closeSpace(undefined);
+      // Pages and terminals belong to the Space they were opened on: its own show, the others' wait hidden.
       this.shown = space;
+      this.spaceTabs.prune((id) => this.model.space(id));
+      const tabs = this.tabsFor(space);
+      this.tabsStack.set_visible_child(tabs.widget);
+      if (!tabs.count && this.stack.get_visible_child_name() === "pages") this.show("home");
+      this.pages.pages.set_visible(tabs.count > 0);
     }
     this.renderSpaceMenu();
     this.renderBanner();
@@ -332,6 +338,8 @@ export class MainWindow {
     if ((change === "mood" && space === this.model.current) || change === "selection") this.pet.setMood(shownMood(this.model.current?.mood));
     if (change === "mood") return;
     if (change === "connections" || change === "selection") {
+      // A Space removed, or moved to a new address, takes its tabs along.
+      this.spaceTabs.prune((id) => this.model.space(id));
       if (change === "selection" || !this.model.current || this.root.get_visible_child_name() === "welcome") this.showSpace();
       else this.renderSpaceMenu();
       return;
@@ -415,8 +423,43 @@ export class MainWindow {
 
   // Opening things
 
+  /** The current Space's tabs, none before a Space is shown. */
+  get tabs(): WebTabs | undefined {
+    const space = this.model.current;
+    return space ? this.spaceTabs.peek(space.conn.id, space) : undefined;
+  }
+
+  /** A Space's tabs, made the first time; they show while that Space does. */
+  private tabsFor(space: Space): WebTabs {
+    return this.spaceTabs.get(space.conn.id, space, () => {
+      const tabs = new WebTabs(this.model);
+      tabs.onEmpty = () => {
+        if (tabs !== this.tabs) return;
+        this.pages.pages.set_visible(false);
+        if (this.stack.get_visible_child_name() === "pages") this.show("home");
+      };
+      tabs.detach = (page) => this.detachTab(page, tabs);
+      this.tabsStack.add_child(tabs.widget);
+      return tabs;
+    });
+  }
+
+  /** A tab moved back from a window of its own: into its Space's tabs, that Space shown. */
+  adoptTab(page: any, from: WebTabs): void {
+    const space = (page.get_child() as any)?._aispaceTab?.space as Space | undefined;
+    // Its Space was removed or moved to a new address meanwhile: nowhere to go back to.
+    if (!space || this.model.space(space.conn.id) !== space) {
+      from.view.close_page(page);
+      return;
+    }
+    this.tabsFor(space).adopt(page, from);
+    if (this.model.current !== space) this.model.select(space.conn.id);
+    this.present();
+    this.show("pages");
+  }
+
   openPanel(space: Space, path = "/", title?: string): void {
-    this.tabs.openPanel(space, path, title);
+    this.tabsFor(space).openPanel(space, path, title);
     this.show("pages");
   }
 
@@ -425,7 +468,7 @@ export class MainWindow {
       const agent = space.catalogue?.agentInfo.find((a) => a.id === entry.ref);
       if (agent) return this.openChat(this.model.preferredAgent(space, agent));
     }
-    if (this.tabs.openEntry(space, entry)) this.show("pages");
+    if (this.tabsFor(space).openEntry(space, entry)) this.show("pages");
   }
 
   openBuiltin(name: Builtin): void {
@@ -442,12 +485,13 @@ export class MainWindow {
   openUrl(space: Space, url: string): void {
     const absolute = /^[a-z][a-z0-9+.-]*:/i.test(url) ? url : `${space.client.base}${url.startsWith("/") ? "" : "/"}${url}`;
     // By origin, not by prefix: `https://space.example.com.evil.net` starts with the Space's address too.
+    const tabs = this.tabsFor(space);
     if (sameOrigin(absolute, space.client.base)) {
-      const before = this.tabs.count;
-      this.tabs.route(space, absolute);
-      if (this.tabs.count === before) this.tabs.open({ space, url: absolute, title: t("panel"), key: `url:${absolute}` });
+      const before = tabs.count;
+      tabs.route(space, absolute);
+      if (tabs.count === before) tabs.open({ space, url: absolute, title: t("panel"), key: `url:${absolute}` });
       this.show("pages");
-    } else this.tabs.route(space, absolute);
+    } else tabs.route(space, absolute);
   }
 
   openChat(agent?: Agent, opts: { draft?: string; send?: string } = {}): void {
@@ -455,19 +499,17 @@ export class MainWindow {
     this.chat.choose(agent, opts);
   }
 
-  /** The command box's question goes to Space Assistant in a new conversation. */
+  /**
+   * The command box's question goes to Space Assistant in a new conversation, sent (the Mac's
+   * `ask`); the chat field's draft stays as it was. While a turn runs, the question starts its new
+   * conversation as soon as that turn ends (core/conversation.ts `ask`).
+   */
   ask(space: Space, text: string): void {
     const agent = this.model.assistant(space);
     if (!agent) return;
     this.show("chat");
     this.chat.choose(agent);
-    const conv = this.chat.view.conversation;
-    if (conv && !conv.busy && conv.messages.length) conv.newConversation();
-    if (conv?.busy) this.chat.view.setDraft(text);
-    else {
-      this.chat.view.setDraft(text);
-      this.chat.view.send();
-    }
+    this.chat.view.conversation?.ask(text);
   }
 
   openInboxItem(space: Space, item: InboxItem): void {
@@ -500,9 +542,9 @@ export class MainWindow {
     }
   }
 
-  private detachTab(page: any): void {
+  private detachTab(page: any, from: WebTabs): void {
     const win = new TabWindow(this.app, this.model, this);
-    win.tabs.adopt(page, this.tabs);
+    win.tabs.adopt(page, from);
     win.window.present();
   }
 }
@@ -519,10 +561,6 @@ export class TabWindow {
     view.add_top_bar(new Adw.HeaderBar());
     this.window.set_content(view);
     this.tabs.onEmpty = () => GLib.idle_add(GLib.PRIORITY_DEFAULT, () => (this.window.close(), GLib.SOURCE_REMOVE));
-    this.tabs.detach = (page) => {
-      main.tabs.adopt(page, this.tabs);
-      main.present();
-      main.show("pages");
-    };
+    this.tabs.detach = (page) => main.adoptTab(page, this.tabs);
   }
 }

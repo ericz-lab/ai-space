@@ -7,7 +7,7 @@ import Pango from "gi://Pango";
 import { machinesOf } from "../core/agents.ts";
 import { type Agent, cardApp, pickText } from "../core/catalogue.ts";
 import { type MachineInventory, decodeInventory, usableClis } from "../core/inventory.ts";
-import { type ChatImage, type ChatStep, MAX_IMAGE_BYTES, MAX_IMAGES, MAX_IMAGES_BYTES, PERMISSIONS, type Permission, granting, imageType, questionAnswer, retryable } from "../core/chat.ts";
+import { type ChatImage, type ChatStep, type Draft, MAX_IMAGE_BYTES, MAX_IMAGES, MAX_IMAGES_BYTES, PERMISSIONS, type Permission, granting, handOver, imageType, questionAnswer, retryable } from "../core/chat.ts";
 import type { ChatMessage, Conversation } from "../core/conversation.ts";
 import { markdownBlocks } from "../core/markdown.ts";
 import { allCommands, stepGroups, toolSummary, toolVariant } from "../../../../src/web/chat-steps.ts";
@@ -119,6 +119,7 @@ export class ChatView {
   private readonly offline: any;
   private readonly placeholder: any;
   private readonly sendHint: any;
+  private readonly asked: any;
   /** The microphone: the words go into the field as they are heard, and are never sent by themselves. */
   private readonly voice: VoiceButton;
   private machines: Agent[] = [];
@@ -182,6 +183,10 @@ export class ChatView {
     this.offline = new Gtk.Label({ xalign: 0, wrap: true, visible: false, margin_start: 6, margin_top: 4 });
     this.offline.add_css_class("dim-label");
     composer.append(this.offline);
+    // Questions from Home waiting for the running turn, each to start a new conversation.
+    this.asked = new Gtk.Label({ xalign: 0, wrap: true, visible: false, margin_start: 6, margin_top: 4 });
+    this.asked.add_css_class("dim-label");
+    composer.append(this.asked);
     this.attachments = new Gtk.Box({ spacing: 6, visible: false, margin_start: 4, margin_top: 4 });
     composer.append(this.attachments);
     this.input = new Gtk.TextView({ wrap_mode: Gtk.WrapMode.WORD_CHAR, accepts_tab: false, top_margin: 6, bottom_margin: 6, left_margin: 6, right_margin: 6 });
@@ -367,6 +372,25 @@ export class ChatView {
     this.addImage(name, bytes);
   }
 
+  /** Hands the unsent text and pictures to another field (Quick Chat's Open in Main Window) and empties this one. */
+  takeDraft(): Draft {
+    const out = { text: this.draft(), images: this.images };
+    this.input.get_buffer().set_text("", -1);
+    this.images = [];
+    this.renderAttachments();
+    return out;
+  }
+
+  /** Takes another field's unsent text and pictures, after what this one already holds (core/chat.ts `handOver`). */
+  putDraft(moved: Draft): void {
+    if (!moved.text.trim() && !moved.images.length) return;
+    const next = handOver({ text: this.draft(), images: this.images }, moved);
+    this.input.get_buffer().set_text(next.text, -1);
+    this.images = next.images;
+    this.renderAttachments();
+    this.focus();
+  }
+
   draft(): string {
     const b = this.input.get_buffer();
     return b.get_text(b.get_start_iter(), b.get_end_iter(), false);
@@ -457,7 +481,7 @@ export class ChatView {
       } catch {
         overlay.set_child(new Gtk.Image({ icon_name: "image-x-generic-symbolic", pixel_size: 40 }));
       }
-      const remove = new Gtk.Button({ icon_name: "window-close-symbolic", halign: Gtk.Align.END, valign: Gtk.Align.START, css_classes: ["circular", "osd"] });
+      const remove = new Gtk.Button({ icon_name: "window-close-symbolic", tooltip_text: tw("chat.removeImage"), halign: Gtk.Align.END, valign: Gtk.Align.START, css_classes: ["circular", "osd"] });
       remove.connect("clicked", () => {
         this.images.splice(i, 1);
         this.renderAttachments();
@@ -479,6 +503,9 @@ export class ChatView {
     this.sendHint.set_visible(Boolean(this.o.floating) && !conv?.busy);
     this.renderPlaceholder();
     this.showError(conv?.error);
+    const asked = conv?.asked ?? [];
+    this.asked.set_text(asked.map((text) => t("askedNext", { text })).join("\n"));
+    this.asked.set_visible(asked.length > 0);
     const name = this.agent ? pickText(this.agent.title, this.agent.i18n, "title", lang) : "";
     this.input.set_tooltip_text(t("messagePlaceholder", { agent: name }));
     this.permission.set_selected(Math.max(0, PERMISSIONS.indexOf(prefs.permission)));

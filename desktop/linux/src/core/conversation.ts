@@ -77,6 +77,8 @@ export class Conversation {
   private stopRequested = false;
   private cancelled = false;
   private stream: { close(): void } | undefined;
+  /** Questions from Home asked while a turn ran: each starts a new conversation once it ends. */
+  private questions: string[] = [];
 
   constructor(
     readonly agent: { id: string; base: string },
@@ -113,6 +115,29 @@ export class Conversation {
     }
     this.messages.push(this.message("user", message, { images }));
     this.start({ kind: "new", turn });
+  }
+
+  /**
+   * A question from Home's command box: sent at once, in a conversation of its own (the Mac's
+   * `ask`), never into the conversation on show. This client keeps one conversation per agent and
+   * a running turn cannot be left, so a question asked while one runs waits for it to end and then
+   * starts a new conversation; `asked` lists those.
+   */
+  ask(text: string): void {
+    const message = text.trim();
+    if (!message) return;
+    if (this.busy) {
+      this.questions.push(message);
+      this.o.onChange();
+      return;
+    }
+    if (this.messages.length || this.sessionId) this.newConversation();
+    this.send(message);
+  }
+
+  /** Questions waiting for the running turn to end, each to start a new conversation. */
+  get asked(): readonly string[] {
+    return this.questions;
   }
 
   /** The person's answer to an approval or a question of the running turn; undefined when it reached the Space. */
@@ -381,6 +406,12 @@ export class Conversation {
       this.pending = [];
       this.stopRequested = false;
       this.busy = false;
+      const question = this.questions.shift();
+      if (question !== undefined) {
+        this.newConversation();
+        this.send(question);
+        return;
+      }
     }
     this.o.onChange();
   }

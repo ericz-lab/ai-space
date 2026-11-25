@@ -2,6 +2,7 @@ import Adw from "gi://Adw?version=1";
 import Gio from "gi://Gio";
 import GLib from "gi://GLib";
 import { type Agent, pickText } from "../core/catalogue.ts";
+import { MAX_IMAGE_BYTES } from "../core/chat.ts";
 import {
   type DialSection, FALLBACK_TITLE, type FromBall, SECTIONS, type Section, type ToBall, decodeFromBall, isOwnDrop, resolveDial,
 } from "../core/floating-ball.ts";
@@ -21,7 +22,8 @@ import type { QuickChat } from "./quick-chat.ts";
 
 /** Pictures the ball wrote for this side to read, under the user's runtime directory. */
 const DROPS = path(GLib.get_user_runtime_dir(), "ai-space-drops");
-const MAX_PICTURE_BYTES = 40 * 1024 * 1024;
+/** A chat takes pictures up to this size (core/chat.ts); a larger one is refused with that reason. */
+const MAX_PICTURE_BYTES = MAX_IMAGE_BYTES;
 
 export class FloatingBall {
   private proc: { pid: number; exited: boolean } | undefined;
@@ -276,7 +278,11 @@ export class FloatingBall {
     const f = Gio.File.new_for_path(file);
     try {
       const info = f.query_info("standard::size", Gio.FileQueryInfoFlags.NONE, null);
-      if (info.get_size() > MAX_PICTURE_BYTES) throw new Error("too large");
+      // Too large says so, as Windows does, rather than "could not read".
+      if (info.get_size() > MAX_PICTURE_BYTES) {
+        this.notify(t("ballTooLarge"));
+        return;
+      }
       const [bytes] = (await f.load_contents_async(null)) as [Uint8Array];
       this.open(section, { name: own ? "Image" : (f.get_basename() ?? "Image"), bytes }, startupId);
     } catch (e) {

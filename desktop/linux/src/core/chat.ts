@@ -35,6 +35,27 @@ export function imageType(bytes: Uint8Array): ChatImage["mediaType"] | undefined
   return undefined;
 }
 
+/** What a message field holds before it is sent. */
+export type Draft = { text: string; images: ChatImage[] };
+
+/**
+ * A draft handed from one field to another (Quick Chat's Open in Main Window): its text goes after
+ * what the other field already holds, on a line of its own, and its pictures join that field's as
+ * far as the Space's limits allow, so neither draft is lost or overwritten.
+ */
+export function handOver(into: Draft, moved: Draft): Draft {
+  const text = !moved.text.trim() ? into.text : !into.text.trim() ? moved.text : `${into.text.replace(/\s+$/, "")}\n${moved.text}`;
+  const images = [...into.images];
+  let total = images.reduce((n, i) => n + (i.data.length * 3) / 4, 0);
+  for (const img of moved.images) {
+    const size = (img.data.length * 3) / 4;
+    if (images.length >= MAX_IMAGES || total + size > MAX_IMAGES_BYTES) break;
+    images.push(img);
+    total += size;
+  }
+  return { text, images };
+}
+
 /** The controls captured when a turn is sent; changing them later does not change that turn. */
 export type TurnRequest = { message: string; permission: Permission; images: ChatImage[] };
 
