@@ -62,7 +62,7 @@ test("an app's token runs its own agent with its skills in the prompt, and nobod
   const cli = join(f.home, "fake.ts");
   await Bun.write(cli, `const args=process.argv.slice(2); const sid=crypto.randomUUID();
 console.log(JSON.stringify({type:"system",subtype:"init",session_id:sid}));
-console.log(JSON.stringify({type:"assistant",message:{content:[{type:"text",text:args[args.indexOf("--append-system-prompt")+1]}]}}));
+console.log(JSON.stringify({type:"assistant",message:{content:[{type:"text",text:args[args.indexOf("--append-system-prompt")+1]+" AGENT="+process.env.SPACE_AGENT_ID}]}}));
 console.log(JSON.stringify({type:"result",session_id:sid,is_error:false}));`);
   const registry = new AppRegistry();
   for (const d of [f.board, f.news, join(f.ws.apps, "other")]) await registry.set(await loadManifest(d));
@@ -86,6 +86,7 @@ console.log(JSON.stringify({type:"result",session_id:sid,is_error:false}));`);
     expect(text).toContain("--- Skills ---");
     expect(text).toContain("board-edit (board)");
     expect(text).toContain("news-search (news)");
+    expect(text).toContain("AGENT=board/analyst"); // the turn knows which agent it is
     expect((await chat("other/helper", "tok-board")).status).toBe(403);
     expect((await chat("board/analyst", "tok-other")).status).toBe(403);
     expect((await chat("board/analyst", "not-an-app")).status).toBe(403);
