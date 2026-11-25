@@ -89,3 +89,13 @@
 "IN" = "IN";
 "OUT" = "OUT";
 "Waiting for your answer…" = "Waiting for your answer…";
+
+/* Chat cards (the web's chat.card.*) */
+"chat.card.undo" = "Undo";
+"chat.card.undoAll" = "Undo all";
+"chat.card.undoRest" = "Undo the other %lld";
+"chat.card.undoItem" = "Undo: %@";
+"chat.card.undone" = "Undone";
+"chat.card.done" = "Done";
+"chat.card.changed" = "Changed elsewhere";
+"Read-only now: the conversation has moved on." = "Read-only now: the conversation has moved on.";

@@ -19,6 +19,10 @@ SHARED="$SHARED $IOS_DIR/Core/ScreenshotRules.swift $IOS_DIR/Core/SharedCaptureS
 SHARED_CORE="$SHARED_CORE $IOS_DIR/Core/ScreenshotRules.swift $IOS_DIR/Core/SharedCaptureStore.swift"
 
 SHARED="$SHARED ShareExtension/MacSharedPicture.swift"
+# Chat cards: the card and its rules, its state and undo, and its drawing (docs/chat-cards.md).
+# HubModels.swift reads a stored message's cards, so the tests compile the rules too.
+SHARED="$SHARED $IOS_DIR/Core/ChatCards.swift $IOS_DIR/Live/ChatCardStore.swift $IOS_DIR/Views/ChatCardsView.swift"
+SHARED_CORE="$SHARED_CORE $IOS_DIR/Core/ChatCards.swift"
 # The desk pet's drawing (its rules are Services/PetRules.swift, which the phone compiles in turn).
 SHARED="$SHARED $IOS_DIR/Views/PetView.swift"
 # The desk pet's sheet, the panel's own (src/web/public), copied into the app by build.sh.

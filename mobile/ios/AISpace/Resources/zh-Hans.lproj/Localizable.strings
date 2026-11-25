@@ -625,3 +625,13 @@
 "Medium" = "中";
 "Large" = "大";
 "Claude walks along the bottom of the pages and shows what the Space is doing: it looks on while agents work, hops in the corner while one waits for you, spins when a turn is done and sleeps when all is quiet. Tap it to open that chat or the inbox." = "Claude 在页面底部走来走去，显示 Space 正在做什么：agent 干活时它在旁边看，有 agent 等你时它在角落里跳，一轮做完时它转一圈，一切安静时它睡觉。点它可以打开对应的对话或收件箱。";
+
+/* Chat cards (the web's chat.card.*) */
+"chat.card.undo" = "撤回";
+"chat.card.undoAll" = "全部撤回";
+"chat.card.undoRest" = "撤回其余 %lld 条";
+"chat.card.undoItem" = "撤回：%@";
+"chat.card.undone" = "已撤回";
+"chat.card.done" = "已完成";
+"chat.card.changed" = "已在别处修改";
+"Read-only now: the conversation has moved on." = "对话已继续，这张卡片现在只读。";

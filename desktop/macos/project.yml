@@ -81,6 +81,13 @@ targets:
         group: Shared
       - path: ../../mobile/ios/AISpace/Views/SharedCaptureView.swift
         group: Shared
+      # Chat cards: the card, its rules, its state and undo, and its drawing (docs/chat-cards.md).
+      - path: ../../mobile/ios/AISpace/Core/ChatCards.swift
+        group: Shared
+      - path: ../../mobile/ios/AISpace/Live/ChatCardStore.swift
+        group: Shared
+      - path: ../../mobile/ios/AISpace/Views/ChatCardsView.swift
+        group: Shared
       # The desk pet's drawing and its sheet, the panel's own.
       - path: ../../mobile/ios/AISpace/Views/PetView.swift
         group: Shared

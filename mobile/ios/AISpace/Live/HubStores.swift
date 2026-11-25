@@ -506,6 +506,8 @@ final class ChatStore: ObservableObject {
         var live = false
         /// A reply of a stored conversation, opened from the history: its runs of calls open folded.
         var historic = false
+        /// What the turn's tools did, as chat cards (docs/chat-cards.md); live ones carry their token.
+        var cards: [ShownChatCard] = []
     }
 
     struct Ask: Equatable {
@@ -545,9 +547,19 @@ final class ChatStore: ObservableObject {
     private var steersSeen = 0
     private var stopRequested = false
 
+    /// The state and undo of the conversation's chat cards.
+    let cardStores: ChatCardStores
+
     init(api: SpaceAPI, base: String) {
         self.api = api
         self.base = base
+        cardStores = ChatCardStores(api: api, base: base)
+    }
+
+    /// Whether a reply's cards may act: no message of the person after it (src/web/Chat.tsx).
+    func cardsActionable(_ bubble: Bubble) -> Bool {
+        guard let index = bubbles.firstIndex(where: { $0.id == bubble.id }) else { return false }
+        return ChatCardRules.actionable(isUser: bubbles.map(\.isUser), at: index)
     }
 
     var canSend: Bool { !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !images.isEmpty }
@@ -591,8 +603,9 @@ final class ChatStore: ObservableObject {
             bubbles = stored.compactMap { m in
                 let isUser = m.role == "user"
                 let steps = isUser ? [] : ChatRows.steps(of: m)
-                guard !(m.text ?? "").isEmpty || !steps.isEmpty else { return nil }
-                return Bubble(isUser: isUser, text: m.text ?? "", steps: steps, historic: !isUser)
+                let cards = isUser ? [] : ShownChatCard.restored(m.cards)
+                guard !(m.text ?? "").isEmpty || !steps.isEmpty || !cards.isEmpty else { return nil }
+                return Bubble(isUser: isUser, text: m.text ?? "", steps: steps, historic: !isUser, cards: cards)
             }
             sessionID = session.sid
             error = nil
@@ -726,6 +739,7 @@ final class ChatStore: ObservableObject {
         var lastSeq = 0
         var failures = 0
         var asks: [String: Ask] = [:]
+        var cards: [ShownChatCard] = []
         // The phone has no permission picker: its turns run as the Mac's default, "Ask before
         // changes", whose approvals the reply shows as cards.
         var body = ChatTurnRequest(message: turn.text, permission: .readOnly, images: turn.images).body(sessionID: sessionID)
@@ -740,6 +754,7 @@ final class ChatStore: ObservableObject {
             bubbles[index].tools = reply.tools
             bubbles[index].steps = reply.steps
             bubbles[index].asks = asks
+            bubbles[index].cards = cards
             bubbles[index].activity = reply.activity
             while steersSeen < reply.consumedSteers.count {
                 takePending(reply.consumedSteers[steersSeen])
@@ -761,6 +776,7 @@ final class ChatStore: ObservableObject {
                         }
                         failures = 0
                         reply.apply(message.data)
+                        if let more = ShownChatCard.event(message.data) { cards += more }
                         switch ChatRows.questionEvent(message.data) {
                         case .asked(let step, let questions)?: asks[step] = asks[step] ?? Ask(questions: questions)
                         case .answered(let step, let answers)?: asks[step]?.answers = answers
@@ -805,6 +821,7 @@ final class ChatStore: ObservableObject {
             bubbles[index].tools = reply.tools
             bubbles[index].steps = reply.steps
             bubbles[index].asks = asks
+            bubbles[index].cards = cards
             bubbles[index].activity = nil
             bubbles[index].pending = []
             bubbles[index].live = false

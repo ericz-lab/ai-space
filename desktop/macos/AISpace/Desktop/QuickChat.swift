@@ -163,6 +163,7 @@ struct QuickChatView: View {
             .frame(height: 40)
             if let chats = model.quickChats {
                 QuickChatThread(chats: chats, icons: model.quickChatResolvedRef.flatMap { model.icons($0.connection) })
+                    .environment(\.chatCards, model.quickChatResolvedRef.map { model.chatCards($0.connection, agent: chats.agent) })
             } else {
                 NoAgent(model: model).frame(height: 120)
             }
@@ -325,7 +326,8 @@ private struct FloatingChatBody: View {
                                            retry: message.id == chat.messages.last?.id && chat.retryableMessage != nil ? { chat.retry() } : nil,
                                            grant: message.id == chat.messages.last?.id && !chat.busy ? { chat.grantAndRetry() } : nil,
                                            grantPermission: preferences.chatPermission.granting(message.denied),
-                                           answer: message.live ? { id, allow, answers in await chat.answer(id, allow: allow, answers: answers) } : nil)
+                                           answer: message.live ? { id, allow, answers in await chat.answer(id, allow: allow, answers: answers) } : nil,
+                                           cardsActionable: !message.cards.isEmpty && chat.cardsActionable(message), cardStores: chat.cardStores)
                             }
                             if let error = chat.error {
                                 Label(error, systemImage: "exclamationmark.triangle").font(.callout).foregroundStyle(Theme.danger)
