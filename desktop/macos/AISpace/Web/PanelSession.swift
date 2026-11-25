@@ -95,6 +95,10 @@ final class PanelSession: NSObject, ObservableObject {
         return home
     }
 
+    /// The app page to open in the browser: the current page, or a package app's entry on the
+    /// Space for it, since the app's own origin admits only this web view (ConnectionRules.browserURL).
+    var appBrowserURL: URL { ConnectionRules.browserURL(current: currentURL ?? webView.url, home: home) }
+
     /// Re-checks a failed connection, for example after the Mac wakes.
     func recoverIfFailed() {
         if state.isFailure { load() }
