@@ -283,10 +283,8 @@ struct AppTabView: View {
                     ToolbarSpacer(.fixed, placement: .primaryAction)
                 }
                 ToolbarItemGroup(placement: .primaryAction) {
-                    if let url = session.currentURL ?? session.webView.url {
-                        Button { NSWorkspace.shared.open(url) } label: { Label("Open in Browser", systemImage: "safari") }
-                            .help("Open in Browser")
-                    }
+                    Button { NSWorkspace.shared.open(session.appBrowserURL) } label: { Label("Open in Browser", systemImage: "safari") }
+                        .help("Open in Browser")
                     Button { model.moveToWindow(tab.app.id, connection: connection.id) } label: {
                         Label("Open in New Window", systemImage: "macwindow.badge.plus")
                     }

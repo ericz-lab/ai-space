@@ -27,6 +27,8 @@ export type AgentInfo = {
 
 /** A runtime/tier choice as every picker gets it; `unavailable` says why it is shown but cannot be picked (docs/model-machines.md#inventory). */
 export type ModelChoice = { value: string; runtime: string; tier: "basic" | "junior" | "intermediate" | "advanced"; model: string; unavailable?: "signed-out" | "offline" };
+/** A model of the built-in model gateway an app's override may name, with no runtime (docs/model.md#models): text for run, image for pictures. */
+export type GatewayModelChoice = { value: string; gateway: "text" | "image"; model: string };
 
 /** One agent CLI on one machine (`GET /api/model/inventory`). */
 export type CliInfo = { cli: string; kind: string; installed?: boolean; signedIn?: boolean; version?: string; path?: string; detail?: string; checkedAt?: string; configured: boolean; runtimes: string[] };
@@ -65,7 +67,16 @@ export type GatewayProviderInfo = {
   /** What names it: groups with its members (`emptied`: those left with none), tiers on it. */
   usedBy: { groups: string[]; tiers: string[]; emptied: string[] };
 };
-export type GatewayPrice = { input?: number; output?: number; cacheRead?: number; cacheWrite?: number; tiers?: { over: number }[]; perImage?: number; perMinute?: number; perMillionChars?: number; source: string };
+export type GatewayPrice = { input?: number; output?: number; cacheRead?: number; cacheWrite?: number; tiers?: { over: number }[]; perImage?: number; perMinute?: number; perMillionChars?: number; source: string; checkedAt?: string; currency?: string; printed?: Omit<GatewayPrice, "source" | "checkedAt" | "currency" | "printed" | "needsRate">; needsRate?: boolean };
+/** Model Watch's prices as Settings shows them (docs/model-gateway.md#prices). */
+export type GatewayWatchStatus = {
+  /** When the prices shipped with ai-space were synced from Model Watch. */
+  syncedAt?: string;
+  rate?: { usdPerCny: number; from: string };
+  rateError?: string;
+  needsRate: boolean;
+  sources: { id: string; name: string; site: string; label?: string; checkedAt?: string; currency: string; skipped: Record<string, number> }[];
+};
 export type GatewaySite = "intl" | "cn";
 /** `sites`: a vendor with a China and an international site, the bases of each (one account works on one only). */
 export type GatewayPreset = { name: string; label: string; messages?: string; openai?: string; auth: "x-api-key" | "bearer"; hasList: boolean; defaults: string[]; sites?: Record<GatewaySite, { messages?: string; openai?: string }>; openaiOffer?: { intl?: string; cn?: string; note: string; source: string } };
@@ -90,7 +101,7 @@ export type GatewayInfo = {
   ttsModels: string[];
   presets: GatewayPreset[];
   /** Where prices come from: the owner's file, and when models.dev's catalogue was last fetched. */
-  pricing?: { file: string; catalogFetchedAt?: string; fileError?: string };
+  pricing?: { file: string; catalogFetchedAt?: string; fileError?: string; modelWatch?: GatewayWatchStatus };
   runtimes: MagpiePins[];
   offer: { claude: boolean };
 };
@@ -103,7 +114,7 @@ export type SpeechChains = { asr: string[]; tts: string[]; live: string[] };
 export type SpeechChainItem = { provider: string } | { gateway: string; model: string; voice?: string };
 export type SpeechOrder = { asr: SpeechChainItem[]; tts: SpeechChainItem[] };
 /** One gateway provider as the Speech and Image groups offer it (`GET /api/model/gateway/speech`). */
-export type GatewayMediaProvider = { name: string; label: string; off?: string; serves: { asr: true | string; tts: true | string; image: true | string }; asrModels: string[]; ttsModels: string[]; imageModels: string[]; voices: Record<string, string[]> };
+export type GatewayMediaProvider = { name: string; label: string; off?: string; serves: { asr: true | string; tts: true | string; image: true | string }; asrModels: string[]; ttsModels: string[]; imageModels: string[]; voices: Record<string, string[]>; voicesOpen?: boolean };
 /** A speech provider that is not the gateway's: written in providers.yaml by hand, or the built-in one when it is here. */
 export type SpeechCustomProvider = { name: string; kind: string; serves: { asr: boolean; tts: boolean; live: boolean }; machine?: string; located?: boolean; off?: string; testable: boolean };
 export type GatewaySpeechInfo = {

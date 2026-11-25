@@ -44,8 +44,21 @@ export const DOCUMENTED_KINDS: Record<string, { kinds: Record<string, GatewayKin
     source: ["https://docs.z.ai/api-reference/audio/audio-transcriptions", "https://docs.z.ai/api-reference/image/generate-image"],
   },
   minimax: {
-    kinds: ids("image", ["MiniMax-H3-Image", "MiniMax-H3-Image-Highspeed"]),
-    source: ["https://platform.minimax.io/docs/api-reference/image-generation-h3-generations.md"],
+    kinds: {
+      ...ids("image", ["MiniMax-H3-Image", "MiniMax-H3-Image-Highspeed"]),
+      ...ids("asr", ["asr-1.0"]),
+      ...ids("tts", ["speech-2.8-turbo", "speech-2.8-hd", "speech-2.6-turbo", "speech-2.6-hd", "speech-02-turbo", "speech-02-hd", "speech-01-turbo", "speech-01-hd"]),
+    },
+    source: [
+      "https://platform.minimax.io/docs/api-reference/image-generation-h3-generations.md",
+      "https://platform.minimax.io/docs/api-reference/speech-to-text.md",
+      "https://platform.minimax.io/docs/api-reference/speech-t2a-http.md",
+    ],
+  },
+  // Pay-as-you-go takes the dated Model IDs of Ark's model list (checked 2026-11-24).
+  ark: {
+    kinds: ids("image", ["doubao-seedream-5-5-261028", "doubao-seedream-5-0-pro-260628", "doubao-seedream-5-0-flash-260915", "doubao-seedream-4-0-260415"]),
+    source: ["https://www.volcengine.com/docs/82379/1330310", "https://docs.volcengine.com/docs/82379/1541523"],
   },
   "ark-plan": {
     kinds: ids("image", ["doubao-seedream-5.5", "doubao-seedream-5.0-pro", "doubao-seedream-5.0-flash"]),
@@ -67,6 +80,15 @@ export const DOCUMENTED_VOICES: Record<string, { voices: string[]; byModel?: Rec
     byModel: { "canopylabs/orpheus-v1-english": ["autumn", "diana", "hannah", "austin", "daniel", "troy"], "canopylabs/orpheus-arabic-saudi": ["abdullah", "fahad", "sultan", "lulwa", "noura", "aisha"] },
     source: "https://console.groq.com/docs/text-to-speech/orpheus",
   },
+  // System voices listed on both sites' pages (platform.minimax.io and platform.minimaxi.com /docs/faq/system-voice-id.md); any other voice id may be typed.
+  minimax: {
+    voices: [
+      "English_Graceful_Lady", "English_Diligent_Man", "English_Gentle-voiced_man", "English_Aussie_Bloke",
+      "Chinese (Mandarin)_News_Anchor", "Chinese (Mandarin)_Radio_Host", "Chinese (Mandarin)_Gentleman", "Chinese (Mandarin)_Lyrical_Voice",
+      "Chinese (Mandarin)_Male_Announcer", "Chinese (Mandarin)_Reliable_Executive", "Chinese (Mandarin)_Mature_Woman", "Cantonese_GentleLady", "Japanese_IntellectualSenior",
+    ],
+    source: "https://platform.minimax.io/docs/faq/system-voice-id.md",
+  },
   zhipu: { voices: ["tongtong", "chuichui", "xiaochen", "jam", "kazi", "douji", "luodo"], source: "https://docs.bigmodel.cn/api-reference/%E6%A8%A1%E5%9E%8B-api/%E6%96%87%E6%9C%AC%E8%BD%AC%E8%AF%AD%E9%9F%B3" },
 };
 
@@ -85,7 +107,7 @@ export function voicesFor(preset: string | undefined, model: string | undefined)
 export const OPENAI_OFFERS: Record<string, { intl?: string; cn?: string; note: string; source: string }> = {
   zhipu: { cn: "https://open.bigmodel.cn/api/paas/v4", note: "speech, transcription and pictures; a GLM Coding Plan key works only on the coding endpoints", source: "https://docs.z.ai/devpack/faq" },
   zai: { intl: "https://api.z.ai/api/paas/v4", note: "transcription and pictures; a GLM Coding Plan key works only on the coding endpoints", source: "https://docs.z.ai/devpack/faq" },
-  minimax: { intl: "https://api.minimax.io/v1", cn: "https://api.minimaxi.com/v1", note: "pictures only (its speech has its own shape)", source: "https://platform.minimax.io/docs/api-reference/image-generation-h3-generations.md" },
+  minimax: { intl: "https://api.minimax.io/v1", cn: "https://api.minimaxi.com/v1", note: "pictures only (its speech is reached by the speech layer's own minimax kind, which needs no openai base)", source: "https://platform.minimax.io/docs/api-reference/image-generation-h3-generations.md" },
   ark: { cn: "https://ark.cn-beijing.volces.com/api/v3", note: "pictures (Seedream) only", source: "https://docs.volcengine.com/docs/82379/1541523" },
   "ark-plan": { cn: "https://ark.cn-beijing.volces.com/api/plan/v3", note: "pictures (Seedream) only, with the Agent Plan key", source: "https://docs.volcengine.com/docs/ark/agent-plan-personal-visual-models?lang=zh" },
 };
@@ -113,7 +135,6 @@ export const PRESET_LACKS: Record<string, Partial<Record<Exclude<GatewayKind, "t
   deepseek: { asr: "its transcription is /v1/tools/asr, a shape the gateway does not forward", tts: "its speech is /v1/tools/tts, a shape the gateway does not forward", image: NONE },
   kimi: { asr: NONE, tts: NONE, image: NONE },
   dashscope: { asr: "its transcription runs through chat completions, not /audio/transcriptions", tts: "its speech is DashScope's own API", image: "its pictures are DashScope's own API (no OpenAI-compatible mode)" },
-  minimax: { asr: "its transcription is /v1/speech_to_text, a shape the gateway does not forward", tts: "its speech (t2a_v2) answers JSON with hex audio, not the forwarded shape" },
   zai: { tts: NONE },
   groq: { image: NONE },
   openrouter: { tts: "its speech answers mp3 or pcm, and ai-space's speech asks for wav", image: "its pictures are POST /api/v1/images, not /images/generations" },
@@ -122,9 +143,31 @@ export const PRESET_LACKS: Record<string, Partial<Record<Exclude<GatewayKind, "t
   "ark-coding": { asr: "a Coding Plan key is for coding tools only", tts: "a Coding Plan key is for coding tools only", image: "a Coding Plan key is for coding tools only" },
 };
 
+/**
+ * Presets whose speech the speech layer reaches with a kind of its own (docs/speech.md#kinds), the
+ * key and the host taken from the gateway provider: the gateway forwards without translating, and
+ * these vendors' speech is not OpenAI's shape. Speech from such a provider needs either base, no openai one.
+ */
+export const NATIVE_SPEECH: Record<string, "minimax"> = { minimax: "minimax" };
+
+/** The speech kind a gateway provider is used with: its preset's own, else the OpenAI shape through the gateway. */
+export function speechKindOf(p: Pick<GatewayProvider, "preset">): "openai-compatible" | "minimax" {
+  return (p.preset && NATIVE_SPEECH[p.preset]) || "openai-compatible";
+}
+
+/** What a provider can serve: through the gateway, or for speech through its preset's own kind (`NATIVE_SPEECH`). */
 export function servesOf(p: Pick<GatewayProvider, "messages" | "openai" | "preset">): Serves {
+  const forwarded = forwardsOf(p);
+  if (speechKindOf(p) === "openai-compatible") return forwarded;
+  const speech = p.messages || p.openai ? true : "no base to read the host from";
+  return { ...forwarded, asr: speech, tts: speech };
+}
+
+/** What the gateway itself forwards to a provider: its model lists count only these. */
+export function forwardsOf(p: Pick<GatewayProvider, "messages" | "openai" | "preset">): Serves {
   const lacks = (p.preset && PRESET_LACKS[p.preset]) || {};
   const noOpenai = "no openai base: add the vendor's OpenAI-style base to use it for speech or pictures";
-  const on = (k: Exclude<GatewayKind, "text">): true | string => lacks[k] ?? (!p.openai ? noOpenai : true);
+  const native = speechKindOf(p) !== "openai-compatible" ? "the speech layer calls this vendor's own speech API, not through the gateway" : undefined;
+  const on = (k: Exclude<GatewayKind, "text">): true | string => (k !== "image" && native) || (lacks[k] ?? (!p.openai ? noOpenai : true));
   return { text: p.messages ? true : "no messages base", asr: on("asr"), tts: on("tts"), image: on("image") };
 }

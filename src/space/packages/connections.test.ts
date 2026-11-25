@@ -3,6 +3,7 @@ import { Database } from "bun:sqlite";
 import { terminalWebSocket } from "../terminal/api.ts";
 import { rejection } from "../testing.ts";
 import { Connections } from "./connections.ts";
+import { CHANNEL_PROTOCOL } from "./channel.ts";
 import { PackageLinks, createConnectionRoutes } from "./links.ts";
 
 const cleanups: (() => void)[] = [];
@@ -228,4 +229,52 @@ test("an outgoing connection sends an access layer's headers from its variable, 
   cleanups.push(() => links.close());
   links.refresh();
   expect(links.status().find((s) => s.id === lone.id)?.error).toContain("MISSING");
+});
+
+// A dialer whose socket goes quiet must notice and dial again: Bun fires no `close` for a socket closed before
+// its upgrade finished, and a proxy in front of a restarted Space can keep an upgraded leg open without answering.
+function dialer(url: string, timing = { handshakeMs: 100, heartbeatMs: 50, deadMs: 150 }) {
+  const own = store(), remoteSpaceId = crypto.randomUUID();
+  const outgoing = own.create({ remoteSpaceId, direction: "outgoing", url, tokenEnv: "HUB_ACCESS" }).connection;
+  const links = new PackageLinks(own, { env: { HUB_ACCESS: "token" }, apps: () => [], timing });
+  cleanups.push(() => links.close());
+  return { links, remoteSpaceId, status: () => links.status().find((c) => c.id === outgoing.id)! };
+}
+async function until(check: () => boolean, what: string) {
+  for (let i = 0; i < 200; i++) { if (check()) return; await Bun.sleep(10); }
+  throw new Error(`timed out waiting for ${what}`);
+}
+
+test("a dialed socket whose upgrade never answers is dropped and dialed again", async () => {
+  let accepted = 0;
+  const silent = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { open() { accepted++; }, data() {} } });
+  cleanups.push(() => silent.stop(true));
+  const { links, status } = dialer(`http://127.0.0.1:${silent.port}`);
+  links.refresh();
+  await until(() => accepted === 1, "the first dial");
+  await until(() => status().error === "identity handshake timed out", "the handshake timeout");
+  links.refresh();
+  await until(() => accepted === 2, "a second dial");
+});
+
+test("an open channel that stops answering pings is dropped and dialed again", async () => {
+  let accepted = 0;
+  let remoteSpaceId = "";
+  // A WebSocket acceptor that says hello and then answers nothing, pings included (Bun.serve always answers them).
+  const mute = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { open() { accepted++; }, data(socket, data) {
+    const key = /sec-websocket-key: *(\S+)/i.exec(data.toString())?.[1];
+    if (!key) return;
+    const accept = new Bun.CryptoHasher("sha1").update(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").digest("base64");
+    const hello = Buffer.from(JSON.stringify({ kind: "hello", spaceId: remoteSpaceId, protocol: CHANNEL_PROTOCOL }));
+    socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
+    socket.write(Buffer.concat([Buffer.from([0x81, hello.length]), hello]));
+  } } });
+  cleanups.push(() => mute.stop(true));
+  const { links, status, remoteSpaceId: id } = dialer(`http://127.0.0.1:${mute.port}`);
+  remoteSpaceId = id;
+  links.refresh();
+  await until(() => status().connected, "the channel to open");
+  await until(() => !status().connected && status().error === "remote Space stopped answering", "the heartbeat to give up");
+  links.refresh();
+  await until(() => accepted === 2, "a second dial");
 });

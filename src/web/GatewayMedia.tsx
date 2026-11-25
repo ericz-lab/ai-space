@@ -223,7 +223,7 @@ export function SpeechCard({ g, editable, onAddProvider, initial, t }: { g: Gate
                     const models = p ? modelsOf(p, role) : [];
                     const voices = p && "gateway" in item && role === "tts" ? p.voices[item.model] ?? [] : [];
                     return (
-                      <li key={keyOf(item)}>
+                      <li key={keyOf(item)} className={"gateway" in item && p ? "gw-order-item has-fields" : "gw-order-item"}>
                         <div className="gw-order-head">
                           <span>
                             <b>{nameOf(item)}</b> <small className="cli-dim">{i === 0 ? t("speechg.first") : t("speechg.then")}{"gateway" in item ? ` · ${t("speechg.viaGateway")}` : c ? ` · ${t("speechg.custom")}` : ""}</small>
@@ -238,7 +238,8 @@ export function SpeechCard({ g, editable, onAddProvider, initial, t }: { g: Gate
                         </div>
                         {"gateway" in item && !p && <small className="gw-warn">{t("speechg.gone")}</small>}
                         {"gateway" in item && p && (
-                          <>
+                          // Inside this provider's own box: its model and voice, not the role's.
+                          <div className="gw-order-fields">
                             <label className="gw-field">
                               <span>{t("speechg.model")}</span>
                               {models.length ? (
@@ -253,7 +254,13 @@ export function SpeechCard({ g, editable, onAddProvider, initial, t }: { g: Gate
                             {role === "tts" && (
                               <label className="gw-field">
                                 <span>{t("speechg.voice")}</span>
-                                {voices.length ? (
+                                {voices.length && p.voicesOpen ? (
+                                  // The vendor's documented voices to pick from, and any other voice id it has (a cloned one) typed.
+                                  <>
+                                    <input className="setselect" list={`gw-voices-${p.name}`} value={item.voice ?? ""} spellCheck={false} autoCapitalize="off" placeholder={t("speechg.voiceTyped")} disabled={lock} onChange={(e) => patch(role, i, { voice: e.target.value })} />
+                                    <datalist id={`gw-voices-${p.name}`}>{voices.map((v) => <option key={v} value={v} />)}</datalist>
+                                  </>
+                                ) : voices.length ? (
                                   <select className="setselect" value={item.voice ?? ""} disabled={lock} onChange={(e) => patch(role, i, { voice: e.target.value })}>
                                     {voices.map((v) => <option key={v} value={v}>{v}</option>)}
                                   </select>
@@ -262,7 +269,7 @@ export function SpeechCard({ g, editable, onAddProvider, initial, t }: { g: Gate
                                 )}
                               </label>
                             )}
-                          </>
+                          </div>
                         )}
                       </li>
                     );
@@ -332,19 +339,24 @@ function AddImageModel({ offered, taken, busy, onAdd, t }: { offered: string[]; 
   );
 }
 
-export function ImageCard({ g, editable, busy, onAddProvider, onAddModel, onSave, t, children }: { g: GatewayInfo; editable: boolean; busy: boolean; onAddProvider?: () => void; onAddModel?: (provider: GatewayInfo["providers"][number], model: string) => void; onSave: (image: string) => void; t: T; children?: ReactNode }) {
-  const [model, setModel] = useState(g.tiers.image ?? "");
+/**
+ * The Pictures group: which providers can draw, their picture models (and adding one), and a test
+ * picture from the model picked here. There is no picture tier: an app's picture call names its
+ * model (docs/model.md#models), so the select only says which model the test draws with.
+ */
+export function ImageCard({ g, editable, busy, onAddProvider, onAddModel, t, children }: { g: GatewayInfo; editable: boolean; busy: boolean; onAddProvider?: () => void; onAddModel?: (provider: GatewayInfo["providers"][number], model: string) => void; t: T; children?: ReactNode }) {
+  const [model, setModel] = useState(g.imageModels[0] ?? "");
   const [testing, setTesting] = useState(false);
   const [picture, setPicture] = useState<{ src: string; ms: number; served?: string } | null>(null);
   const [testError, setTestError] = useState("");
-  useEffect(() => setModel(g.tiers.image ?? ""), [g.tiers.image]);
-  const offered = g.imageModels.includes(model) || !model ? g.imageModels : [model, ...g.imageModels];
+  // A model added or removed: keep the pick when it is still there.
+  useEffect(() => setModel((m) => (g.imageModels.includes(m) ? m : (g.imageModels[0] ?? ""))), [g.imageModels.join(",")]);
   const test = async () => {
     setTesting(true);
     setTestError("");
     setPicture(null);
     try {
-      const r = await sendJson<{ failed?: boolean; error?: string; image?: string; type?: string; ms: number; served?: string }>("POST", "/api/model/gateway/image/test", model ? { model } : {});
+      const r = await sendJson<{ failed?: boolean; error?: string; image?: string; type?: string; ms: number; served?: string }>("POST", "/api/model/gateway/image/test", { model });
       if (r.failed || !r.image) setTestError(r.error ?? "failed");
       else setPicture({ src: `data:${r.type};base64,${r.image}`, ms: r.ms, ...(r.served ? { served: r.served } : {}) });
     } catch (e) {
@@ -373,24 +385,20 @@ export function ImageCard({ g, editable, busy, onAddProvider, onAddModel, onSave
             {t("imageg.none")} {onAddProvider && <button className="linkbtn" onClick={onAddProvider}>{t("gateway.addCan")}</button>}
           </small>
         )}
-        <label className="gw-field">
-          <span>{t("gateway.imageTier")}</span>
-          <select className="setselect" value={model} disabled={busy || !editable || (!offered.length && !model)} onChange={(e) => setModel(e.target.value)}>
-            <option value="">{t("magpie.noTier")}</option>
-            {offered.map((m) => <option key={m} value={m}>{g.groups[m] ? t("magpie.groupOption", { model: m }) : m}</option>)}
-          </select>
-        </label>
-        {g.tiers.image && !g.imageModels.includes(g.tiers.image) && <small className="gw-warn gw-block">{t("imageg.stale")}</small>}
-        {editable && (
-          <div className="setbtns">
-            <span className="setbtns-gap" />
-            <button className="btn2 primary" disabled={busy || model === (g.tiers.image ?? "")} onClick={() => onSave(model)}>{t("magpie.save")}</button>
+        {/* gateway.yaml from before: its picture tier loads and nothing reads it. */}
+        {g.tiers.image && <small className="gw-warn gw-block">{t("imageg.tierIgnored", { model: g.tiers.image })}</small>}
+        {children}
+        {g.imageModels.length > 0 && (
+          <div className="gw-tests-row">
+            <label className="gw-field">
+              <span>{t("imageg.testModel")}</span>
+              <select className="setselect" value={model} disabled={testing} onChange={(e) => setModel(e.target.value)}>
+                {g.imageModels.map((m) => <option key={m} value={m}>{g.groups[m] ? t("magpie.groupOption", { model: m }) : m}</option>)}
+              </select>
+            </label>
+            <button className="btn2" disabled={testing || !model} onClick={() => void test()}>{testing ? t("gateway.testing") : t("imageg.test")}</button>
           </div>
         )}
-        {children}
-        <div className="gw-tests-row">
-          <button className="btn2" disabled={testing || !model} onClick={() => void test()}>{testing ? t("gateway.testing") : t("imageg.test")}</button>
-        </div>
         <small className="cli-dim gw-block">{t("imageg.testCost")}</small>
         {picture && (
           <div className="gw-clip">

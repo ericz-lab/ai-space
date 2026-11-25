@@ -1,5 +1,8 @@
-import { assertCompletionMode, type OnDelta, type PriceBasis, type RuntimeAdapter } from "../runtimes/types.ts";
-import { RuntimeRegistry, claudeOnly } from "../runtimes/registry.ts";
+import { assertCompletionMode, MODEL_TIERS, type OnDelta, type PriceBasis, type RuntimeAdapter } from "../runtimes/types.ts";
+import { RuntimeRegistry, claudeOnly, splitMachine } from "../runtimes/registry.ts";
+import { createGatewayModels } from "../runtimes/anthropic-api.ts";
+import type { GatewayLink } from "../gateway/types.ts";
+import type { VendorImageDeps } from "./vendor-image.ts";
 import type { ModelStore } from "./store.ts";
 import type { ModelSource } from "./app-models.ts";
 import { classifyFailure, REST_KINDS } from "./failure.ts";
@@ -21,6 +24,13 @@ import { type CallTrace, type ImageRunInput, type ImageRunOutcome, type ModelCal
  * (full mode, tools, files, another machine) is skipped. The row names the first choice
  * (`fallbackFrom`), how many runtimes were tried, and the trace of the decision.
  *
+ * Gateway models (docs/model.md#models): a model whose first segment is a provider of gateway.yaml
+ * (`ds/deepseek-chat`), or a bare name that is one of its groups, goes to the built-in model
+ * gateway directly, with no runtime: text as Anthropic Messages, pictures as OpenAI Images. Such
+ * a call has no fallback list here; the gateway's own groups and rests are its failover. Its row
+ * has no runtime and backend `gateway`, and keeps the model asked for, what served it and the cost.
+ * A runtime name always wins (a provider may not be named like one: gateway/config.ts).
+ *
  * Shutdown: `drain` waits for the calls in flight, because an app is blocked on
  * each of them; the ones still running when the grace is over are written to the
  * ledger as interrupted, so a restart that cuts a call is visible there.
@@ -35,6 +45,8 @@ export type ModelServiceOptions = {
   now?: () => number;
   /** Told about every call's outcome: the status table's limited and last-success columns. */
   health?: RuntimeHealth;
+  /** The built-in model gateway, for calls that name one of its models (above). */
+  gateway?: { link: GatewayLink; fetch?: typeof fetch; vendorImage?: VendorImageDeps };
 };
 
 export type RunResult = { outcome: RunOutcome; call: ModelCall };
@@ -71,6 +83,13 @@ function assertPlace(runtime: RuntimeAdapter, input: Pick<RunInput, "mode" | "to
 
 /** What every runtime that answers a call checks first; a failure here is the request's, never a reason to fall back. */
 function assertTakes(runtime: RuntimeAdapter, input: RunInput): void {
+  if (runtime.backend === "gateway") {
+    assertCompletionMode(input);
+    if (input.tools.length) throw new Error("a call to a model gateway model takes no tools; name a runtime (runtime/model) for a call with tools");
+    if (input.mode === "full") throw new Error("a call to a model gateway model has no full completion mode; name a Codex or Claude Code runtime");
+    if (input.serviceTier !== undefined) throw new Error("serviceTier requires a local Codex streaming runtime");
+    return;
+  }
   assertPlace(runtime, input);
   assertCompletionMode(input);
   if (input.serviceTier !== undefined && runtime.kind !== "codex-cli") throw new Error("serviceTier requires a local Codex streaming runtime");
@@ -111,6 +130,9 @@ export class ModelService {
   private running = 0;
   private readonly queue: (() => void)[] = [];
   private readonly inflight = new Map<Promise<RunResult | ImageResult>, Inflight>();
+  private readonly gateway: GatewayLink | undefined;
+  /** The gateway called directly; not a runtime, never listed (anthropic-api.ts `createGatewayModels`). */
+  private readonly gatewayModels: RuntimeAdapter | undefined;
 
   constructor(opts: ModelServiceOptions) {
     this.store = opts.store;
@@ -119,6 +141,40 @@ export class ModelService {
     this.log = opts.log ?? ((m) => console.log(`[model] ${m}`));
     this.now = opts.now ?? Date.now;
     this.health = opts.health;
+    this.gateway = opts.gateway?.link;
+    this.gatewayModels = opts.gateway ? createGatewayModels({ gateway: opts.gateway.link, ...(opts.gateway.fetch ? { fetch: opts.gateway.fetch } : {}), ...(opts.gateway.vendorImage ? { vendorImage: opts.gateway.vendorImage } : {}) }) : undefined;
+  }
+
+  /**
+   * The gateway model a value names, for answers or for pictures, or undefined when it names a
+   * runtime (or nothing the gateway knows). Throws when it names a gateway model of another kind.
+   */
+  gatewayModel(model: string, purpose: "text" | "image"): string | undefined {
+    if (!this.namesGateway(model)) return undefined;
+    const kinds = this.gateway!.kindsOf(model)!;
+    if (!kinds.includes(purpose)) {
+      const what = kinds.includes("image") ? "a picture model (send it to /api/model/image)" : kinds.includes("text") ? "a text model (send it to /api/model/run)" : `a ${kinds.join("/")} model (the speech service uses it)`;
+      throw new Error(`${model} is ${what}, not a ${purpose === "image" ? "picture" : "text"} model of the model gateway`);
+    }
+    return model;
+  }
+
+  /** Whether a value names a model of the built-in model gateway (of any kind), not a runtime's. */
+  namesGateway(model: string): boolean {
+    if (!this.gateway || !this.gatewayModels || splitMachine(model)) return false;
+    const slash = model.indexOf("/");
+    if (slash < 0 ? (MODEL_TIERS as readonly string[]).includes(model) : this.runtimes.get(model.slice(0, slash))) return false;
+    return Boolean(this.gateway.kindsOf(model));
+  }
+
+  /** Whether a call naming this model goes to the built-in model gateway rather than a runtime. */
+  isGateway(runtime: RuntimeAdapter): boolean {
+    return runtime === this.gatewayModels;
+  }
+
+  /** The gateway's models an app may name, for the panel's model pickers. */
+  gatewayChoices(): { text: string[]; image: string[] } {
+    return this.gateway && this.gatewayModels ? this.gateway.choices() : { text: [], image: [] };
   }
 
   /** Where a bare model name runs; the status view shows it. */
@@ -133,6 +189,7 @@ export class ModelService {
 
   /** The runtime a request's model names, and the model as that runtime knows it. Throws on an unknown runtime or one without answers. */
   resolve(model: string): { runtime: RuntimeAdapter; model: string } {
+    if (this.gatewayModel(model, "text")) return { runtime: this.gatewayModels!, model };
     const r = this.runtimes.resolve(model);
     if (!r.runtime.capabilities.complete) throw new Error(`runtime ${r.runtime.name} does not answer requests`);
     return r;
@@ -166,6 +223,7 @@ export class ModelService {
 
   /** The runtime a request for pictures names; throws when it cannot make them. */
   resolveImage(model: string): { runtime: RuntimeAdapter; model: string } {
+    if (this.gatewayModel(model, "image")) return { runtime: this.gatewayModels!, model };
     const r = this.runtimes.resolve(model, "image");
     if (!r.runtime.capabilities.image || !r.runtime.image) throw new Error(`runtime ${r.runtime.name} does not make images`);
     return r;
@@ -188,7 +246,7 @@ export class ModelService {
   private async executeImage(app: string, input: ImageRunInput, signal?: AbortSignal, source?: ModelSource, origin: Origin = "run"): Promise<ImageResult> {
     const row = (runtime: RuntimeAdapter | undefined, model: string, outcome: ImageRunOutcome, startedAt: number, durationMs: number) =>
       this.store.add({
-        app, tag: input.tag, model: outcome.model ?? model, runtime: runtime?.name, ...(runtime?.machine ? { machine: runtime.machine } : {}), ...(source ? { modelSource: source } : {}),
+        app, tag: input.tag, model: outcome.model ?? model, runtime: runtime && !this.isGateway(runtime) ? runtime.name : undefined, ...(runtime?.machine ? { machine: runtime.machine } : {}), ...(source ? { modelSource: source } : {}),
         backend: outcome.backend, origin, status: outcome.ok ? "ok" : "error", error: outcome.ok ? undefined : outcome.error,
         startedAt, durationMs, promptChars: input.prompt.length, outputChars: outcome.ok ? outcome.text.length : undefined, usage: outcome.usage, costUsd: outcome.costUsd,
         ...(outcome.priceBasis ? { priceBasis: outcome.priceBasis } : {}),
@@ -214,7 +272,7 @@ export class ModelService {
       this.release();
     }
     const call = row(target.runtime, target.model, outcome, startedAt, Math.max(0, this.now() - startedAt));
-    this.health?.note(target.runtime.machine ?? "", target.runtime.name, outcome.ok ? undefined : outcome.error);
+    if (!this.isGateway(target.runtime)) this.health?.note(target.runtime.machine ?? "", target.runtime.name, outcome.ok ? undefined : outcome.error);
     if (!outcome.ok) this.log(`${app}/${input.tag} image (${target.runtime.name}/${target.model}, ${outcome.backend}): ${outcome.error}`);
     return { outcome, call };
   }
@@ -299,9 +357,9 @@ export class ModelService {
           o = { ok: false, error: (e as Error).message ?? String(e), backend: c.runtime.backend };
         }
         const failure = o.ok ? undefined : classifyFailure(o.error, this.now());
-        this.health?.note(c.runtime.machine ?? "", c.runtime.name, o.ok ? undefined : o.error, failure);
+        if (!this.isGateway(c.runtime)) this.health?.note(c.runtime.machine ?? "", c.runtime.name, o.ok ? undefined : o.error, failure);
         tries.push({
-          runtime: c.runtime.name, ...(c.runtime.machine ? { machine: c.runtime.machine } : {}), model: o.model ?? c.model, ok: o.ok,
+          ...(this.isGateway(c.runtime) ? {} : { runtime: c.runtime.name }), ...(c.runtime.machine ? { machine: c.runtime.machine } : {}), model: o.model ?? c.model, ok: o.ok,
           ...(o.ok ? {} : { error: o.error.slice(0, 200), kind: failure!.kind }), ms: Math.max(0, this.now() - t0),
           ...(streamed && !o.ok ? { streamed: true } : {}), ...(o.served ? { served: o.served } : {}),
         });
@@ -347,7 +405,8 @@ export class ModelService {
    * the peer offers only the runtimes it chose (SPACE_PEER_MODEL).
    */
   private candidates(input: RunInput, first: { runtime: RuntimeAdapter; model: string }, origin: Origin): Candidate[] {
-    const list = origin === "peer" ? undefined : this.runtimes.fallbackFor(input.model);
+    // A gateway model's failover is the gateway's own (its groups and rests).
+    const list = origin === "peer" || this.isGateway(first.runtime) ? undefined : this.runtimes.fallbackFor(input.model);
     const head: Candidate = { label: list?.key ?? input.model, runtime: first.runtime, model: first.model, note: { model: list?.key ?? input.model }, first: true };
     if (!list) return [head];
     const all: Candidate[] = [head];
@@ -386,7 +445,7 @@ export class ModelService {
       tag: input.tag,
       // A peer resolved the tier: its concrete model is what ran.
       model: outcome.model ?? input.model,
-      runtime: runtime?.name,
+      runtime: runtime && !this.isGateway(runtime) ? runtime.name : undefined,
       ...(runtime?.machine ? { machine: runtime.machine } : {}),
       ...(source ? { modelSource: source } : {}),
       mode: input.mode ?? (input.tools.length || input.files?.length ? undefined : "slim"),

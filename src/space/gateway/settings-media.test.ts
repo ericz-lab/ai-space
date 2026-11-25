@@ -10,7 +10,7 @@ import { SpeechStore } from "../speech/store.ts";
 import { SpeechError } from "../speech/types.ts";
 import { GATEWAY_PREFIX, createGatewayRoutes } from "./api.ts";
 import { parseGatewayYaml } from "./config.ts";
-import { kindOf, servesOf } from "./kinds.ts";
+import { forwardsOf, kindOf, servesOf } from "./kinds.ts";
 import { ModelGateway } from "./service.ts";
 import { createGatewaySettingsRoutes } from "./settings.ts";
 import { chainOf, setSpeechText, speechEditProblem } from "./speech-edit.ts";
@@ -63,6 +63,40 @@ function vendor() {
   return { url: `http://127.0.0.1:${server.port}`, seen };
 }
 
+/**
+ * MiniMax's speech API as its docs show it (speech-t2a-http.md, speech-to-text.md): hex audio in JSON,
+ * errors inside HTTP 200 for t2a_v2, the real status for speech_to_text.
+ */
+function minimaxVendor(key = KEY) {
+  const seen: { path: string; auth: string | null; language: string | null; json?: Record<string, unknown>; form?: Record<string, string> }[] = [];
+  const server = Bun.serve({
+    port: 0,
+    hostname: "127.0.0.1",
+    async fetch(req) {
+      const url = new URL(req.url);
+      const auth = req.headers.get("authorization");
+      const s: (typeof seen)[number] = { path: url.pathname, auth, language: req.headers.get("language") };
+      if (req.headers.get("content-type")?.startsWith("multipart/")) {
+        const f = await req.formData();
+        s.form = Object.fromEntries([...f.entries()].map(([k, v]) => [k, typeof v === "string" ? v : `<file ${(v as File).size}>`]));
+      } else s.json = (await req.json()) as Record<string, unknown>;
+      seen.push(s);
+      const good = auth === `Bearer ${key}`;
+      if (url.pathname === "/v1/t2a_v2") {
+        if (!good) return Response.json({ base_resp: { status_code: 1004, status_msg: "login fail: Please carry the API secret key in the 'Authorization' field of the request header" } });
+        return Response.json({ data: { audio: Buffer.from(WAV).toString("hex"), status: 2 }, extra_info: { audio_format: "wav", usage_characters: 20 }, trace_id: "t", base_resp: { status_code: 0, status_msg: "success" } });
+      }
+      if (url.pathname === "/v1/speech_to_text") {
+        if (!good) return Response.json({ type: "error", error: { type: "authorized_error", message: "login fail (1004)", http_code: "401" } }, { status: 401 });
+        return Response.json({ text: "hello from ai-space", duration: 1.2, n_speakers: 1, segments: [{ id: 0, start: 0, end: 1.2, speaker: "S1", text: "hello from ai-space" }], trace_id: "t" });
+      }
+      return new Response("404 page not found", { status: 404 });
+    },
+  });
+  stops.push(() => server.stop(true));
+  return { url: `http://127.0.0.1:${server.port}`, seen };
+}
+
 let home: string;
 beforeEach(async () => {
   home = await mkdtemp(join(tmpdir(), "space-gw-media-"));
@@ -91,7 +125,7 @@ async function setup(gatewayYaml?: string, o: { studio?: boolean } = {}) {
     l.warnings.push(...checkGatewayProviders(l.config, (n) => {
       const p = gateway.link.provider(n);
       const off = gateway.providerOff(n);
-      return p ? { openai: Boolean(p.openai), ...(off ? { off } : {}) } : undefined;
+      return p ? { openai: Boolean(p.openai), messages: Boolean(p.messages), ...(off ? { off } : {}) } : undefined;
     }, gateway.enabled));
     return { config: l.config, source: l.source, warnings: l.warnings, adapters: buildAdapters(l.config, { voiceStudio, gateway: gateway.link }) };
   };
@@ -156,6 +190,9 @@ describe("model kinds (docs/model-gateway.md#kinds)", () => {
     expect(servesOf({ preset: "openrouter", messages: "x", openai: "y" })).toMatchObject({ asr: true, tts: expect.stringMatching(/wav/), image: expect.stringMatching(/api\/v1\/images/) });
     expect(servesOf({ openai: "y" })).toEqual({ text: "no messages base", asr: true, tts: true, image: true });
     expect(servesOf({ preset: "zhipu", messages: "x" }).image).toMatch(/no openai base/);
+    // MiniMax's speech is the speech layer's own kind: either base gives the host; the gateway forwards none of it.
+    expect(servesOf({ preset: "minimax", messages: "x" })).toEqual({ text: true, asr: true, tts: true, image: expect.stringMatching(/no openai base/) });
+    expect(forwardsOf({ preset: "minimax", messages: "x", openai: "y" })).toMatchObject({ asr: expect.stringMatching(/speech layer/), tts: expect.stringMatching(/speech layer/), image: true });
   });
 
   test("/v1/models carries each model's kind; magpie's reader still tells groups apart", async () => {
@@ -217,6 +254,18 @@ describe("the speech orders in providers.yaml (docs/speech.md#from-settings)", (
     expect(chainOf(moved.after, "tts")).toEqual(["gateway-oa", "voice-studio"]);
     expect(chainOf(moved.after, "asr")).toEqual(["voice-studio", "gateway-oa"]);
     expect(chainOf(moved.after, "live")).toEqual(["voice-studio"]);
+  });
+
+  test("a minimax entry: its kind and the vendor's ids; an old entry of another kind for that provider is started again", () => {
+    const old = "speech:\n  providers:\n    gateway-minimax:   # mine\n      kind: openai-compatible\n      gateway: space\n      provider: minimax\n      asrModel: whisper-1\n";
+    const mm = (_role: "asr" | "tts", model: string, voice?: string) => ({ gateway: "minimax", model, kind: "minimax" as const, ...(voice ? { voice } : {}) });
+    const { text, after, changed } = setSpeechText(old, { asr: [mm("asr", "asr-1.0")], tts: [mm("tts", "speech-2.8-hd", "Cantonese_GentleLady")] }, {}, "absent");
+    expect(changed).toBe(true);
+    expect(text).toContain("    gateway-minimax:   # mine\n      kind: minimax\n      gateway: space\n      provider: minimax\n      asrModel: asr-1.0\n      ttsModel: speech-2.8-hd\n      voice: Cantonese_GentleLady\n");
+    expect(after.providers).toEqual([{ name: "gateway-minimax", kind: "minimax", url: "", asrModel: "asr-1.0", ttsModel: "speech-2.8-hd", voice: "Cantonese_GentleLady", gateway: { via: "space", provider: "minimax" } }]);
+    // The same again writes nothing; taking it out of TTS keeps its TTS model, out of both removes it.
+    expect(setSpeechText(text, { asr: [mm("asr", "asr-1.0")], tts: [mm("tts", "speech-2.8-hd", "Cantonese_GentleLady")] }, {}, "absent").changed).toBe(false);
+    expect(setSpeechText(text, { asr: [mm("asr", "asr-1.0")], tts: [] }, {}, "absent").after.providers[0]).toMatchObject({ kind: "minimax", ttsModel: "speech-2.8-hd" });
   });
 
   test("no file, voice-studio not there: nothing of it is written", () => {
@@ -375,6 +424,65 @@ describe("the Speech group's routes", () => {
   });
 });
 
+describe("a MiniMax provider in the Speech group (its own speech kind)", () => {
+  const gwYaml = (url: string) => `providers:\n  minimax:\n    preset: minimax\n    messages: '${url}/anthropic'\n    apiKeyEnv: OA\n    models: [MiniMax-M3]\n`;
+
+  test("it serves ASR and TTS with its documented models and voices, which may be typed; the gateway itself does not list them", async () => {
+    const m = minimaxVendor();
+    const { call } = await setup(gwYaml(m.url).replace("models: [MiniMax-M3]", "models: [MiniMax-M3, asr-1.0, speech-2.8-hd]"));
+    const p = (await call("GET", "/api/model/gateway/speech")).json.providers.find((x: { name: string }) => x.name === "minimax");
+    expect(p.serves).toEqual({ asr: true, tts: true, image: expect.stringMatching(/no openai base/) });
+    expect(p.asrModels).toEqual(["asr-1.0"]);
+    expect(p.ttsModels).toContain("speech-2.8-hd");
+    expect(p.voices["speech-2.8-hd"]).toContain("Chinese (Mandarin)_News_Anchor");
+    expect(p.voicesOpen).toBe(true);
+    const info = (await call("GET", "/api/model/gateway")).json;
+    const row = info.providers.find((x: { name: string }) => x.name === "minimax");
+    expect(row.serves).toMatchObject({ asr: true, tts: true });
+    expect(row.kinds).toMatchObject({ "asr-1.0": "asr", "speech-2.8-hd": "tts" });
+    // Nothing for the gateway to forward: its own speech lists stay without these.
+    expect([info.asrModels, info.ttsModels]).toEqual([[], []]);
+  });
+
+  test("saved as kind minimax with the vendor's ids; it answers with the gateway provider's key and host; no voices list is written", async () => {
+    const m = minimaxVendor();
+    const { call, speech } = await setup(gwYaml(m.url));
+    const order = { asr: [{ gateway: "minimax", model: "asr-1.0" }], tts: [{ gateway: "minimax", model: "speech-2.8-hd", voice: "Chinese (Mandarin)_News_Anchor" }] };
+    expect((await call("PUT", "/api/model/gateway/speech", order)).json).toMatchObject({ ok: true, applied: true, after: { asr: ["gateway-minimax"], tts: ["gateway-minimax"] } });
+    const text = await readFile(join(home, "providers.yaml"), "utf8");
+    expect(text).toContain("    gateway-minimax:\n      kind: minimax\n      gateway: space\n      provider: minimax\n      asrModel: asr-1.0\n      ttsModel: speech-2.8-hd\n      voice: \"Chinese (Mandarin)_News_Anchor\"\n");
+    expect(text).not.toContain("voices:");
+    expect(text).not.toContain(KEY);
+    expect((await call("GET", "/api/model/gateway/speech")).json.order).toEqual(order);
+    // Saving the same again writes nothing.
+    expect((await call("PUT", "/api/model/gateway/speech", order)).json.unchanged).toBe(true);
+    const spoken = await speech.speak({ app: "notes", tag: "t" }, { text: "hi", voices: [] });
+    expect([spoken.call.provider, spoken.call.kind, spoken.contentType]).toEqual(["gateway-minimax", "minimax", "audio/wav"]);
+    expect(m.seen.at(-1)).toMatchObject({ path: "/v1/t2a_v2", auth: `Bearer ${KEY}`, json: { model: "speech-2.8-hd", voice_setting: { voice_id: "Chinese (Mandarin)_News_Anchor" } } });
+    const heard = await speech.transcribe({ app: "notes", tag: "t" }, { file: new Blob([WAV]), filename: "a.wav", language: "zh", context: "" });
+    expect(heard.result.segments).toEqual([{ start: 0, end: 1.2, text: "hello from ai-space" }]);
+    expect(m.seen.at(-1)).toMatchObject({ path: "/v1/speech_to_text", language: "zh", form: { model: "asr-1.0", response_format: "verbose_json" } });
+    // A cloud provider: a local-only app is refused.
+    expect((await speech.speak({ app: "diary", tag: "t" }, { text: "hi", voices: [] }).catch((e) => e)).code).toBe("local_only");
+  });
+
+  test("the row's tests: TTS then ASR on that clip; a refused key is a failure without the key", async () => {
+    const m = minimaxVendor();
+    const { call } = await setup(gwYaml(m.url));
+    const tts = (await call("POST", "/api/model/gateway/speech/test", { role: "tts", provider: "minimax", model: "speech-2.8-turbo" })).json;
+    expect(tts).toMatchObject({ ok: true, role: "tts", contentType: "audio/wav", bytes: WAV.length });
+    // No voice sent: the first documented one.
+    expect(m.seen[0]!.json).toMatchObject({ model: "speech-2.8-turbo", voice_setting: { voice_id: "English_Graceful_Lady" }, audio_setting: { format: "wav" } });
+    expect((await call("POST", "/api/model/gateway/speech/test", { role: "asr", provider: "minimax", model: "asr-1.0", audio: tts.audio })).json).toMatchObject({ ok: true, text: "hello from ai-space" });
+    // A vendor that takes another key refuses this one: inside HTTP 200, as t2a_v2 does.
+    const other = minimaxVendor("sk-another-key");
+    const { call: wrong } = await setup(gwYaml(other.url));
+    const bad = (await wrong("POST", "/api/model/gateway/speech/test", { role: "tts", provider: "minimax", model: "speech-2.8-turbo" })).json;
+    expect(bad).toMatchObject({ ok: true, failed: true, error: expect.stringContaining("(1004)") });
+    expect(JSON.stringify(bad)).not.toContain(KEY);
+  });
+});
+
 describe("the Image group", () => {
   test("which providers can draw, and a test picture through the gateway", async () => {
     const v = vendor();
@@ -382,7 +490,9 @@ describe("the Image group", () => {
     const view = (await call("GET", "/api/model/gateway")).json;
     expect(view.imageModels).toEqual(["oa/gpt-image-1"]);
     expect(view.providers.find((p: { name: string }) => p.name === "ds").serves.image).toBe("the vendor documents none");
-    const r = (await call("POST", "/api/model/gateway/image/test", {})).json;
+    // The test names its picture model: the old tiers.image is not read.
+    expect((await call("POST", "/api/model/gateway/image/test", {})).json).toMatchObject({ ok: false, error: "pick the picture model to test" });
+    const r = (await call("POST", "/api/model/gateway/image/test", { model: "oa/gpt-image-1" })).json;
     expect(r).toMatchObject({ ok: true, type: "image/png", bytes: PNG.length, served: "oa/gpt-image-1" });
     expect(v.seen.at(-1)).toMatchObject({ path: "/v1/images/generations", json: { model: "gpt-image-1", n: 1 } });
     expect((await call("POST", "/api/model/gateway/image/test", { model: "ds/x" })).json).toMatchObject({ ok: true, failed: true });

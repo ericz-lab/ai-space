@@ -89,9 +89,10 @@ const totalsSql = () => `
   COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
   COALESCE(SUM(output_tokens), 0) AS output_tokens,
   COALESCE(SUM(${modelCostSql()}), 0) AS cost_usd,
+  SUM(CASE WHEN price_basis IS NOT NULL AND cost_usd IS NULL THEN 1 ELSE 0 END) AS unpriced,
   COALESCE(SUM(duration_ms), 0) AS duration_ms`;
 
-type TotalsRow = { calls: number; errors: number; input_tokens: number; cache_write_tokens: number; cache_read_tokens: number; output_tokens: number; cost_usd: number; duration_ms: number };
+type TotalsRow = { calls: number; errors: number; input_tokens: number; cache_write_tokens: number; cache_read_tokens: number; output_tokens: number; cost_usd: number; unpriced: number | null; duration_ms: number };
 
 export type GroupTotals<K extends Record<string, string>> = K & UsageTotals;
 
@@ -393,6 +394,7 @@ function totalsOf(r: TotalsRow | null | undefined): UsageTotals {
     outputTokens,
     tokens: inputTokens + cacheWriteTokens + cacheReadTokens + outputTokens,
     costUsd: r?.cost_usd ?? 0,
+    unpriced: r?.unpriced ?? 0,
     durationMs: r?.duration_ms ?? 0,
   };
 }

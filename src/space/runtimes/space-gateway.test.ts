@@ -256,7 +256,7 @@ describe("the built-in gateway's tiers (docs/model-gateway.md#tiers)", () => {
     return gateway;
   }
 
-  test("an API runtime: its own pin, else the gateway's tier; an image call goes to the picture tier", () => {
+  test("an API runtime: its own pin, else the gateway's tier; an old tiers.image is ignored", () => {
     const gateway = gatewayTiered("http://127.0.0.1:9");
     const reg = new RuntimeRegistry(
       { default: "api", runtimes: [{ name: "api", kind: "anthropic-api", apiKey: "", apiUrl: "", gateway: "space", models: { advanced: "ds/deepseek-v4-pro" } }, { name: "plain", kind: "anthropic-api", apiKey: "k", apiUrl: "", models: { basic: "claude-haiku" } }] },
@@ -265,7 +265,8 @@ describe("the built-in gateway's tiers (docs/model-gateway.md#tiers)", () => {
     expect(reg.resolve("api/advanced").model).toBe("ds/deepseek-v4-pro");
     expect(reg.resolve("api/basic").model).toBe("fast");
     expect(() => reg.resolve("api/junior")).toThrow(/no model for tier junior/);
-    expect(reg.resolve("api/advanced", "image").model).toBe("openai/gpt-image-1");
+    // tiers.image is read by nothing: a tier is the runtime's own for pictures too.
+    expect(reg.resolve("api/advanced", "image").model).toBe("ds/deepseek-v4-pro");
     expect(reg.resolve("api/ds/deepseek-chat", "image").model).toBe("ds/deepseek-chat");
     // A runtime not through the gateway keeps its own tiers.
     expect(reg.resolve("plain/basic").model).toBe("claude-haiku");
