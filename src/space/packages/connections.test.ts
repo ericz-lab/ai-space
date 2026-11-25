@@ -229,3 +229,55 @@ test("an outgoing connection sends an access layer's headers from its variable, 
   links.refresh();
   expect(links.status().find((s) => s.id === lone.id)?.error).toContain("MISSING");
 });
+
+/** A TCP server that takes connections and answers nothing, or (with `hello`) completes the upgrade, sends that one frame and then goes silent: no pongs, no close. */
+function silentServer(hello?: string) {
+  let opened = 0;
+  const server = Bun.listen<{ upgraded: boolean }>({ hostname: "127.0.0.1", port: 0, socket: {
+    open: (s) => { opened++; s.data = { upgraded: false }; },
+    data: (s, chunk) => {
+      if (!hello || s.data.upgraded) return;
+      const key = /sec-websocket-key: *(\S+)/i.exec(chunk.toString())?.[1];
+      if (!key) return;
+      s.data.upgraded = true;
+      const accept = new Bun.CryptoHasher("sha1").update(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").digest("base64");
+      const payload = Buffer.from(hello);
+      s.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
+      s.write(Buffer.concat([Buffer.from([0x81, payload.length]), payload]));
+    },
+  } });
+  cleanups.push(() => server.stop(true));
+  return { url: `http://127.0.0.1:${server.port}`, opened: () => opened };
+}
+
+test("a dial the other Space never answers is given up and dialed again", async () => {
+  const peerStore = store(), hubId = crypto.randomUUID();
+  const hub = silentServer();
+  peerStore.create({ remoteSpaceId: hubId, direction: "outgoing", url: hub.url, tokenEnv: "HUB_ACCESS" });
+  const peer = new PackageLinks(peerStore, { env: { HUB_ACCESS: "token" }, apps: () => [], handshakeMs: 50 });
+  cleanups.push(() => peer.close());
+  peer.refresh();
+  for (let i = 0; i < 100 && !peer.status()[0]?.error; i++) await Bun.sleep(10);
+  expect(peer.status()[0]?.error).toMatch(/did not answer/);
+  expect(peer.status()[0]?.connected).toBe(false);
+  peer.refresh();
+  for (let i = 0; i < 100 && hub.opened() < 2; i++) await Bun.sleep(10);
+  expect(hub.opened()).toBe(2);
+});
+
+test("an open channel that stops answering pings is dropped and dialed again", async () => {
+  const peerStore = store(), hubId = crypto.randomUUID();
+  const hub = silentServer(JSON.stringify({ kind: "hello", spaceId: hubId, protocol: 2 }));
+  peerStore.create({ remoteSpaceId: hubId, direction: "outgoing", url: hub.url, tokenEnv: "HUB_ACCESS" });
+  const peer = new PackageLinks(peerStore, { env: { HUB_ACCESS: "token" }, apps: () => [], heartbeatMs: 30 });
+  cleanups.push(() => peer.close());
+  peer.refresh();
+  for (let i = 0; i < 100 && !peer.status()[0]?.connected; i++) await Bun.sleep(5);
+  expect(peer.status()[0]?.connected).toBe(true);
+  for (let i = 0; i < 100 && !peer.status()[0]?.error; i++) await Bun.sleep(10);
+  expect(peer.status()[0]?.error).toMatch(/stopped answering/);
+  expect(peer.status()[0]?.connected).toBe(false);
+  peer.refresh();
+  for (let i = 0; i < 100 && hub.opened() < 2; i++) await Bun.sleep(10);
+  expect(hub.opened()).toBe(2);
+});

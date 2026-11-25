@@ -52,6 +52,10 @@ export class PackageLinks {
     /** The icon image of a locally owned app, for the tile a connected Space shows. */
     icon?: (app: string) => Promise<Response | undefined>;
     handle?: LinkHandler;
+    /** How long a dial may wait for the other Space's hello (default 10 s). */
+    handshakeMs?: number;
+    /** How often an open outgoing channel is pinged (default 20 s); silent for three of these, it is dropped and dialed again. */
+    heartbeatMs?: number;
   }) {
     this.unsubscribe = connections.onChange((id, change) => {
       // A changed app list or scope set keeps the channel: only the streams that needed what was taken away
@@ -135,10 +139,24 @@ export class PackageLinks {
     try { socket = new WebSocket(c.url!.replace(/^http/, "ws") + "/api/connections/channel", { headers: { ...extra, authorization: `Bearer ${token}`, "x-space-id": this.connections.spaceId, [PROTOCOL_HEADER]: String(CHANNEL_PROTOCOL) } } as unknown as string[]); }
     catch { this.errors.set(c.id, "could not open connection"); return; }
     let channel: PackageChannel | undefined;
-    const live: Live = { close: () => { channel?.close(); socket.close(1000, "connection changed"); } };
+    let lastSeen = Date.now();
+    let heartbeat: ReturnType<typeof setInterval> | undefined;
+    const stop = () => { clearTimeout(timeout); clearInterval(heartbeat); channel?.close(); };
+    const live: Live = { close: () => { stop(); socket.close(1000, "connection changed"); } };
     this.live.set(c.id, live);
-    const timeout = setTimeout(() => socket.close(4002, "identity handshake timed out"), 10_000);
+    // A socket that never finished opening, or whose path died without a close frame, may never fire `close`
+    // (Bun's `close()` on a CONNECTING socket does not). Forget it here so `refresh` dials again.
+    const abandon = (error: string) => {
+      const current = this.live.get(c.id) === live;
+      if (current) { this.live.delete(c.id); this.errors.set(c.id, error); }
+      stop();
+      (socket as WebSocket & { terminate?: () => void }).terminate?.();
+    };
+    const handshakeMs = this.options.handshakeMs ?? 10_000, heartbeatMs = this.options.heartbeatMs ?? 20_000;
+    const timeout = setTimeout(() => abandon(`the other Space did not answer within ${handshakeMs / 1000} s`), handshakeMs);
+    socket.addEventListener("pong", () => { lastSeen = Date.now(); });
     socket.onmessage = (e) => {
+      lastSeen = Date.now();
       if (typeof e.data !== "string") { socket.close(4002, "invalid channel data"); return; }
       if (!channel) {
         try {
@@ -148,11 +166,16 @@ export class PackageLinks {
           clearTimeout(timeout);
           channel = new PackageChannel((data) => { if (socket.bufferedAmount > 4 * 1024 ** 2) throw new Error("connection backpressure limit"); socket.send(data); }, (meta, body, signal) => this.handle(c.id, meta, body, signal), "a", () => socket.close(4002, "channel closed"), { classify: streamKind });
           live.channel = channel; this.errors.delete(c.id);
+          heartbeat = setInterval(() => {
+            if (Date.now() - lastSeen > 3 * heartbeatMs) { abandon("the other Space stopped answering"); return; }
+            try { (socket as WebSocket & { ping?: () => void }).ping?.(); } catch { /* a closing socket: `close` or the next beat ends it */ }
+          }, heartbeatMs);
+          heartbeat.unref?.();
         } catch (err) { this.errors.set(c.id, (err as Error).message); socket.close(4003, "handshake refused"); }
       } else channel.receive(e.data);
     };
     socket.onclose = () => {
-      clearTimeout(timeout); channel?.close();
+      stop();
       if (this.live.get(c.id) === live) this.live.delete(c.id);
     };
     // A refused upgrade (an acceptor of another protocol answers 426) reaches a WebSocket only as an error.
