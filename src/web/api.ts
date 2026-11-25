@@ -70,9 +70,8 @@ export type GatewayProviderInfo = {
 export type GatewayPrice = { input?: number; output?: number; cacheRead?: number; cacheWrite?: number; tiers?: { over: number }[]; perImage?: number; perMinute?: number; perMillionChars?: number; source: string; checkedAt?: string; currency?: string; printed?: Omit<GatewayPrice, "source" | "checkedAt" | "currency" | "printed" | "needsRate">; needsRate?: boolean };
 /** Model Watch's prices as Settings shows them (docs/model-gateway.md#prices). */
 export type GatewayWatchStatus = {
-  fetchedAt?: string;
-  from?: string;
-  error?: string;
+  /** When the prices shipped with ai-space were synced from Model Watch. */
+  syncedAt?: string;
   rate?: { usdPerCny: number; from: string };
   rateError?: string;
   needsRate: boolean;

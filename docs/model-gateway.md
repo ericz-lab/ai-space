@@ -195,7 +195,16 @@ A mapping takes `input`, `output` (together), `cacheRead`, `cacheWrite`, `perIma
 
 ### From Model Watch
 
-Model Watch (the `model-watch` app) reads the vendors' pricing pages every day. It offers what it read as the bus capability `model-watch/prices` (`GET /api/prices`: each page with its host, currencies and check time, and each row as printed: model id and name, variant, currency, unit, input, cached input, output). ai-space fetches it from this machine, else from the one peer that lists it, every six hours (ten minutes after a failure), and keeps the last answer in `run/model-watch-prices.json`, so a restart or an unreachable machine keeps the last prices. `src/space/gateway/model-watch.ts` holds the rules:
+Model Watch (the `model-watch` app, on the owner's Mac) reads the vendors' pricing pages every day. Its prices ship with ai-space as `src/space/gateway/model-watch-prices.json`: each page with its URL, host, currencies and check time, and each row as printed (model id and name, variant, currency, unit, input, cached input and output, the printed text), plus when the file was synced. ai-space never asks Model Watch at run time, on this machine or a peer; a machine prices from the file of the version it runs.
+
+To publish new prices, on the machine that runs Model Watch:
+
+```sh
+bun run sync-prices            # reads ~/.ai-space/data/model-watch/main.db read-only
+bun run sync-prices path/to/main.db
+```
+
+The script (`scripts/sync-model-watch-prices.ts`) needs no running app. It writes the rows of enabled pages that are still on their page, ordered by page and row key, one row per line, so the diff shows only what changed; it prints the rows added, removed and changed, and leaves the file untouched when nothing did. Commit the file and deploy: each machine then prices from it. It can be run by hand or by a scheduled job.
 
 - **Which page prices which provider**, by the page's host and the provider's base (`MODEL_WATCH_SITES`): `platform.minimax.cn` prices MiniMax's China bases (`api.minimax.cn`, `api.minimaxi.com`), never `api.minimax.io`; `docs.bigmodel.cn` the `zhipu` preset, not `zai`; `platform.kimi.com` Kimi's China base `api.moonshot.cn`; Volcengine's pay-as-you-go page the `ark` preset (`/api/compatible` and `/api/v3`), not the Coding Plan or the Agent Plan, which are subscriptions and stay unpriced unless gateway-prices.yaml prices them; `api-docs.deepseek.com` DeepSeek. OpenAI's, Anthropic's and Gemini's pages are left to models.dev.
 - **Which row is which model**: the same id in any case, else the one whose id, then whose name, is the same once both drop case, a trailing date (`-261028`) and everything but letters and digits (Ark's `正式版` reads as `-ga`). When two models of a page come out alike, neither is used: a price is never taken from another model.
@@ -203,7 +212,7 @@ Model Watch (the `model-watch` app) reads the vendors' pricing pages every day. 
 - **Units**: `1M tokens` gives input, output and cache read; `image` gives `perImage` (the output side); `minute` and `hour` give `perMinute`; `10K characters` and `1M characters` give `perMillionChars`. Rows per second, video, 3D file, request, song or voice are not used and are listed under the providers in Settings → Gateway.
 - **Currency**: the ledger is USD. A USD page is used as is. A CNY page is converted at `SPACE_GATEWAY_USD_PER_CNY` (USD for one CNY, such as `0.14`), set in the workspace `.env` or the service environment; ai-space never guesses a rate. Without it a model that models.dev prices in USD keeps that price; one only Model Watch prices is shown in Settings in CNY, marked as waiting for a rate, and its calls stay unpriced.
 
-Settings → Gateway says where each price came from (the source, and for Model Watch when its page was read), what a converted price was on the page, when the copy was fetched and from which machine, and the rate. The Usage page shows a sum that left out unpriced gateway calls as "+ n unpriced", and one of only those as "unpriced", never as $0.
+Settings → Gateway says where each price came from (the source, and for Model Watch when its page was read), what a converted price was on the page, when the file was synced, and the rate. The Usage page shows a sum that left out unpriced gateway calls as "+ n unpriced", and one of only those as "unpriced", never as $0.
 
 ### Earlier calls follow the prices
 

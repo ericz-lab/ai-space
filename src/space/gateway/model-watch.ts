@@ -1,15 +1,14 @@
-import { mkdir, rename } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import bundled from "./model-watch-prices.json" with { type: "json" };
 import type { Price } from "./prices.ts";
 import type { GatewayProvider } from "./types.ts";
 
 /**
- * The prices Model Watch reads off the vendors' pricing pages (docs/model-gateway.md#prices), the
- * second place a gateway price is looked for, after gateway-prices.yaml and before models.dev.
+ * The prices Model Watch reads off the vendors' pricing pages (docs/model-gateway.md#from-model-watch),
+ * the second place a gateway price is looked for, after gateway-prices.yaml and before models.dev.
  *
- * Model Watch offers them as the bus capability `model-watch/prices`, on this machine or on a peer.
- * They are fetched every few hours and kept in `run/model-watch-prices.json`, so a restart or an
- * unreachable machine keeps the last copy. A row is used only when all of these hold:
+ * They ship with ai-space: `model-watch-prices.json` next to this file is written on the machine
+ * that runs Model Watch by `bun run sync-prices` (scripts/sync-model-watch-prices.ts) and committed;
+ * ai-space never asks Model Watch at run time. A row is used only when all of these hold:
  *
  *  - its page is one of MODEL_WATCH_SITES, and the provider's base is that site's API base: the
  *    China pages price the China bases only, Ark's pay-as-you-go page its pay-as-you-go bases only;
@@ -21,13 +20,8 @@ import type { GatewayProvider } from "./types.ts";
  * A model none of this prices falls through to models.dev.
  */
 
-export const MODEL_WATCH_APP = "model-watch";
-export const MODEL_WATCH_CAPABILITY = "prices";
-export const MODEL_WATCH_CACHE = join("run", "model-watch-prices.json");
 /** USD for one CNY, set by the owner; never guessed. */
 export const RATE_ENV = "SPACE_GATEWAY_USD_PER_CNY";
-const REFRESH_MS = 6 * 3600_000;
-const RETRY_MS = 10 * 60_000;
 
 export type WatchRow = {
   source: string; id: string; name: string; variant: string; currency: string | null; unit: string | null;
@@ -35,7 +29,8 @@ export type WatchRow = {
 };
 export type WatchSource = { id: string; name: string; pricingUrl: string | null; site: string | null; currencies: string[]; checkedAt: string | null; error: string | null };
 export type WatchPayload = { sources: WatchSource[]; prices: WatchRow[] };
-type Cache = { fetchedAt: string; from: string; payload: WatchPayload };
+/** The synced file: when, from which database, and Model Watch's sources and rows as printed. */
+export type WatchFile = WatchPayload & { syncedAt: string; from: string };
 
 /**
  * The pricing pages whose rows price a gateway provider, by the page's host, and the API bases
@@ -211,10 +206,8 @@ export type WatchLookup = {
 };
 
 export type ModelWatchStatus = {
-  fetchedAt?: string;
-  /** The peer it came from; "" for this machine. */
-  from?: string;
-  error?: string;
+  /** When the bundled file was synced from Model Watch. */
+  syncedAt?: string;
   rate?: { usdPerCny: number; from: string };
   rateError?: string;
   /** CNY pages are in use and no rate is set. */
@@ -223,104 +216,27 @@ export type ModelWatchStatus = {
 };
 
 export type ModelWatchOptions = {
-  home: string;
   env?: Record<string, string | undefined>;
-  now?: () => number;
-  log?: (line: string) => void;
+  /** The prices; the file shipped with ai-space when not given (tests give their own). */
+  data?: WatchFile;
 };
 
-/** Fetches `model-watch/prices`: the answer and the machine that gave it ("" for this one). */
-export type WatchFetch = () => Promise<{ from: string; res: Response }>;
-
 export class ModelWatchPrices {
-  private readonly cache: string;
   private readonly env: Record<string, string | undefined>;
-  private readonly now: () => number;
-  private readonly log: (line: string) => void;
-  private copy: Cache | undefined;
-  private error: string | undefined;
-  private lastTry = 0;
-  private fetcher: WatchFetch | undefined;
-  private refreshing: Promise<void> | undefined;
-  private readonly listeners: (() => void)[] = [];
-  private bySource = new Map<string, WatchRow[]>();
+  private readonly copy: WatchFile | undefined;
+  private readonly bySource = new Map<string, WatchRow[]>();
 
-  constructor(o: ModelWatchOptions) {
-    this.cache = join(o.home, MODEL_WATCH_CACHE);
+  constructor(o: ModelWatchOptions = {}) {
     this.env = o.env ?? process.env;
-    this.now = o.now ?? Date.now;
-    this.log = o.log ?? ((l) => console.log(`[gateway-prices] ${l}`));
-  }
-
-  /** The copy kept from the last fetch. */
-  async load(): Promise<void> {
-    try {
-      this.set((await Bun.file(this.cache).json()) as Cache);
-    } catch { /* none yet */ }
-  }
-
-  /** Where to fetch from, once the bus and the peers are up; fetches now when the copy is old. */
-  start(fetcher: WatchFetch): void {
-    this.fetcher = fetcher;
-    this.tick();
-  }
-
-  /**
-   * Called on the price book's timer (every minute): refetch every six hours, ten minutes after a
-   * failure, and every minute while there is no copy at all (at boot the app or the peer that has
-   * Model Watch is often not there yet).
-   */
-  tick(): void {
-    if (!this.fetcher) return;
-    const age = this.copy ? this.now() - Date.parse(this.copy.fetchedAt) : Infinity;
-    const wait = !this.copy ? 0 : this.error ? RETRY_MS : REFRESH_MS;
-    if (age >= REFRESH_MS && this.now() - this.lastTry >= (this.lastTry ? wait : 0)) void this.refresh();
-  }
-
-  onChange(listener: () => void): void {
-    this.listeners.push(listener);
-  }
-
-  refresh(): Promise<void> {
-    if (!this.fetcher) return Promise.resolve();
-    this.refreshing ??= (async () => {
-      this.lastTry = this.now();
-      try {
-        const { from, res } = await this.fetcher!();
-        if (!res.ok) throw new Error(`HTTP ${res.status}${await res.text().then((t) => (t ? `: ${t.slice(0, 200)}` : ""), () => "")}`);
-        const body = (await res.json()) as Partial<WatchPayload>;
-        if (!Array.isArray(body.sources) || !Array.isArray(body.prices)) throw new Error("the answer has no sources and prices");
-        const next: Cache = { fetchedAt: new Date(this.now()).toISOString(), from, payload: { sources: body.sources, prices: body.prices } };
-        await mkdir(dirname(this.cache), { recursive: true });
-        await Bun.write(`${this.cache}.tmp`, JSON.stringify(next));
-        await rename(`${this.cache}.tmp`, this.cache);
-        const changed = JSON.stringify(next.payload) !== JSON.stringify(this.copy?.payload);
-        this.set(next);
-        this.error = undefined;
-        this.log(`Model Watch prices${from ? ` from ${from}` : ""}: ${next.payload.prices.length} rows of ${next.payload.sources.length} pages`);
-        if (changed) for (const l of this.listeners) l();
-      } catch (e) {
-        const said = this.error;
-        this.error = (e as Error).message;
-        // Said once per reason: with no copy it is tried every minute.
-        if (this.error !== said) this.log(`Model Watch prices not refreshed (${this.error}); ${this.copy ? `keeping those of ${this.copy.fetchedAt}` : "none yet"}`);
-      } finally {
-        this.refreshing = undefined;
-      }
-    })();
-    return this.refreshing;
-  }
-
-  private set(c: Cache): void {
-    this.copy = c;
-    this.bySource = new Map();
-    for (const r of c.payload.prices) this.bySource.set(r.source, [...(this.bySource.get(r.source) ?? []), r]);
+    const data = o.data ?? (bundled as unknown as WatchFile);
+    this.copy = Array.isArray(data?.sources) && Array.isArray(data?.prices) ? data : undefined;
+    for (const r of this.copy?.prices ?? []) this.bySource.set(r.source, [...(this.bySource.get(r.source) ?? []), r]);
   }
 
   /** The page that prices this provider, by its base. */
   sourceFor(p: Pick<GatewayProvider, "messages" | "openai">): WatchSource | undefined {
     const bases = [p.messages, p.openai].filter((b): b is string => Boolean(b)).map((b) => b.replace(/\/+$/, ""));
-    return this.copy?.payload.sources.find((s) => {
+    return this.copy?.sources.find((s) => {
       const site = s.site ? MODEL_WATCH_SITES[s.site] : undefined;
       return site?.bases.some((pre) => bases.some((b) => b === pre || b.startsWith(`${pre}/`)));
     });
@@ -344,15 +260,14 @@ export class ModelWatchPrices {
 
   status(): ModelWatchStatus {
     const rate = readRate(this.env);
-    const sources = (this.copy?.payload.sources ?? []).filter((s) => s.site && MODEL_WATCH_SITES[s.site]).map((s) => {
+    const sources = (this.copy?.sources ?? []).filter((s) => s.site && MODEL_WATCH_SITES[s.site]).map((s) => {
       const rows = this.bySource.get(s.id) ?? [];
       const skipped: Record<string, number> = {};
       for (const r of rows) if ((SKIPPED_UNITS as readonly string[]).includes(r.unit ?? "")) skipped[r.unit!] = (skipped[r.unit!] ?? 0) + 1;
       return { id: s.id, name: s.name, site: s.site!, label: MODEL_WATCH_SITES[s.site!]!.label, ...(s.checkedAt ? { checkedAt: s.checkedAt } : {}), currency: s.currencies.join(", "), skipped };
     });
     return {
-      ...(this.copy ? { fetchedAt: this.copy.fetchedAt, from: this.copy.from } : {}),
-      ...(this.error ? { error: this.error } : {}),
+      ...(this.copy ? { syncedAt: this.copy.syncedAt } : {}),
       ...(rate && !("error" in rate) ? { rate } : {}),
       ...(rate && "error" in rate ? { rateError: rate.error } : {}),
       needsRate: !(rate && !("error" in rate)) && sources.some((s) => s.currency.includes("CNY")),

@@ -12,8 +12,8 @@ import type { GatewayProvider } from "./types.ts";
  *
  *  1. `<workspace>/gateway-prices.yaml`: the owner's price for `provider/model`;
  *  2. the same file's `provider/*`: every model of that provider (a relay's discount, a plan);
- *  3. Model Watch's copy of the vendor's pricing page, for the page of this provider's site
- *     (model-watch.ts), in USD or converted from CNY at the owner's rate;
+ *  3. Model Watch's copy of the vendor's pricing page, shipped with ai-space (model-watch-prices.json,
+ *     model-watch.ts), for the page of this provider's site, in USD or converted from CNY at the owner's rate;
  *  4. models.dev's catalogue, for the models.dev provider that matches this provider's site.
  *
  * No price: the call is unpriced, never counted as free. A price file of its own, not a key of
@@ -245,7 +245,6 @@ export class PriceBook {
 
   constructor(o: PriceBookOptions) {
     this.modelWatch = o.modelWatch;
-    this.modelWatch?.onChange(() => this.changed());
     this.file = join(o.home, PRICES_FILE);
     this.cache = join(o.home, MODELS_DEV_CACHE);
     this.doFetch = o.fetch ?? fetch;
@@ -256,7 +255,6 @@ export class PriceBook {
   /** Read both files; then refresh the catalogue in the background when it is a day old or missing. */
   async load(): Promise<void> {
     await this.readOwn();
-    await this.modelWatch?.load();
     try {
       this.catalog = (await Bun.file(this.cache).json()) as PriceCatalog;
     } catch { /* no cache yet */ }
@@ -301,7 +299,6 @@ export class PriceBook {
     let last = this.now();
     this.timer = setInterval(() => {
       void this.readOwn();
-      this.modelWatch?.tick();
       if (this.now() - last >= REFRESH_MS || (this.catalog && this.now() - Date.parse(this.catalog.fetchedAt) >= REFRESH_MS)) {
         last = this.now();
         void this.refresh();

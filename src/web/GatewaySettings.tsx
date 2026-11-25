@@ -292,10 +292,9 @@ export function WatchNote({ w, t }: { w: GatewayWatchStatus; t: T }) {
   return (
     <p className="setnote gw-watch">
       <small>
-        {w.fetchedAt
-          ? t("gateway.watchFrom", { machine: w.from ? t("gateway.watchMachine", { machine: w.from }) : "", at: utc(w.fetchedAt), pages: w.sources.map((s) => `${s.label ?? s.name} (${s.currency}${s.checkedAt ? `, ${t("gateway.priceChecked", { at: utc(s.checkedAt) })}` : ""})`).join("; ") })
-          : t("gateway.watchNone", { error: w.error ? `: ${w.error}` : "" })}
-        {w.fetchedAt && w.error && <> {t("gateway.watchError", { error: w.error })}</>}
+        {w.syncedAt
+          ? t("gateway.watchFrom", { at: utc(w.syncedAt), pages: w.sources.map((s) => `${s.label ?? s.name} (${s.currency}${s.checkedAt ? `, ${t("gateway.priceChecked", { at: utc(s.checkedAt) })}` : ""})`).join("; ") })
+          : t("gateway.watchNone")}
         {w.rate && <> {t("gateway.rateSet", { rate: String(w.rate.usdPerCny), from: w.rate.from })}</>}
         {w.rateError && <> <span className="gw-unpriced">{w.rateError}</span></>}
         {w.needsRate && <> <span className="gw-unpriced">{t("gateway.rateMissing", { variable: "SPACE_GATEWAY_USD_PER_CNY" })}</span></>}

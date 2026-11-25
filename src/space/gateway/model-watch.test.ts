@@ -1,10 +1,13 @@
 import { expect, test } from "bun:test";
 import { mkdtemp, writeFile } from "node:fs/promises";
+import { Database } from "bun:sqlite";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import fixture from "./fixtures/model-watch-prices.json";
 import { GATEWAY_PRESETS, GATEWAY_SITES } from "./config.ts";
-import { MODEL_WATCH_CACHE, ModelWatchPrices, RATE_ENV, matchRows, modelKey, priceFromRows, type WatchPayload, type WatchRow } from "./model-watch.ts";
+import { ModelWatchPrices, RATE_ENV, matchRows, modelKey, priceFromRows, type WatchFile, type WatchPayload, type WatchRow } from "./model-watch.ts";
+import bundled from "./model-watch-prices.json";
+import { diffPrices, formatPrices, readModelWatch } from "../../../scripts/sync-model-watch-prices.ts";
 import { costOf, MODELS_DEV_CACHE, PriceBook, PRICES_FILE } from "./prices.ts";
 
 // Rows copied from a Model Watch database on 2026-11-25 (its /api/prices answer), never the live one.
@@ -77,12 +80,10 @@ test("units: 10K characters per million, an hour per minute, a picture per pictu
   expect(priced("minimax", "image-01")).toMatchObject({ price: { perImage: 0.025 } });
 });
 
-const watch = async (env: Record<string, string> = {}, payload: unknown = PAYLOAD) => {
+const FILE: WatchFile = { syncedAt: "2026-11-25T01:28:33.815Z", from: "fixture", sources: PAYLOAD.sources, prices: PAYLOAD.prices };
+const watch = async (env: Record<string, string> = {}, data: WatchFile = FILE) => {
   const home = await mkdtemp(join(tmpdir(), "mw-"));
-  const w = new ModelWatchPrices({ home, env, log: () => {} });
-  w.start(async () => ({ from: "mac", res: Response.json({ ok: true, ...(payload as object) }) }));
-  await w.refresh();
-  return { home, w };
+  return { home, w: new ModelWatchPrices({ env, data }) };
 };
 
 test("sites: China pages price the China bases only, Ark's pay-as-you-go page the pay-as-you-go base only", async () => {
@@ -108,7 +109,7 @@ test("currency: CNY at the owner's rate; with no rate shown but not used; a bad 
   expect(got).toMatchObject({ currency: "CNY", printed: { perImage: 0.13 }, checkedAt: expect.any(String) });
   expect(got.price.perImage).toBeCloseTo(0.0182, 9);
   expect(got.needsRate).toBeUndefined();
-  expect(w.status()).toMatchObject({ rate: { usdPerCny: 0.14, from: RATE_ENV }, needsRate: false, from: "mac" });
+  expect(w.status()).toMatchObject({ rate: { usdPerCny: 0.14, from: RATE_ENV }, needsRate: false, syncedAt: FILE.syncedAt });
   const none = (await watch()).w;
   expect(none.lookup(ark, "doubao-seedream-5-5-261028")).toMatchObject({ price: { perImage: 0.13 }, needsRate: true });
   expect(none.status().needsRate).toBe(true);
@@ -118,17 +119,46 @@ test("currency: CNY at the owner's rate; with no rate shown but not used; a bad 
   expect(none.status().sources.find((s) => s.id === "minimax")!.skipped).toMatchObject({ second: expect.any(Number), video: expect.any(Number), voice: expect.any(Number) });
 });
 
-test("the copy: kept in the workspace, read after a restart, kept when the machine is unreachable", async () => {
-  const { home } = await watch({ [RATE_ENV]: "0.14" });
-  expect(await Bun.file(join(home, MODEL_WATCH_CACHE)).exists()).toBe(true);
-  const after = new ModelWatchPrices({ home, env: { [RATE_ENV]: "0.14" }, log: () => {} });
-  await after.load();
-  after.start(async () => {
-    throw new Error("peer mac is down");
-  });
-  await after.refresh();
-  expect(after.lookup(minimaxCn, "MiniMax-M3")?.price.input).toBeCloseTo(0.294, 9);
-  expect(after.status()).toMatchObject({ error: "peer mac is down", fetchedAt: expect.any(String) });
+test("the file shipped with ai-space: read with no workspace copy and no app, and its rows are Model Watch's", () => {
+  const f = bundled as unknown as WatchFile;
+  expect(f.syncedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  expect(f.sources.length).toBeGreaterThan(0);
+  expect(f.prices.length).toBeGreaterThan(0);
+  const w = new ModelWatchPrices({ env: { [RATE_ENV]: "0.14" } });
+  expect(w.status()).toMatchObject({ syncedAt: f.syncedAt, needsRate: false });
+  // An unreadable file prices nothing and says there are no prices.
+  const empty = new ModelWatchPrices({ env: {}, data: {} as WatchFile });
+  expect(empty.status()).toMatchObject({ needsRate: false, sources: [] });
+  expect(empty.lookup(minimaxCn, "MiniMax-M3")).toBeUndefined();
+});
+
+test("the sync script: Model Watch's database read only, rows in a stable order, a diff by row", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "mw-db-"));
+  const path = join(dir, "main.db");
+  const db = new Database(path);
+  db.exec(`CREATE TABLE sources (id TEXT PRIMARY KEY, name TEXT, pricing_url TEXT, pricing_checked_at TEXT, pricing_error TEXT, enabled INTEGER, added_at TEXT);
+    CREATE TABLE prices (source_id TEXT, price_key TEXT, model_id TEXT, name TEXT, variant TEXT DEFAULT '', pos INTEGER, currency TEXT, unit TEXT, input REAL, cached_input REAL, output REAL, text TEXT, present INTEGER, first_seen_at TEXT, updated_at TEXT);`);
+  db.exec(`INSERT INTO sources VALUES ('mm', 'MiniMax', 'https://platform.minimax.cn/docs/guides/pricing', '2026-11-25T01:00:00Z', NULL, 1, '1'),
+    ('off', 'Off', 'https://example.com/p', NULL, NULL, 0, '2'), ('nopage', 'No page', NULL, NULL, NULL, 1, '3');
+    INSERT INTO prices VALUES ('mm', 'b', 'minimax-m3', 'MiniMax-M3', '', 1, 'CNY', '1M tokens', 2.1, 0.42, 8.4, '¥2.1', 1, 'x', 'x'),
+    ('mm', 'a', 'speech-2.8-hd', 'speech-2.8-hd', '', 0, 'CNY', '10K characters', NULL, NULL, 3.5, '¥3.5', 1, 'x', 'x'),
+    ('mm', 'c', 'gone', 'Gone', '', 2, 'CNY', '1M tokens', 1, NULL, 1, '', 0, 'x', 'x'),
+    ('off', 'a', 'x', 'X', '', 0, 'USD', '1M tokens', 1, NULL, 1, '', 1, 'x', 'x');`);
+  db.close();
+  const f = readModelWatch(path, new Date("2026-11-25T02:00:00Z"));
+  expect(f.sources.map((s) => [s.id, s.site, s.currencies])).toEqual([["mm", "platform.minimax.cn", ["CNY"]]]);
+  // Present rows of enabled pages only, by key, whatever order the page printed them in.
+  expect(f.prices.map((r) => r.id)).toEqual(["speech-2.8-hd", "minimax-m3"]);
+  expect(f.prices[1]).toMatchObject({ source: "mm", currency: "CNY", unit: "1M tokens", input: 2.1, cachedInput: 0.42, output: 8.4 });
+  // The written file reads back the same, one row per line.
+  const text = formatPrices(f);
+  expect(JSON.parse(text)).toEqual(JSON.parse(JSON.stringify(f)));
+  expect(text.split("\n").filter((l) => l.includes('"source":"mm"'))).toHaveLength(2);
+  // The ai-space side reads it: priced from the file at the rate.
+  const w = new ModelWatchPrices({ env: { [RATE_ENV]: "0.14" }, data: f });
+  expect(w.lookup(minimaxCn, "MiniMax-M3")?.price.input).toBeCloseTo(0.294, 9);
+  const next = { ...f, prices: [{ ...f.prices[0]!, output: 3 }, { ...f.prices[1]!, id: "minimax-m3.5", name: "MiniMax-M3.5" }] };
+  expect(diffPrices(f, next)).toEqual({ added: ["mm/minimax-m3.5 (1M tokens)"], removed: ["mm/minimax-m3 (1M tokens)"], changed: ["mm/speech-2.8-hd (10K characters)"] });
 });
 
 test("the price book: the owner's file, then Model Watch, then models.dev; a CNY price without a rate costs nothing", async () => {
@@ -154,44 +184,4 @@ test("the price book: the owner's file, then Model Watch, then models.dev; a CNY
   expect(noRate.lookupSync(minimaxOldCn, "MiniMax-M3")).toMatchObject({ source: "models.dev minimax-cn", price: { input: 0.3 } });
   expect(noRate.lookupSync(minimaxOldCn, "MiniMax-M3.1-Flash")).toBeUndefined();
   expect(noRate.describe(minimaxOldCn, "MiniMax-M3.1-Flash")).toMatchObject({ needsRate: true, source: "Model Watch minimax" });
-});
-
-test("the schedule: every tick until a first copy (Model Watch is often not up at boot), then every six hours; a failure said once", async () => {
-  const home = await mkdtemp(join(tmpdir(), "mw-tick-"));
-  let t = Date.parse("2026-11-25T00:00:00Z");
-  const lines: string[] = [];
-  const w = new ModelWatchPrices({ home, env: {}, now: () => t, log: (l) => lines.push(l) });
-  // A tick starts a fetch without waiting for it: let it finish.
-  const settle = async () => {
-    await (w as unknown as { refreshing?: Promise<void> }).refreshing;
-  };
-  let calls = 0;
-  let up = false;
-  w.start(async () => {
-    calls++;
-    if (!up) throw new Error("no model-watch/prices on this space or its peers");
-    return { from: "mac", res: Response.json(PAYLOAD) };
-  });
-  await w.refresh();
-  for (let i = 0; i < 3; i++) {
-    t += 60_000;
-    w.tick();
-    await settle();
-  }
-  expect(calls).toBe(4);
-  expect(lines.filter((l) => l.includes("not refreshed"))).toHaveLength(1);
-  up = true;
-  t += 60_000;
-  w.tick();
-  await settle();
-  expect(w.status()).toMatchObject({ from: "mac", fetchedAt: expect.any(String) });
-  const after = calls;
-  t += 3600_000;
-  w.tick();
-  await settle();
-  expect(calls).toBe(after);
-  t += 6 * 3600_000;
-  w.tick();
-  await settle();
-  expect(calls).toBe(after + 1);
 });
