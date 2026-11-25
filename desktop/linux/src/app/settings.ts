@@ -16,7 +16,7 @@ import type { LocalManager } from "./local-manager.ts";
 import { LocalPanel } from "./local-view.ts";
 import type { AppModel } from "./model.ts";
 import { PeerPage } from "./peer-view.ts";
-import { type Ctx, choiceRow, loadLabels, plain } from "./settings-kit.ts";
+import { type Ctx, choiceRow, confirm, loadLabels, plain } from "./settings-kit.ts";
 import { activityPage, appModelsPage, eventsPage, tasksPage, usagePage } from "./settings-pages.ts";
 import { accountSection, automationSection, feedbackSection, modelsSection, packagesSection, statusSection, usageSection } from "./settings-space.ts";
 import { connectForm } from "./welcome.ts";
@@ -260,7 +260,7 @@ function sectionPage(s: Section, ctx: Ctx, local: LocalManager, model: AppModel,
 /** A command shown to copy into a terminal or the desktop's settings. */
 function commandRow(command: string, toast: (title: string) => void): any {
   const row = plain(new Adw.ActionRow({ title_selectable: true, css_classes: ["monospace"] }), command);
-  const copy = new Gtk.Button({ icon_name: "edit-copy-symbolic", valign: Gtk.Align.CENTER, css_classes: ["flat"] });
+  const copy = new Gtk.Button({ icon_name: "edit-copy-symbolic", tooltip_text: t("copy"), valign: Gtk.Align.CENTER, css_classes: ["flat"] });
   copy.connect("clicked", () => {
     row.get_clipboard().set(command);
     toast(t("copied"));
@@ -309,7 +309,7 @@ function general(page: any, ctx: Ctx, model: AppModel, toast: (title: string) =>
       if (c.isDefault) tags.push(t("isDefault"));
       if (c.managed) tags.push(t("managedTag"));
       if (tags.length) row.add_suffix(new Gtk.Label({ label: tags.join(" · "), css_classes: ["dim-label", "caption"] }));
-      const menu = new Gtk.MenuButton({ icon_name: "view-more-symbolic", valign: Gtk.Align.CENTER, css_classes: ["flat"] });
+      const menu = new Gtk.MenuButton({ icon_name: "view-more-symbolic", tooltip_text: t("spaceActions"), valign: Gtk.Align.CENTER, css_classes: ["flat"] });
       const pop = new Gtk.Popover();
       const box = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL });
       const item = (text: string, run: () => void, destructive = false) => {
@@ -327,10 +327,13 @@ function general(page: any, ctx: Ctx, model: AppModel, toast: (title: string) =>
           model.save();
           renderSpaces();
         });
-      item(t("remove"), () => {
-        model.remove(c.id);
-        renderSpaces();
-      }, true);
+      // Its sign-in and this computer's screens for it go too: ask first (Windows' SettingsWindow).
+      item(t("removeSpace"), () =>
+        confirm(ctx.dialog, t("removeSpaceTitle", { name: c.name }), t("removeSpaceBody"), t("remove"), () => {
+          model.remove(c.id);
+          renderSpaces();
+        }),
+      true);
       pop.set_child(box);
       menu.set_popover(pop);
       row.add_suffix(menu);

@@ -390,8 +390,9 @@ export function packagesSection(page: any, ctx: Ctx, space: Space): void {
   // An upload still settling: its state, checked every 3 s while the section is open.
   const op = pendingUploads.get(conn);
   if (op) {
-    const g = new Adw.PreferencesGroup({ title: tw("packages.operation"), description: op.id });
-    const state = row(tw("packages.uncertain"));
+    // A plain status; the operation's id stays on the row's tooltip for whoever needs to look it up.
+    const g = new Adw.PreferencesGroup({ title: tw("packages.state.installing") });
+    const state = row(tw("packages.uncertain"), undefined, `${tw("packages.operation")}: ${op.id}`);
     g.add(state);
     const dismiss = linkRow(tw("packages.dismiss"), () =>
       confirm(ctx.dialog, tw("packages.dismiss"), tw("packages.dismissConfirm"), tw("packages.dismiss"), () => {
@@ -423,7 +424,7 @@ export function packagesSection(page: any, ctx: Ctx, space: Space): void {
   const upload = new Adw.PreferencesGroup({ title: tw("packages.manage") });
   let file: any;
   const fileRow = row(tw("packages.file"), "—");
-  const pick = new Gtk.Button({ icon_name: "document-open-symbolic", valign: Gtk.Align.CENTER, css_classes: ["flat"] });
+  const pick = new Gtk.Button({ icon_name: "document-open-symbolic", tooltip_text: t("choose"), valign: Gtk.Align.CENTER, css_classes: ["flat"] });
   fileRow.add_suffix(pick);
   fileRow.set_activatable_widget(pick);
   const upgrade = new Adw.SwitchRow({ title: tw("packages.upgrade") });

@@ -3,23 +3,29 @@ import Gio from "gi://Gio";
 import GLib from "gi://GLib";
 import Gtk from "gi://Gtk?version=4.0";
 import Pango from "gi://Pango";
-import type { InboxItem } from "../core/desktop.ts";
+import { type InboxItem, inboxClick, inboxShown } from "../core/desktop.ts";
 import { relativeTime } from "../core/format.ts";
 import { lang, prefs, t } from "./env.ts";
 import type { AppModel, Space } from "./model.ts";
 
 /**
  * The inbox: the Space's open threads, newest first. Opening one marks it read and goes to its
- * page; Done takes it off the list. The same threads arrive as desktop notifications with Mark
- * as Read and Done on them.
+ * page; a thread without a page unfolds to its whole text instead. Done takes it off the list, with
+ * Undo in a toast. A change the Space did not take says so in a toast, and an inbox that could not
+ * be read says why, with Try Again, rather than look empty. The same threads arrive as desktop
+ * notifications with Mark as Read and Done on them.
  */
 export class InboxPage {
   readonly widget: any;
   private readonly list: any;
   private readonly stack: any;
   private readonly markAll: any;
+  private readonly toasts: any;
+  private readonly errorPage: any;
   private space: Space | undefined;
   private key = "";
+  /** The thread without a link whose whole text is on show. */
+  private unfolded: string | undefined;
 
   constructor(
     private readonly model: AppModel,
@@ -31,7 +37,10 @@ export class InboxPage {
     title.add_css_class("title-2");
     bar.append(title);
     this.markAll = new Gtk.Button({ label: t("markAllRead") });
-    this.markAll.connect("clicked", () => this.space && void this.model.markAllRead(this.space));
+    this.markAll.connect("clicked", () => {
+      const space = this.space;
+      if (space) void this.model.markAllRead(space).then((error) => this.failed(error));
+    });
     bar.append(this.markAll);
     const barClamp = new Adw.Clamp({ maximum_size: 820, child: bar });
     box.append(barClamp);
@@ -40,18 +49,28 @@ export class InboxPage {
     this.list.add_css_class("boxed-list");
     this.list.connect("row-activated", (_l: unknown, row: any) => this.activate(row.item));
     const empty = new Adw.StatusPage({ icon_name: "mail-read-symbolic", title: t("inboxEmpty"), description: t("inboxEmptyBody"), vexpand: true });
+    // An inbox that could not be read: why, and Try Again (Windows' InboxPage).
+    this.errorPage = new Adw.StatusPage({ icon_name: "dialog-warning-symbolic", vexpand: true });
+    const retry = new Gtk.Button({ label: t("tryAgain"), halign: Gtk.Align.CENTER, css_classes: ["pill"] });
+    retry.connect("clicked", () => this.space && void this.model.loadInbox(this.space));
+    this.errorPage.set_child(retry);
     this.stack = new Gtk.Stack();
     this.stack.add_named(new Gtk.ScrolledWindow({ hscrollbar_policy: Gtk.PolicyType.NEVER, vexpand: true, child: new Adw.Clamp({ maximum_size: 820, child: this.list }) }), "list");
     this.stack.add_named(empty, "empty");
+    this.stack.add_named(this.errorPage, "error");
     box.append(this.stack);
-    this.widget = box;
+    this.toasts = new Adw.ToastOverlay({ child: box });
+    this.widget = this.toasts;
     model.on((change, space) => {
       if (change === "inbox" && space === this.space) this.render();
     });
   }
 
   show(space: Space | undefined): void {
-    if (space !== this.space) this.key = "";
+    if (space !== this.space) {
+      this.key = "";
+      this.unfolded = undefined;
+    }
     this.space = space;
     this.render();
     if (space?.ready) void this.model.loadInbox(space);
@@ -60,15 +79,47 @@ export class InboxPage {
   private activate(item: InboxItem): void {
     const space = this.space;
     if (!space) return;
-    if (item.unread) void this.model.markInbox(space, [item.thread], { read: true });
-    if (item.url) this.openUrl(space, item.url);
+    const click = inboxClick(item, this.unfolded);
+    const unfoldChanged = click.unfolded !== this.unfolded;
+    this.unfolded = click.unfolded;
+    if (click.markRead) void this.mark(space, item, { read: true });
+    if (click.open) this.openUrl(space, click.open);
+    else if (unfoldChanged) this.render();
+  }
+
+  /** Sends a change; one the Space did not take says so in a toast. */
+  private async mark(space: Space, item: InboxItem, change: { read?: boolean; done?: boolean }): Promise<boolean> {
+    const error = await this.model.markInbox(space, [item.thread], change);
+    this.failed(error);
+    return error === undefined;
+  }
+
+  private toast(title: string, opts: { button?: string; run?: () => void } = {}): void {
+    const toast = new Adw.Toast({ title, use_markup: false, timeout: opts.button ? 5 : 3, ...(opts.button ? { button_label: opts.button } : {}) });
+    if (opts.run) toast.connect("button-clicked", opts.run);
+    this.toasts.add_toast(toast);
+  }
+
+  private failed(error: string | undefined): void {
+    if (error !== undefined) this.toast(t("changeNotSaved", { error }));
+  }
+
+  /** Done: off the list, with Undo, which opens it again. */
+  private async done(item: InboxItem): Promise<void> {
+    const space = this.space;
+    if (!space) return;
+    if (!(await this.mark(space, item, { done: true, read: true }))) return;
+    this.toast(t("markedDone"), { button: t("undo"), run: () => void this.mark(space, item, { done: false }) });
   }
 
   private render(): void {
-    const items = (this.space?.inbox.items ?? []).filter((i) => !i.done);
-    const key = JSON.stringify(items.map((i) => [i.thread, i.lastAt, i.unread, i.count]));
+    const shown = inboxShown(this.space?.inbox.items ?? [], this.space?.inboxError);
+    const items = shown.kind === "list" ? shown.items : [];
+    if (this.unfolded && !items.some((i) => i.thread === this.unfolded)) this.unfolded = undefined;
+    const key = JSON.stringify([items.map((i) => [i.thread, i.lastAt, i.unread, i.count, i.text]), this.unfolded]);
     this.markAll.set_sensitive(items.some((i) => i.unread));
-    this.stack.set_visible_child_name(items.length ? "list" : "empty");
+    if (shown.kind === "error") this.errorPage.set_title(t("inboxLoadFailed", { error: shown.message }));
+    this.stack.set_visible_child_name(shown.kind);
     if (key === this.key) return;
     this.key = key;
     this.list.remove_all();
@@ -95,17 +146,19 @@ export class InboxPage {
     // The app's name is the title when the thread has none; the line below then carries only the count.
     const sub = [item.title ? item.app : "", item.count > 1 ? String(item.count) : ""].filter(Boolean).join(" · ");
     if (sub) text.append(new Gtk.Label({ label: sub, xalign: 0, css_classes: ["caption", "dim-label"] }));
-    const body = new Gtk.Label({ label: item.text, xalign: 0, wrap: true, wrap_mode: Pango.WrapMode.WORD_CHAR, lines: 3, ellipsize: Pango.EllipsizeMode.END });
+    // Three lines, or the whole text while the thread is unfolded (a thread without a link).
+    const whole = !item.url && item.thread === this.unfolded;
+    const body = new Gtk.Label({ label: item.text, xalign: 0, wrap: true, wrap_mode: Pango.WrapMode.WORD_CHAR, ...(whole ? {} : { lines: 3, ellipsize: Pango.EllipsizeMode.END }) });
     text.append(body);
     box.append(text);
     const actions = new Gtk.Box({ spacing: 2, valign: Gtk.Align.CENTER });
     if (item.unread) {
       const read = new Gtk.Button({ icon_name: "mail-read-symbolic", tooltip_text: t("markRead"), css_classes: ["flat", "circular"] });
-      read.connect("clicked", () => this.space && void this.model.markInbox(this.space, [item.thread], { read: true }));
+      read.connect("clicked", () => this.space && void this.mark(this.space, item, { read: true }));
       actions.append(read);
     }
     const done = new Gtk.Button({ icon_name: "object-select-symbolic", tooltip_text: t("done"), css_classes: ["flat", "circular"] });
-    done.connect("clicked", () => this.space && void this.model.markInbox(this.space, [item.thread], { done: true, read: true }));
+    done.connect("clicked", () => void this.done(item));
     actions.append(done);
     box.append(actions);
     row.set_child(box);

@@ -30,6 +30,8 @@ export class Space {
   catalogueAt = 0;
   stale = false;
   inbox: { items: InboxItem[]; summary: InboxSummary } = { items: [], summary: { unread: 0, open: 0 } };
+  /** Why the last look at the inbox failed; undefined once one succeeds. */
+  inboxError: string | undefined;
   /** What the Space is doing, for the desk pet (docs/app-spec.md#space-mood); undefined from a Space without the route. */
   mood: SpaceMood | undefined;
   readonly seen = new InboxSeen();
@@ -340,26 +342,42 @@ export class AppModel {
   async loadInbox(space: Space): Promise<void> {
     try {
       space.inbox = decodeInbox(await space.client.get("/api/inbox?filter=open&limit=200"));
+      space.inboxError = undefined;
       const fresh = space.seen.fresh(space.inbox.items);
       if (fresh.length) this.onFreshInbox?.(space, fresh);
-      if (space.shown.changed("inbox", space.inbox)) this.emit("inbox", space);
+      if (space.shown.changed("inbox", [space.inbox, space.inboxError])) this.emit("inbox", space);
     } catch (e) {
       if (e instanceof SpaceError && e.kind === "signin") this.setState(space, { kind: "signin" });
+      // The page says the inbox could not be read rather than show it empty (core/desktop.ts `inboxShown`).
+      else space.inboxError = e instanceof Error ? e.message : String(e);
+      if (space.shown.changed("inbox", [space.inbox, space.inboxError])) this.emit("inbox", space);
     }
   }
 
-  async markInbox(space: Space, threads: string[], change: { read?: boolean; done?: boolean }): Promise<void> {
+  /** Marks threads read, done or back; the error's text when the Space did not take the change. */
+  async markInbox(space: Space, threads: string[], change: { read?: boolean; done?: boolean }): Promise<string | undefined> {
+    let error: string | undefined;
     try {
       await space.client.send("POST", "/api/inbox/mark", { threads, ...change });
     } catch (e) {
       logError(e, "inbox");
+      error = e instanceof Error ? e.message : String(e);
     }
     await this.loadInbox(space);
+    return error;
   }
 
-  async markAllRead(space: Space): Promise<void> {
-    await space.client.send("POST", "/api/inbox/read-all", {}).catch((e) => logError(e, "inbox"));
+  /** Marks every thread read; the error's text when the Space did not take the change. */
+  async markAllRead(space: Space): Promise<string | undefined> {
+    let error: string | undefined;
+    try {
+      await space.client.send("POST", "/api/inbox/read-all", {});
+    } catch (e) {
+      logError(e, "inbox");
+      error = e instanceof Error ? e.message : String(e);
+    }
     await this.loadInbox(space);
+    return error;
   }
 
   /** Picks up turns still running on the Space (started here before a restart, or on another client). */

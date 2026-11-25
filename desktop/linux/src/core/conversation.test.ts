@@ -309,3 +309,46 @@ describe("chat cards in a conversation", () => {
     expect(h.calls.some((c) => c.path.endsWith("/cards/action"))).toBe(false);
   });
 });
+
+describe("a question from Home", () => {
+  test("starts a new conversation and is sent at once, leaving the shown one's history behind", async () => {
+    const h = harness();
+    h.conv.send("first");
+    await h.tick();
+    h.feeds[0]!.event(1, init);
+    h.feeds[0]!.event(2, { type: "done" });
+    await h.tick();
+    expect(h.conv.sessionId).toBe("sess-1");
+    h.conv.ask("  what is new?  ");
+    await h.tick();
+    expect(h.conv.messages[0]).toMatchObject({ role: "user", text: "what is new?" });
+    expect(h.calls.at(-1)).toEqual({ method: "POST", path: "/api/agents/space/assistant/chat", body: { message: "what is new?", interactive: true } });
+  });
+
+  test("asked while a turn runs, it waits for that turn, then starts a new conversation of its own", async () => {
+    const h = harness();
+    h.conv.send("long job");
+    await h.tick();
+    h.feeds[0]!.event(1, init);
+    h.conv.ask("a quick question");
+    await h.tick();
+    // Not steered into the running turn, not queued into its conversation.
+    expect(h.calls.filter((c) => c.path.endsWith("/steer"))).toEqual([]);
+    expect(h.conv.messages.map((m) => m.text)).not.toContain("a quick question");
+    expect(h.conv.asked).toEqual(["a quick question"]);
+    h.feeds[0]!.event(2, { type: "done" });
+    await h.tick();
+    expect(h.conv.asked).toEqual([]);
+    expect(h.conv.busy).toBe(true);
+    expect(h.conv.messages[0]).toMatchObject({ role: "user", text: "a quick question" });
+    expect(h.calls.at(-1)!.body).toEqual({ message: "a quick question", interactive: true });
+  });
+
+  test("an empty question does nothing", async () => {
+    const h = harness();
+    h.conv.ask("   ");
+    await h.tick();
+    expect(h.calls).toEqual([]);
+    expect(h.conv.messages).toEqual([]);
+  });
+});

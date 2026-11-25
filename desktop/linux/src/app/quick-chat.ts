@@ -215,6 +215,7 @@ export class QuickChat {
       this.view?.focus();
     });
     header.append(this.fresh);
+    header.append(this.roundButton("window-new-symbolic", `${t("openInMainWindow")} (Ctrl+O)`, () => this.openInMain()));
     header.append(this.roundButton("window-close-symbolic", `${t("close")} (Esc)`, () => this.hide()));
     // Dragging the header's empty part moves the panel, as dragging a title bar does. Only once the
     // pointer has moved: a move that starts on the press takes the click from the header's buttons.
@@ -251,12 +252,8 @@ export class QuickChat {
       if (keyval === Gdk.KEY_n) this.view?.conversation?.newConversation();
       else if (keyval === Gdk.KEY_j) picker.popup();
       else if (keyval === Gdk.KEY_p) this.permission.popup();
-      else if (keyval === Gdk.KEY_o) {
-        this.hide();
-        const main = this.main();
-        main.openChat(this.agent);
-        main.present();
-      } else return false;
+      else if (keyval === Gdk.KEY_o) this.openInMain();
+      else return false;
       return true;
     });
     this.window.add_controller(keys);
@@ -273,6 +270,16 @@ export class QuickChat {
     this.window.connect("realize", () => {
       this.window.get_surface()?.connect("notify::height", () => this.place());
     });
+  }
+
+  /** The same conversation in the main window, with what is being written and its pictures; this field is emptied (Windows' QuickChatWindow). */
+  private openInMain(): void {
+    const moved = this.view?.takeDraft();
+    this.hide();
+    const main = this.main();
+    main.openChat(this.agent);
+    if (moved) main.chat.view.putDraft(moved);
+    main.present();
   }
 
   private roundButton(icon: string, tooltip: string, action: () => void): any {

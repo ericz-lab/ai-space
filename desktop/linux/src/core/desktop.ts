@@ -27,6 +27,30 @@ export function decodeInbox(body: unknown): { items: InboxItem[]; summary: Inbox
 }
 
 /**
+ * What the inbox page shows: the open threads, "Nothing new", or why the inbox could not be read.
+ * Threads already known stay on show when a later look fails; with none known, the failure takes
+ * the page, so a Space that did not answer never reads as an empty inbox.
+ */
+export type InboxShown = { kind: "list"; items: InboxItem[] } | { kind: "empty" } | { kind: "error"; message: string };
+
+export function inboxShown(items: readonly InboxItem[], loadError: string | undefined): InboxShown {
+  const open = items.filter((i) => !i.done);
+  if (open.length) return { kind: "list", items: open };
+  return loadError !== undefined ? { kind: "error", message: loadError } : { kind: "empty" };
+}
+
+/**
+ * A click on an inbox row: a thread with a link opens it; one without unfolds to its whole text,
+ * or folds back, one thread at a time (Windows' InboxPage). Either way an unread thread is marked
+ * read when it is opened or unfolded.
+ */
+export function inboxClick(item: InboxItem, unfolded: string | undefined): { open?: string; unfolded: string | undefined; markRead: boolean } {
+  if (item.url) return { open: item.url, unfolded, markRead: item.unread };
+  const next = unfolded === item.thread ? undefined : item.thread;
+  return { unfolded: next, markRead: item.unread && next !== undefined };
+}
+
+/**
  * Which inbox threads deserve a desktop notification: unread ones that are new or changed since
  * the last look. The first look at a connection only records what is there, so connecting never
  * floods the screen with old messages (the Mac's `InboxSeen`).
