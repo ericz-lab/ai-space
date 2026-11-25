@@ -16,12 +16,8 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import kotlin.math.PI
 import kotlin.math.sin
-import android.Manifest
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
-import android.content.pm.PackageManager
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -42,16 +38,13 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Cancel
-import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.StopCircle
 import androidx.compose.material.icons.outlined.AccountCircle
 import androidx.compose.material.icons.outlined.AddCircleOutline
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.Calculate
 import androidx.compose.material.icons.outlined.GridView
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
@@ -72,7 +65,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -85,7 +77,6 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -99,9 +90,6 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.content.ContextCompat
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
 import dev.aispace.android.AppModel
 import dev.aispace.android.HubPage
 import dev.aispace.android.R
@@ -123,8 +111,9 @@ import dev.aispace.android.core.SpaceApi
 import dev.aispace.android.core.Times
 import dev.aispace.android.core.Urls
 import dev.aispace.android.live.OmniboxStore
-import dev.aispace.android.live.OmniboxVoice
 import dev.aispace.android.live.ShortcutExecution
+import dev.aispace.android.ui.common.VoiceButton
+import dev.aispace.android.ui.common.rememberVoice
 import dev.aispace.android.live.zone
 import dev.aispace.android.ui.theme.AiTheme
 import dev.aispace.android.ui.theme.ThemeTokens
@@ -151,41 +140,20 @@ internal fun OmniboxField(
     onFocusChange: (Boolean) -> Unit,
     onVoiceBusy: (Boolean) -> Unit,
     onSubmit: () -> Unit,
+    /** The code voice input sends (VoiceLanguage), read when a recording starts. */
+    voiceLanguage: () -> String,
     modifier: Modifier = Modifier,
     /** Actions are being resolved for the text: three dots beside the microphone say so. */
     resolving: Boolean = false,
 ) {
     val t = AiTheme.tokens
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val voice = remember { OmniboxVoice(scope) }
+    val voice = rememberVoice(api)
     val idle = query.isEmpty() && !focused
     val title = stringResource(R.string.omnibox_universal_search)
     val label = stringResource(R.string.omnibox_field_label)
     val clear = stringResource(R.string.home_clear)
-    val microphone = stringResource(R.string.omnibox_voice_microphone)
     val style = TextStyle(fontSize = 19.sp, lineHeight = 24.sp, color = t.text)
-    val toggle = {
-        voice.toggle(api, query) { text ->
-            onQuery(text)
-            requester.requestFocus()
-        }
-    }
-    val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) toggle() else voice.error = microphone
-    }
-    val lifecycle = LocalLifecycleOwner.current.lifecycle
-    DisposableEffect(lifecycle) {
-        // Leaving the app ends the recording: the microphone is not held in the background.
-        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_STOP) voice.cancel() }
-        lifecycle.addObserver(observer)
-        onDispose {
-            lifecycle.removeObserver(observer)
-            voice.cancel()
-            onVoiceBusy(false)
-        }
-    }
-    LaunchedEffect(api) { voice.cancel() }
+    DisposableEffect(Unit) { onDispose { onVoiceBusy(false) } }
     val busy = voice.busy
     LaunchedEffect(busy) { onVoiceBusy(busy) }
 
@@ -228,20 +196,15 @@ internal fun OmniboxField(
                 },
             )
             if (resolving) ResolvingDots(t.secondaryText)
-            val listening = voice.recording || voice.starting
-            if (voice.transcribing) {
-                CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = t.secondaryText)
-            } else {
-                Icon(
-                    if (listening) Icons.Filled.StopCircle else Icons.Filled.Mic,
-                    contentDescription = stringResource(if (listening) R.string.omnibox_stop_recording else R.string.omnibox_voice),
-                    tint = if (listening) ThemeTokens.danger else t.text,
-                    modifier = Modifier.size(24.dp).clip(RoundedCornerShape(12.dp)).clickable {
-                        val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
-                        if (busy || granted) toggle() else permission.launch(Manifest.permission.RECORD_AUDIO)
-                    },
-                )
-            }
+            VoiceButton(
+                voice, api,
+                prefix = { query },
+                language = voiceLanguage,
+                deliver = { text ->
+                    onQuery(text)
+                    requester.requestFocus()
+                },
+            )
             if (query.isNotEmpty()) {
                 Icon(
                     Icons.Filled.Cancel, contentDescription = clear, tint = t.secondaryText,
@@ -259,14 +222,6 @@ internal fun OmniboxField(
                 Text(title, style = style, color = t.text)
             }
         }
-    }
-    voice.error?.let { message ->
-        AlertDialog(
-            onDismissRequest = { voice.error = null },
-            confirmButton = { TextButton(onClick = { voice.error = null }) { Text(stringResource(R.string.omnibox_ok)) } },
-            title = { Text(stringResource(R.string.omnibox_voice)) },
-            text = { Text(message) },
-        )
     }
 }
 

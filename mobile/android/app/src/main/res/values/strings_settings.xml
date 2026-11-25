@@ -14,7 +14,10 @@
     <string name="settings_dark">Dark</string>
     <string name="settings_widgets">Widgets</string>
     <string name="settings_language">Language</string>
-    <string name="settings_display_footer">These belong to this phone, as the same choices on the panel belong to each browser. The theme is one of the panel\'s. The language follows the app\'s language in the system settings, or the phone\'s.</string>
+    <string name="settings_voice_language">Voice language</string>
+    <string name="settings_voice_same_as_app">Same as AI Space</string>
+    <string name="settings_voice_detect">Detect automatically</string>
+    <string name="settings_display_footer">These belong to this phone, as the same choices on the panel belong to each browser. The theme is one of the panel\'s. The language follows the app\'s language in the system settings, or the phone\'s. Voice input is transcribed in that language too, unless Voice language names another.</string>
 
     <string name="settings_services">Services</string>
     <string name="settings_peers">Peers</string>
