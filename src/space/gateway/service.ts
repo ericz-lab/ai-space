@@ -5,7 +5,7 @@ import { carriesThinking, downstreamHeaders, errorText, readUsage, tapMessagesSt
 import { GatewayTokens } from "./tokens.ts";
 import { costOf, pricedAnswer, type Price, type PriceBook } from "./prices.ts";
 import { TraceStore } from "./trace.ts";
-import { kindOf, servesOf } from "./kinds.ts";
+import { forwardsOf, kindOf } from "./kinds.ts";
 import type { Usage } from "../runtimes/types.ts";
 import type { GatewayBase, GatewayConfig, GatewayKind, GatewayLink, GatewayProvider, GatewayTiers } from "./types.ts";
 
@@ -200,11 +200,11 @@ export class ModelGateway {
         models: models.filter((id) => id.startsWith(`${p.name}/`)),
       };
     });
-    // A model counts for a kind when it is of that kind and its provider serves it (kinds.ts).
+    // A model counts for a kind when it is of that kind and the gateway forwards it to its provider (kinds.ts).
     const is = (kind: GatewayKind) => (id: string) => {
       const split = splitModelId(id);
       const p = split && config.providers.find((x) => x.name === split.provider);
-      return Boolean(p && kindOf(p, split!.model) === kind && servesOf(p)[kind] === true);
+      return Boolean(p && kindOf(p, split!.model) === kind && forwardsOf(p)[kind] === true);
     };
     const ofKind = (kind: GatewayKind, groups: boolean) => models.filter((id) => (config.groups[id] ? groups && config.groups[id]!.some(is(kind)) : is(kind)(id)));
     return {

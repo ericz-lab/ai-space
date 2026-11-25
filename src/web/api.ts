@@ -103,7 +103,7 @@ export type SpeechChains = { asr: string[]; tts: string[]; live: string[] };
 export type SpeechChainItem = { provider: string } | { gateway: string; model: string; voice?: string };
 export type SpeechOrder = { asr: SpeechChainItem[]; tts: SpeechChainItem[] };
 /** One gateway provider as the Speech and Image groups offer it (`GET /api/model/gateway/speech`). */
-export type GatewayMediaProvider = { name: string; label: string; off?: string; serves: { asr: true | string; tts: true | string; image: true | string }; asrModels: string[]; ttsModels: string[]; imageModels: string[]; voices: Record<string, string[]> };
+export type GatewayMediaProvider = { name: string; label: string; off?: string; serves: { asr: true | string; tts: true | string; image: true | string }; asrModels: string[]; ttsModels: string[]; imageModels: string[]; voices: Record<string, string[]>; voicesOpen?: boolean };
 /** A speech provider that is not the gateway's: written in providers.yaml by hand, or the built-in one when it is here. */
 export type SpeechCustomProvider = { name: string; kind: string; serves: { asr: boolean; tts: boolean; live: boolean }; machine?: string; located?: boolean; off?: string; testable: boolean };
 export type GatewaySpeechInfo = {

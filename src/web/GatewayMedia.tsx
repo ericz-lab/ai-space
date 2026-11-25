@@ -253,7 +253,13 @@ export function SpeechCard({ g, editable, onAddProvider, initial, t }: { g: Gate
                             {role === "tts" && (
                               <label className="gw-field">
                                 <span>{t("speechg.voice")}</span>
-                                {voices.length ? (
+                                {voices.length && p.voicesOpen ? (
+                                  // The vendor's documented voices to pick from, and any other voice id it has (a cloned one) typed.
+                                  <>
+                                    <input className="setselect" list={`gw-voices-${p.name}`} value={item.voice ?? ""} spellCheck={false} autoCapitalize="off" placeholder={t("speechg.voiceTyped")} disabled={lock} onChange={(e) => patch(role, i, { voice: e.target.value })} />
+                                    <datalist id={`gw-voices-${p.name}`}>{voices.map((v) => <option key={v} value={v} />)}</datalist>
+                                  </>
+                                ) : voices.length ? (
                                   <select className="setselect" value={item.voice ?? ""} disabled={lock} onChange={(e) => patch(role, i, { voice: e.target.value })}>
                                     {voices.map((v) => <option key={v} value={v}>{v}</option>)}
                                   </select>

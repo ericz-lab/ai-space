@@ -199,6 +199,16 @@ test("the Speech group with a custom provider: one list, each order first-to-las
   expect(ro).not.toContain("aria-label=\"Move up\"");
 });
 
+test("the Speech group with a vendor whose voices are many: pick a documented one or type another", () => {
+  const mm = { name: "minimax", label: "MiniMax", serves: { asr: true as const, tts: true as const, image: "no openai base" }, asrModels: ["asr-1.0"], ttsModels: ["speech-2.8-hd"], imageModels: [], voices: { "speech-2.8-hd": ["English_Graceful_Lady", "Chinese (Mandarin)_News_Anchor"] }, voicesOpen: true };
+  const info = speechInfo({ providers: [oa, mm], order: { asr: [{ gateway: "minimax", model: "asr-1.0" }], tts: [{ gateway: "minimax", model: "speech-2.8-hd", voice: "my-cloned-voice" }, { gateway: "oa", model: "tts-1", voice: "nova" }] } });
+  const html = renderToStaticMarkup(<SpeechCard g={gw()} editable initial={info} t={t} />);
+  expect(html).toMatch(/<input class="setselect" list="gw-voices-minimax"[^>]*value="my-cloned-voice"\/>/);
+  expect(html).toContain('<datalist id="gw-voices-minimax"><option value="English_Graceful_Lady"></option><option value="Chinese (Mandarin)_News_Anchor"></option></datalist>');
+  // A fixed list stays a choice.
+  expect(html).toContain('<option value="nova" selected="">nova</option>');
+});
+
 test("the Image group: who can draw and why not, the picture model, a test that costs, the URL rule", () => {
   const p = { ...base, name: "oa", models: ["gpt-image-1"], kinds: { "gpt-image-1": "image" as const }, serves: { text: "no messages base", asr: true as const, tts: true as const, image: true as const } };
   const html = renderToStaticMarkup(<ImageCard g={gw({ providers: [base, p], imageModels: ["oa/gpt-image-1"], tiers: { image: "oa/gpt-image-1" } })} editable busy={false} onSave={noop} t={t} />);
