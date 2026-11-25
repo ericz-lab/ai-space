@@ -4,40 +4,47 @@ import Carbon.HIToolbox
 import Combine
 import SwiftUI
 
-/// Voice input in any app (docs/macos-desktop.md#voice-input): the voice input shortcut starts a
-/// clip, pressing it again ends it, the selected Space transcribes it as a field's microphone
-/// does (VoiceInput), and the text goes into whatever field has the keyboard, through the
-/// clipboard and a paste (DictationRules). What the clipboard held comes back afterwards.
+/// Voice input in any app (docs/macos-desktop.md#voice-input): holding fn (FnKey) records, the
+/// words show live in a capsule at the bottom of the screen (LiveVoice), and on release the text
+/// goes once into whatever field has the keyboard, through the clipboard and a paste
+/// (DictationRules). What the clipboard held comes back afterwards. Provisional text is never typed
+/// into the field and corrected: that cannot be done reliably across apps.
 @MainActor
 final class Dictation {
     private unowned let model: AppModel
-    private let voice = VoiceInput()
+    private let live = LiveVoice()
+    /// Only asks each Space whether it can transcribe (`GET /api/voice`), as a field's microphone does.
+    private let probe = VoiceInput()
     private let hud = DictationHUD()
     private var watchers: Set<AnyCancellable> = []
-    /// Between the press and the recorder starting: a second press then does nothing.
-    private var starting = false
-    private var askedForAccessibility = false
+    /// Between fn and the recorder starting, while a Space is chosen.
+    private var choosing = false
+    /// fn came up while a Space was being chosen: nothing is recorded.
+    private var released = false
     private static let transient = NSPasteboard.PasteboardType("org.nspasteboard.TransientType")
 
     init(model: AppModel) {
         self.model = model
-        voice.$state.sink { [weak self] state in self?.hud.follow(state) }.store(in: &watchers)
-        voice.$error.sink { [weak self] error in if let error { self?.hud.note(error) } }.store(in: &watchers)
+        live.$state.combineLatest(live.$text).sink { [weak self] state, text in self?.hud.follow(state, text: text) }.store(in: &watchers)
+        live.$error.sink { [weak self] error in if let error { self?.hud.note(error) } }.store(in: &watchers)
     }
 
-    /// What the shortcut does.
-    func toggle() {
-        switch voice.state {
-        case .recording: voice.toggle { [weak self] text in self?.insert(text) }
-        case .transcribing: break
-        case .idle, .unavailable:
-            guard !starting else { return }
-            starting = true
-            Task {
-                await start()
-                starting = false
-            }
+    /// fn held: a press while the previous transcript is still on its way does nothing.
+    func begin() {
+        guard live.state == .idle, !choosing else { return }
+        choosing = true
+        released = false
+        hud.follow(.starting, text: "")
+        Task {
+            await start()
+            choosing = false
         }
+    }
+
+    /// fn let go.
+    func end() {
+        if choosing { released = true; return }
+        live.stop()
     }
 
     private func start() async {
@@ -50,31 +57,28 @@ final class Dictation {
             return
         }
         var reachable = false
+        var chosen: SpaceAPI?
         for c in order {
-            guard let live = model.lives[c.id] else { continue }
-            switch live.status {
+            guard let space = model.lives[c.id] else { continue }
+            switch space.status {
             case .signInNeeded, .offline: continue
             case .ok, .unknown: break
             }
             reachable = true
-            await voice.check(live.api)
-            if voice.state != .unavailable { break }
+            await probe.check(space.api)
+            if probe.state != .unavailable { chosen = space.api; break }
         }
-        guard voice.state == .idle else {
+        guard let chosen else {
             if !reachable {
                 hud.note(String(localized: "\(first.name) is not connected. Voice input needs the Space."))
-            } else if voice.state == .unavailable {
+            } else {
                 hud.note(String(localized: "None of your Spaces can transcribe speech."))
             }
             return
         }
-        let ownKeyWindow = NSApp.keyWindow != nil
-        if DictationRules.asksForAccessibility(ownKeyWindow: ownKeyWindow, trusted: AXIsProcessTrusted(), askedBefore: askedForAccessibility) {
-            askedForAccessibility = true
-            // The system's own prompt, which opens Privacy & Security → Accessibility.
-            AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": true] as CFDictionary)
-        }
-        voice.toggle { [weak self] text in self?.insert(text) }
+        // Released before a Space answered: too short to have said anything.
+        guard !released else { hud.follow(.idle, text: ""); return }
+        live.start(api: chosen) { [weak self] text in self?.insert(text) }
     }
 
     /// The transcript goes through the clipboard: written, pasted, and the earlier contents put
@@ -142,7 +146,8 @@ final class Dictation {
 final class DictationHUD {
     enum Look: Equatable {
         case listening(String)
-        case transcribing
+        /// Released: what was heard so far, until the final text is in.
+        case transcribing(String)
         case note(String)
     }
 
@@ -152,14 +157,13 @@ final class DictationHUD {
     /// Counts what was shown, so a note's timer hides only that note.
     private var shown = 0
 
-    func follow(_ state: VoiceInput.State) {
+    func follow(_ state: LiveVoice.State, text: String) {
         switch state {
-        case .recording:
-            let shortcut = Preferences.shared.voiceInput.label
-            show(.listening(String(localized: "Listening… \(shortcut) to stop")))
-        case .transcribing: show(.transcribing)
-        case .idle, .unavailable:
-            // A note just shown (a failed transcription) outlives the end of the clip.
+        case .starting, .recording:
+            show(.listening(text.isEmpty ? String(localized: "Listening… let go of fn to finish") : DictationRules.tail(text)))
+        case .finishing: show(.transcribing(DictationRules.tail(text)))
+        case .idle:
+            // A note just shown (a failed transcription) outlives the end of the recording.
             if case .note = look { return }
             hide()
         }
@@ -224,10 +228,11 @@ struct DictationHUDView: View {
             switch look {
             case .listening(let text):
                 Image(systemName: "mic.fill").foregroundStyle(Theme.danger).symbolEffect(.pulse, isActive: true)
-                Text(verbatim: text)
-            case .transcribing:
+                Text(verbatim: text).lineLimit(3).fixedSize(horizontal: false, vertical: true)
+            case .transcribing(let text):
                 ProgressView().controlSize(.small)
-                Text("Transcribing…")
+                if text.isEmpty { Text("Transcribing…") }
+                else { Text(verbatim: text).lineLimit(3).fixedSize(horizontal: false, vertical: true).foregroundStyle(.secondary) }
             case .note(let text):
                 Image(systemName: "mic.slash").foregroundStyle(.secondary)
                 Text(verbatim: text).fixedSize(horizontal: false, vertical: true)

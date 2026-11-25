@@ -22,12 +22,6 @@ enum DictationRules {
         return .systemPaste
     }
 
-    /// The system's Accessibility prompt, once per launch, when the text will have to go into
-    /// another app and the permission is missing. Recording starts either way.
-    static func asksForAccessibility(ownKeyWindow: Bool, trusted: Bool, askedBefore: Bool) -> Bool {
-        !ownKeyWindow && !trusted && !askedBefore
-    }
-
     /// How long a pasted transcript holds the clipboard before what was there comes back: long
     /// enough for the app in front to read it after the posted ⌘V.
     static let restoreDelay: TimeInterval = 0.8
@@ -36,5 +30,29 @@ enum DictationRules {
     /// A transcript left for the person to paste is never taken away.
     static func restores(_ delivery: Delivery, changeCount: Int, written: Int) -> Bool {
         delivery != .clipboardOnly && changeCount == written
+    }
+
+    /// How much of a long live transcript the capsule shows: its end, which is what is being said,
+    /// cut at a word when one ends near the cut (a language without spaces is cut anywhere).
+    static func tail(_ text: String, limit: Int = 120) -> String {
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard text.count > limit else { return text }
+        var kept = text.suffix(limit)
+        if let space = kept.prefix(limit / 6).firstIndex(of: " ") { kept = kept[kept.index(after: space)...] }
+        return "…" + kept
+    }
+
+    /// Mono 16 kHz PCM16 as a WAV file: the live recording sent as a clip when the live route
+    /// does not answer.
+    static func wav(pcm: Data, sampleRate: Int = 16000) -> Data {
+        var out = Data()
+        func put(_ text: String) { out.append(Data(text.utf8)) }
+        func put32(_ value: Int) { withUnsafeBytes(of: UInt32(value).littleEndian) { out.append(contentsOf: $0) } }
+        func put16(_ value: Int) { withUnsafeBytes(of: UInt16(value).littleEndian) { out.append(contentsOf: $0) } }
+        put("RIFF"); put32(36 + pcm.count); put("WAVE")
+        put("fmt "); put32(16); put16(1); put16(1); put32(sampleRate); put32(sampleRate * 2); put16(2); put16(16)
+        put("data"); put32(pcm.count)
+        out.append(pcm)
+        return out
     }
 }
