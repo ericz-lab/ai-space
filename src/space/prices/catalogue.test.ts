@@ -1,7 +1,7 @@
 import { afterAll, expect, test } from "bun:test";
 import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { PriceBook } from "./book.ts";
 import { bundledCatalogue, CATALOGUE_CACHE, CatalogueFeed, type Catalogue, parseCatalogue } from "./catalogue.ts";
 import { guardChanges } from "./guard.ts";
@@ -82,7 +82,7 @@ test("the feed: a newer catalogue is taken and cached, a broken one refused with
   await again.refresh();
   expect(again.origin()).toBe("fetched");
   expect(again.current().vendors.openai!.models["gpt-6-sol"]!.input).toBe(2.5);
-  expect((await readdir(join(h, "run"))).includes(CATALOGUE_CACHE.split("/").at(-1)!)).toBe(true);
+  expect((await readdir(join(h, "run"))).includes(basename(CATALOGUE_CACHE))).toBe(true);
 });
 
 test("the release's own copy wins when it is newer than the fetched one; an empty URL fetches nothing", async () => {
