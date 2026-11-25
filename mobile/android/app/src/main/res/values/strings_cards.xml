@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Chat cards (docs/chat-cards.md), worded as the web's chat.card.* in src/web/messages.ts. -->
+    <string name="chat_card_undo">Undo</string>
+    <string name="chat_card_undo_all">Undo all</string>
+    <string name="chat_card_undo_rest">Undo the other %1$d</string>
+    <string name="chat_card_undo_item">Undo: %1$s</string>
+    <string name="chat_card_undone">Undone</string>
+    <string name="chat_card_done">Done</string>
+    <string name="chat_card_changed">Changed elsewhere</string>
+    <string name="chat_card_read_only">Read-only now: the conversation has moved on.</string>
+</resources>

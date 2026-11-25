@@ -183,6 +183,8 @@ data class CatalogueEntry(
     /** The page to open: the app's `url` or the widget's `link`, `{lang}` and `{accent}` not yet filled in. */
     val link: String? = null,
     val reach: Reach,
+    /** An agent's app icon (`appIcon`), which heads its chat cards; null for anything else. */
+    val appIcon: String? = null,
 ) {
     val id: String get() = key
     val key: String get() = "${kind.name}:$ref"
@@ -344,6 +346,7 @@ data class Catalogue(
             kind = EntryKind.agent, ref = a.id, title = a.title, detail = a.description, i18n = a.i18n,
             icon = a.avatar, peer = a.peer, link = null,
             reach = if (a.stale == true || (a.peer != null && a.peer in offlinePeers)) Reach.peerOffline else Reach.unknown,
+            appIcon = a.appIcon,
         )
 
         fun entry(w: CatalogWidget): CatalogueEntry = CatalogueEntry(

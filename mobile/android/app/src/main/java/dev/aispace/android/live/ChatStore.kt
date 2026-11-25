@@ -14,6 +14,7 @@ import dev.aispace.android.core.ChatStepKind
 import dev.aispace.android.core.ChatStored
 import dev.aispace.android.core.Hub
 import dev.aispace.android.core.SSEMessage
+import dev.aispace.android.core.ShownCard
 import dev.aispace.android.core.SpaceApi
 import dev.aispace.android.core.SpaceApiError
 import dev.aispace.android.core.SpacePath
@@ -66,6 +67,8 @@ class ChatStore(
         val live: Boolean = false,
         /** A reply restored from a past session's transcript: its runs of calls open folded. */
         val historic: Boolean = false,
+        /** What the agent's tools did, as cards under the reply; a live reply's carry their event's token. */
+        val cards: List<ShownCard> = emptyList(),
         val id: UUID = UUID.randomUUID(),
     ) {
         val approvals: List<ChatApproval> get() = steps.mapNotNull { it.approval }
@@ -73,6 +76,9 @@ class ChatStore(
     }
 
     val draft = MutableStateFlow("")
+
+    /** The shown cards' state, Undo and read-only (docs/chat-cards.md). */
+    val cards = ChatCardStore(api, base, scope)
 
     var bubbles by mutableStateOf<List<Bubble>>(emptyList())
         private set
@@ -153,6 +159,7 @@ class ChatStore(
         isOpening = false
         sessionID = null
         bubbles = emptyList()
+        cards.clear()
         error = null
         images = emptyList()
         imageError = null
@@ -173,9 +180,14 @@ class ChatStore(
             bubbles = stored.mapNotNull { m ->
                 val user = m.role == "user"
                 val work = if (user) emptyList() else m.work
-                if (m.text.isNullOrEmpty() && work.isEmpty()) null
-                else Bubble(isUser = user, text = m.text ?: "", tools = work.filter { it.kind == ChatStepKind.Tool }.map { it.title }, steps = work, historic = !user)
+                if (m.text.isNullOrEmpty() && work.isEmpty() && (user || m.cards.isEmpty())) null
+                else Bubble(
+                    isUser = user, text = m.text ?: "", tools = work.filter { it.kind == ChatStepKind.Tool }.map { it.title }, steps = work, historic = !user,
+                    // A restored card has no token: it shows its items' state, read-only.
+                    cards = if (user) emptyList() else m.cards,
+                )
             }
+            cards.clear()
             sessionID = session.sid
             error = null
         } catch (e: CancellationException) {
@@ -336,6 +348,7 @@ class ChatStore(
                     tools = reply.tools,
                     activity = reply.activity,
                     steps = reply.steps,
+                    cards = reply.cards,
                     note = note(reply),
                     pending = pending,
                 )
@@ -399,6 +412,7 @@ class ChatStore(
                     text = shown(reply),
                     tools = reply.tools,
                     steps = reply.steps,
+                    cards = reply.cards,
                     note = note(reply),
                     pending = emptyList(),
                     activity = null,
@@ -449,6 +463,7 @@ class ChatStore(
         images = emptyList()
         imageError = null
         bubbles = emptyList()
+        cards.clear()
         sessions = emptyList()
         error = null
     }

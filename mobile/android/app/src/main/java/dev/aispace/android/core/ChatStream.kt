@@ -263,6 +263,8 @@ data class ChatReply(
     val steps: List<ChatStep> = emptyList(),
     /** Messages the agent has read that the person added while the turn ran, one per `steer` event. */
     val consumedSteers: List<String> = emptyList(),
+    /** What the agent's tools did, as cards under the reply (docs/chat-cards.md), each with its event's token. */
+    val cards: List<ShownCard> = emptyList(),
     private val streamingStep: String? = null,
     private val serial: Int = 0,
 ) {
@@ -411,6 +413,8 @@ data class ChatReply(
             } else {
                 copy(note = "⚠️ " + describe(ev.opt("error") ?: "error"))
             }
+            // What a tool did, checked by ai-space; the token lets this reply's cards act.
+            "cards" -> copy(cards = cards + ShownCard.event(ev))
             "done" -> settled().copy(finished = true, activity = null)
             else -> this
         }

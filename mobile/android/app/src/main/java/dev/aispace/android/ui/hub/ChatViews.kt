@@ -63,6 +63,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -146,6 +147,9 @@ import dev.aispace.android.core.ChatStepState
 import dev.aispace.android.core.ChatTools
 import dev.aispace.android.core.ToolVariant
 import dev.aispace.android.core.ChatRoute
+import dev.aispace.android.core.CardApp
+import dev.aispace.android.core.CardRules
+import dev.aispace.android.core.Urls
 import dev.aispace.android.core.Connection
 import dev.aispace.android.live.CatalogueLoader
 import dev.aispace.android.live.ChatImages
@@ -190,6 +194,9 @@ internal fun AgentChat(
     }
     ChatPage(
         agent, model.chat(connection, base), icons,
+        cardApp = CardApp.of(agent, catalogue.apps),
+        // An item's link opens as any link on the Space's pages: an app page in the app, else the browser.
+        openLink = { url, title -> Urls.resolve(connection.url, url)?.let { model.openFromHub(it, title, connection) } },
         machines = machines,
         machineClis = { m -> Inventory.machine(inventory, m.peer)?.usableClis ?: emptyList() },
         onMachine = { m ->
@@ -262,6 +269,8 @@ internal fun ChatPage(
     agent: CatalogueEntry,
     store: ChatStore,
     icons: IconImages,
+    cardApp: CardApp = CardApp(),
+    openLink: (url: String, title: String) -> Unit = { _, _ -> },
     machines: List<CatalogueEntry> = listOf(agent),
     machineClis: (CatalogueEntry) -> List<String> = { emptyList() },
     onMachine: (CatalogueEntry) -> Unit = {},
@@ -297,10 +306,12 @@ internal fun ChatPage(
         }
     }
 
+    val appName = cardApp.entry?.displayTitle()
+    val cardContext = remember(store, cardApp, appName, icons, openLink) { CardContext(store.cards, cardApp, appName, icons, openLink) }
     LaunchedEffect(store) { if (store.isRunning) store.loadSessions() }
     LaunchedEffect(running) { if (!running) store.loadSessions() }
     // The end of the conversation stays in view as the reply grows.
-    LaunchedEffect(bubbles.size, bubbles.lastOrNull()?.text, bubbles.lastOrNull()?.steps?.size) {
+    LaunchedEffect(bubbles.size, bubbles.lastOrNull()?.text, bubbles.lastOrNull()?.steps?.size, bubbles.lastOrNull()?.cards?.size) {
         // The intro (when there are no messages), the bubbles, then the end.
         listState.scrollToItem((if (bubbles.isEmpty()) 1 else 0) + bubbles.size)
     }
@@ -333,8 +344,13 @@ internal fun ChatPage(
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             if (bubbles.isEmpty()) item(key = "intro") { Intro(agent, icons) }
-            items(bubbles, key = { it.id }) {
-                ChatBubble(it, answer = if (it.live) { id, allow, answers -> store.answer(id, allow, answers) } else null)
+            // Cards act only under the conversation's latest reply (src/web/Chat.tsx).
+            val isUser = bubbles.map { it.isUser }
+            itemsIndexed(bubbles, key = { _, b -> b.id }) { i, it ->
+                ChatBubble(
+                    it, answer = if (it.live) { id, allow, answers -> store.answer(id, allow, answers) } else null,
+                    cards = cardContext, actionable = CardRules.actionable(isUser, i),
+                )
             }
             item(key = "end") { Spacer(Modifier.height(1.dp)) }
         }
@@ -621,8 +637,13 @@ private fun Intro(agent: CatalogueEntry, icons: IconImages) {
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ChatBubble(bubble: ChatStore.Bubble, answer: (suspend (String, Boolean, Map<String, List<String>>?) -> String?)?) {
-    BoxWithConstraints(Modifier.fillMaxWidth()) { BubbleRow(bubble, answer, widest = maxWidth * 0.88f) }
+private fun ChatBubble(
+    bubble: ChatStore.Bubble,
+    answer: (suspend (String, Boolean, Map<String, List<String>>?) -> String?)?,
+    cards: CardContext? = null,
+    actionable: Boolean = false,
+) {
+    BoxWithConstraints(Modifier.fillMaxWidth()) { BubbleRow(bubble, answer, widest = maxWidth * 0.88f, cards, actionable) }
 }
 
 /**
@@ -631,7 +652,13 @@ private fun ChatBubble(bubble: ChatStore.Bubble, answer: (suspend (String, Boole
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun BubbleRow(bubble: ChatStore.Bubble, answer: (suspend (String, Boolean, Map<String, List<String>>?) -> String?)?, widest: androidx.compose.ui.unit.Dp) {
+private fun BubbleRow(
+    bubble: ChatStore.Bubble,
+    answer: (suspend (String, Boolean, Map<String, List<String>>?) -> String?)?,
+    widest: androidx.compose.ui.unit.Dp,
+    cards: CardContext?,
+    actionable: Boolean,
+) {
     val t = AiTheme.tokens
     val r = t.radiusSmall
     val shape = RoundedCornerShape(topStart = r, topEnd = r, bottomEnd = 4.dp, bottomStart = r)
@@ -688,6 +715,8 @@ private fun BubbleRow(bubble: ChatStore.Bubble, answer: (suspend (String, Boolea
                 } else if (bubble.text.isNotEmpty()) {
                     RichText(bubble.text, t.text, ThemeTokens.link)
                 }
+                // What the turn's tools did, under the reply, with Undo while it is the latest.
+                if (cards != null && bubble.cards.isNotEmpty()) ChatCards(bubble.id.toString(), bubble.cards, actionable, cards)
                 for (text in bubble.pending) SteerLine(text, pending = true)
                 val waiting = steps.filter { it.kind == ChatStepKind.Approval && it.state == ChatStepState.Waiting }
                 if (bubble.live && waiting.isNotEmpty()) {
