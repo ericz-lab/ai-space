@@ -137,3 +137,12 @@ test("a peer's rows load with its own choices; an older peer and an unreachable 
   expect(await loadPeerModels("older")).toEqual({ peer: "older", old: true });
   expect(await loadPeerModels("down")).toEqual({ peer: "down", error: "peer down unreachable: timeout" });
 });
+
+test("gateway models are offered under the model gateway, text and pictures apart, with no runtime", () => {
+  const withGateway: Option[] = [...options, { value: "ds/deepseek-chat", gateway: "text", model: "ds/deepseek-chat" }, { value: "oa/gpt-image-1", gateway: "image", model: "oa/gpt-image-1" }];
+  const html = renderToStaticMarkup(<AppModelDetail group={notes} options={withGateway} onSaved={() => {}} t={t} />);
+  expect(html).toContain('<optgroup label="Model gateway · text (/api/model/run)"><option value="ds/deepseek-chat">ds/deepseek-chat</option></optgroup>');
+  expect(html).toContain('<optgroup label="Model gateway · pictures (/api/model/image)"><option value="oa/gpt-image-1">oa/gpt-image-1</option></optgroup>');
+  expect(html).toContain('<optgroup label="codex">');
+  expect(html).not.toContain('label="undefined"');
+});

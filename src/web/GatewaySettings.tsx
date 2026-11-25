@@ -128,8 +128,8 @@ export default function GatewaySettings() {
               save={{ label: t("magpie.save"), mustChange: true, needOne: false }}
               typed={editable}
               busy={busy || !editable}
-              // The picture tier is the Image group's; it is kept as it is.
-              onSave={(tiers: GatewayTiers) => void runIn("tiers")(() => sendJson("PUT", "/api/model/gateway/tiers", { tiers: { ...tiers, image: g.tiers.image } }), t("gateway.saved"))}
+              // The four text tiers only: there is no picture tier (an old one stays in the file, ignored).
+              onSave={(tiers: GatewayTiers) => void runIn("tiers")(() => sendJson("PUT", "/api/model/gateway/tiers", { tiers: { basic: tiers.basic, junior: tiers.junior, intermediate: tiers.intermediate, advanced: tiers.advanced } }), t("gateway.saved"))}
               t={t}
             />
           </div>
@@ -140,7 +140,7 @@ export default function GatewaySettings() {
       {!g.unavailable && <SpeechCard g={g} editable={editable} onAddProvider={editable ? addProvider : undefined} t={t} />}
 
       {!g.unavailable && (
-        <ImageCard g={g} editable={editable} busy={busy} onAddProvider={editable ? addProvider : undefined} onAddModel={(p, model) => void runIn("image")(() => sendJson("PUT", `/api/model/gateway/providers/${p.name}`, { models: [...p.models, model], kinds: { [model]: "image" } }), t("imageg.added", { model: `${p.name}/${model}` }))} onSave={(image) => void runIn("image")(() => sendJson("PUT", "/api/model/gateway/tiers", { tiers: { ...g.tiers, image } }), t("gateway.imageSaved"))} t={t}>
+        <ImageCard g={g} editable={editable} busy={busy} onAddProvider={editable ? addProvider : undefined} onAddModel={(p, model) => void runIn("image")(() => sendJson("PUT", `/api/model/gateway/providers/${p.name}`, { models: [...p.models, model], kinds: { [model]: "image" } }), t("imageg.added", { model: `${p.name}/${model}` }))} t={t}>
           {messages("image")}
         </ImageCard>
       )}
@@ -149,12 +149,13 @@ export default function GatewaySettings() {
         <div className="setcard gw">
           <p className="sethead">{t("gateway.runtimes")}</p>
           <p className="setnote">{g.runtimes.length ? t("gateway.used", { names: g.runtimes.map((r) => (r.loaded ? r.runtime : `${r.runtime} (${t("magpie.pending")})`)).join(", ") }) : t("gateway.unused")}</p>
-          <div className="setbtns">
-            <span className="setbtns-gap" />
-            {/* One runtime of each kind through the gateway: once there, its button goes. */}
-            {g.offer.claude && !g.runtimes.some((r) => r.kind === "claude-code") && <button className="btn2" disabled={busy || !!g.unavailable} onClick={() => void addRuntime("claude-code")}>{t("gateway.addClaude")}</button>}
-            {!g.runtimes.some((r) => r.kind === "anthropic-api") && <button className="btn2" disabled={busy || !!g.unavailable} onClick={() => void addRuntime("anthropic-api")}>{t("gateway.addApi")}</button>}
-          </div>
+          {/* Claude Code through the gateway, once: an app needs no runtime to call the gateway's models. */}
+          {g.offer.claude && !g.runtimes.some((r) => r.kind === "claude-code") && (
+            <div className="setbtns">
+              <span className="setbtns-gap" />
+              <button className="btn2" disabled={busy || !!g.unavailable} onClick={() => void addRuntime()}>{t("gateway.addClaude")}</button>
+            </div>
+          )}
           <p className="setnote">{t(g.offer.claude ? "gateway.runtimeHelp" : "gateway.runtimeHelpNoClaude")}</p>
           {messages("runtimes")}
         </div>
@@ -164,10 +165,10 @@ export default function GatewaySettings() {
     </>
   );
 
-  async function addRuntime(kind: "claude-code" | "anthropic-api") {
+  async function addRuntime() {
     let msg = "";
     await runIn("runtimes")(async () => {
-      const r = await sendJson<{ runtime: string; applied: boolean }>("POST", "/api/model/gateway/runtimes", { kind });
+      const r = await sendJson<{ runtime: string; applied: boolean }>("POST", "/api/model/gateway/runtimes", { kind: "claude-code" });
       msg = t(r.applied ? "gateway.runtimeAdded" : "gateway.runtimeRestart", { name: r.runtime });
     });
     if (msg) setStatus(msg);

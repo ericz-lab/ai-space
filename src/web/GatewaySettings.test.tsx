@@ -150,13 +150,13 @@ const studio = { name: "voice-studio", kind: "voice-studio", serves: { asr: true
 
 test("the Pictures group adds a picture model to a provider that can draw: the documented ids, or one typed", () => {
   const mm: GatewayProviderInfo = { ...base, name: "minimax", preset: "minimax", openai: "https://api.minimaxi.com/v1", models: ["MiniMax-M3"], kinds: { "MiniMax-M3": "text" }, serves: { text: true, asr: "no", tts: "no", image: true }, imageOffer: ["MiniMax-H3-Image"] };
-  const html = renderToStaticMarkup(<ImageCard g={gw({ providers: [mm, base] })} editable busy={false} onAddModel={noop} onSave={noop} t={zh} />);
+  const html = renderToStaticMarkup(<ImageCard g={gw({ providers: [mm, base] })} editable busy={false} onAddModel={noop} t={zh} />);
   expect(html).toContain("能画图（0 个图片模型）");
   expect(html).toContain(">+ MiniMax-H3-Image</button>");
   expect(html).toContain('placeholder="厂商控制台里的图片模型 ID"');
   // Only where it can draw, and only for the owner.
   expect(html.match(/gw-addmodel/g)?.length).toBe(1);
-  expect(renderToStaticMarkup(<ImageCard g={gw({ providers: [mm] })} editable={false} busy={false} onAddModel={noop} onSave={noop} t={zh} />)).not.toContain("gw-addmodel");
+  expect(renderToStaticMarkup(<ImageCard g={gw({ providers: [mm] })} editable={false} busy={false} onAddModel={noop} t={zh} />)).not.toContain("gw-addmodel");
 });
 
 test("the Speech group, nothing of the space's own: the gateway's providers only, empty orders, no live, nothing named that is not there", () => {
@@ -209,14 +209,22 @@ test("the Speech group with a vendor whose voices are many: pick a documented on
   expect(html).toContain('<option value="nova" selected="">nova</option>');
 });
 
-test("the Image group: who can draw and why not, the picture model, a test that costs, the URL rule", () => {
-  const p = { ...base, name: "oa", models: ["gpt-image-1"], kinds: { "gpt-image-1": "image" as const }, serves: { text: "no messages base", asr: true as const, tts: true as const, image: true as const } };
-  const html = renderToStaticMarkup(<ImageCard g={gw({ providers: [base, p], imageModels: ["oa/gpt-image-1"], tiers: { image: "oa/gpt-image-1" } })} editable busy={false} onSave={noop} t={t} />);
-  expect(html).toContain("<b>oa</b> can draw (1 picture models)");
+test("the Image group: who can draw and why not, the picture model to test with, no picture tier, the URL rule", () => {
+  const p = { ...base, name: "oa", models: ["gpt-image-1", "dall-e-3"], kinds: { "gpt-image-1": "image" as const, "dall-e-3": "image" as const }, serves: { text: "no messages base", asr: true as const, tts: true as const, image: true as const } };
+  const html = renderToStaticMarkup(<ImageCard g={gw({ providers: [base, p], imageModels: ["oa/gpt-image-1", "oa/dall-e-3"] })} editable busy={false} t={t} />);
+  expect(html).toContain("<b>oa</b> can draw (2 picture models)");
   expect(html).toContain("the vendor documents none");
-  expect(html).toContain('<option value="oa/gpt-image-1" selected="">oa/gpt-image-1</option>');
+  // The select only picks the test's model: the first is picked, there is no empty choice and no Save.
+  expect(html).toContain("Test with");
+  expect(html).toContain('<option value="oa/gpt-image-1" selected="">oa/gpt-image-1</option><option value="oa/dall-e-3">oa/dall-e-3</option>');
+  expect(html).not.toContain(">Save</button>");
+  expect(html).not.toContain(`<span>${t("gateway.imageTier")}</span>`);
+  expect(html).not.toContain("gw-warn");
   expect(html).toContain(">Make a test picture</button>");
   expect(html).toContain("only over https from a public address");
-  const empty = renderToStaticMarkup(<ImageCard g={gw()} editable busy={false} onSave={noop} onAddProvider={noop} t={zh} />);
+  const empty = renderToStaticMarkup(<ImageCard g={gw()} editable busy={false} onAddProvider={noop} t={zh} />);
   expect(empty).toContain("添加能做这件事的服务商");
+  expect(empty).not.toContain("生成一张测试图");
+  // An old tiers.image in gateway.yaml: said to be ignored, in both languages.
+  for (const tr of [t, zh]) expect(renderToStaticMarkup(<ImageCard g={gw({ providers: [p], imageModels: ["oa/gpt-image-1"], tiers: { image: "oa/gpt-image-1" } })} editable busy={false} t={tr} />)).toContain(tr("imageg.tierIgnored", { model: "oa/gpt-image-1" }).replace(/'/g, "&#x27;"));
 });

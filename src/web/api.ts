@@ -27,6 +27,8 @@ export type AgentInfo = {
 
 /** A runtime/tier choice as every picker gets it; `unavailable` says why it is shown but cannot be picked (docs/model-machines.md#inventory). */
 export type ModelChoice = { value: string; runtime: string; tier: "basic" | "junior" | "intermediate" | "advanced"; model: string; unavailable?: "signed-out" | "offline" };
+/** A model of the built-in model gateway an app's override may name, with no runtime (docs/model.md#models): text for run, image for pictures. */
+export type GatewayModelChoice = { value: string; gateway: "text" | "image"; model: string };
 
 /** One agent CLI on one machine (`GET /api/model/inventory`). */
 export type CliInfo = { cli: string; kind: string; installed?: boolean; signedIn?: boolean; version?: string; path?: string; detail?: string; checkedAt?: string; configured: boolean; runtimes: string[] };

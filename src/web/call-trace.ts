@@ -12,7 +12,7 @@ export type FailureKind = "credit" | "quota" | "rate" | "auth" | "transport" | "
 export type CallTrace = {
   skippedLayers?: { source: string; model: string }[];
   candidates?: { model: string; later?: "resting" | "signed-out" | "unreachable" | "not-installed"; restKind?: FailureKind; until?: string; skipped?: string }[];
-  tries: { runtime: string; machine?: string; model: string; ok: boolean; error?: string; kind?: FailureKind; ms: number; streamed?: boolean; served?: string }[];
+  tries: { runtime?: string; machine?: string; model: string; ok: boolean; error?: string; kind?: FailureKind; ms: number; streamed?: boolean; served?: string }[];
   stop?: "answered" | "not-switched" | "streamed" | "no-time" | "exhausted" | "aborted";
 };
 
@@ -41,7 +41,8 @@ export function traceLines(trace: CallTrace, lang: Lang): string[] {
     }
   }
   trace.tries.forEach((x, i) => {
-    const model = `${x.machine ? `${x.machine}:` : ""}${x.runtime}/${x.model}`;
+    // No runtime: the built-in model gateway answered the gateway model named.
+    const model = x.runtime ? `${x.machine ? `${x.machine}:` : ""}${x.runtime}/${x.model}` : x.model;
     const time = fmtDuration(x.ms, lang);
     const line = x.ok ? t("trace.tryOk", { n: i + 1, model, time }) : t("trace.tryFailed", { n: i + 1, model, kind: failureText(x.kind ?? "other", lang), time });
     const extra = [x.streamed ? t("trace.streamed") : "", x.served ? t("trace.served", { model: x.served }) : ""].filter(Boolean);
