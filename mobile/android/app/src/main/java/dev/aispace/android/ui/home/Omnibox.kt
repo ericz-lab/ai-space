@@ -14,6 +14,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.text.font.FontWeight
 import kotlin.math.PI
 import kotlin.math.sin
 import android.app.DatePickerDialog
@@ -295,6 +296,14 @@ internal fun OmniboxResults(
     var selection by remember { mutableStateOf<ShortcutIntent?>(null) }
     var pendingLink by remember { mutableStateOf<String?>(null) }
     var chatError by remember { mutableStateOf<String?>(null) }
+    // Set for a moment after a result was copied, so its row can say so.
+    var copied by remember { mutableStateOf(false) }
+    var copies by remember { mutableStateOf(0) }
+    LaunchedEffect(copies) {
+        if (copies == 0) return@LaunchedEffect
+        kotlinx.coroutines.delay(1500)
+        copied = false
+    }
     val busy = stringResource(R.string.omnibox_agent_busy)
     val resultTitle = stringResource(R.string.omnibox_result)
 
@@ -322,9 +331,9 @@ internal fun OmniboxResults(
             chatError = busy
             return
         }
-        chat.newChat()
-        chat.draft.value = query
-        chat.send(intentID = intent?.id, timezone = zone())
+        // The question goes as it is: what is being written in that chat, and its images, stay.
+        chat.newChat(keepComposer = true)
+        chat.send(query, intentID = intent?.id, timezone = zone())
         model.hubPage = HubPage.Chat("agent:$agent")
         onQuery("")
     }
@@ -342,7 +351,10 @@ internal fun OmniboxResults(
     }
 
     fun copy(text: String?) {
-        if (!text.isNullOrEmpty()) clipboard.setText(AnnotatedString(text))
+        if (text.isNullOrEmpty()) return
+        clipboard.setText(AnnotatedString(text))
+        copied = true
+        copies += 1
     }
 
     fun activateDefault() {
@@ -387,7 +399,7 @@ internal fun OmniboxResults(
         for (intent in resolution?.agentIntents ?: emptyList()) {
             ResultRow(intent.title, intent.reason, Icons.Outlined.AutoAwesome, enabled = enabled && intent.available) { ask(intent) }
         }
-        for (intent in strong) ActionRow(intent, store, enabled, ::copy, { selection = it }, ::open)
+        for (intent in strong) ActionRow(intent, store, enabled, copied, ::copy, { selection = it }, ::open)
         if (resolution?.agentIntents.isNullOrEmpty()) {
             for (entry in entries) {
                 ResultRow(
@@ -397,7 +409,7 @@ internal fun OmniboxResults(
                 ) { openEntry(entry) }
             }
         }
-        for (intent in loose) ActionRow(intent, store, enabled, ::copy, { selection = it }, ::open)
+        for (intent in loose) ActionRow(intent, store, enabled, copied, ::copy, { selection = it }, ::open)
         ResultRow(stringResource(R.string.omnibox_ask_assistant), null, Icons.Outlined.AutoAwesome, enabled = enabled) { ask(null) }
         store.error?.let { Text(it, style = HomeType.footnote, color = ThemeTokens.danger, modifier = Modifier.padding(horizontal = 12.dp)) }
         chatError?.let { Text(it, style = HomeType.footnote, color = ThemeTokens.danger, modifier = Modifier.padding(horizontal = 12.dp)) }
@@ -446,6 +458,7 @@ private fun ActionRow(
     intent: ShortcutIntent,
     store: OmniboxStore,
     enabled: Boolean,
+    copied: Boolean,
     copy: (String?) -> Unit,
     choose: (ShortcutIntent) -> Unit,
     open: (String) -> Unit,
@@ -461,7 +474,17 @@ private fun ActionRow(
                 .glass(16.dp, t.solid, t.hairline, elevation = 0.dp)
                 .clickable(enabled = usable, onClick = tap)
                 .padding(12.dp),
-        ) { ShortcutResultView(preview, open) }
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Box(Modifier.weight(1f)) { ShortcutResultView(preview, open) }
+                if (intent.kind == "calc" && copied) {
+                    Text(
+                        stringResource(R.string.omnibox_copied), style = HomeType.caption, fontWeight = FontWeight.SemiBold, color = t.accent,
+                        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                    )
+                }
+            }
+        }
     } else {
         val icon = when {
             intent.kind == "calc" -> Icons.Outlined.Calculate

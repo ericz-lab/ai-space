@@ -348,4 +348,51 @@ class ChatStoreTests {
         assertTrue(body.contains("\"intentId\":\"news\""))
         assertTrue(body.contains("\"timezone\":\"Asia\\/Tokyo\"") || body.contains("\"timezone\":\"Asia/Tokyo\""))
     }
+    @Test fun aQuestionFromSearchLeavesTheFieldAndItsImagesAlone() = runBlocking {
+        server.enqueue(done())
+        val store = store(this)
+        val image = ChatImage("a.png", "image/png", byteArrayOf(1, 2, 3))
+        store.draft.value = "half a thought"
+        assertTrue(store.addImage(image))
+        store.newChat(keepComposer = true)
+        store.send("  what is due today?  ", intentID = "due", timezone = "UTC")
+        assertEquals("half a thought", store.draft.value)
+        assertEquals(listOf(image), store.images)
+        finished(store)
+        val body = server.takeRequest().body.readUtf8()
+        assertTrue(body.contains("\"message\":\"what is due today?\""))
+        assertFalse(body.contains("\"images\""))
+        assertTrue(body.contains("\"intentId\":\"due\""))
+        // A plain new chat still empties the images.
+        store.newChat()
+        assertTrue(store.images.isEmpty())
+    }
+
+    @Test fun aRefusedStopIsSaidAndStopCanBePressedAgain() = runBlocking {
+        var stops = 0
+        server.dispatcher = object : okhttp3.mockwebserver.Dispatcher() {
+            override fun dispatch(request: okhttp3.mockwebserver.RecordedRequest): MockResponse = when {
+                // The turn's stream trickles in for a while, so the turn is still running.
+                request.path == "/agent/chat" -> turn("data: {\"type\":\"noop\"}\n\n").throttleBody(2, 100, TimeUnit.MILLISECONDS)
+                request.path!!.endsWith("/stop") ->
+                    if (++stops == 1) MockResponse().setResponseCode(500).setBody("{\"error\":\"cannot stop\"}") else MockResponse().setBody("{}")
+                else -> done()
+            }
+        }
+        val store = store(this)
+        store.draft.value = "long job"
+        store.send()
+        // The run is named once the answer's headers are in.
+        delay(200)
+        store.stop()
+        assertTrue(store.stopping)
+        withTimeout(3000) { while (store.stopping) delay(5) }
+        assertEquals("cannot stop (HTTP 500)", store.error)
+        assertTrue(store.isRunning)
+        store.stop()
+        assertTrue(store.stopping)
+        finished(store)
+        assertEquals(2, stops)
+        assertFalse(store.stopping)
+    }
 }

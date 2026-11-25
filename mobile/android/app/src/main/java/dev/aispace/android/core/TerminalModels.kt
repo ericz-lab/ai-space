@@ -173,3 +173,17 @@ object TerminalNotice {
     /** The reasons the Space names before it closes a socket; any other close reason is shown as it came. */
     val knownReasons: Set<String> = setOf("idle", "killed", "shutdown", "exit")
 }
+
+/**
+ * What the tab strip does with its tabs: ending a tab whose shell may still run is asked first,
+ * a closed one goes at once; a session opened again takes the place of the tab it replaces.
+ */
+object TerminalTabRules {
+    fun asksBeforeEnding(closed: Boolean): Boolean = !closed
+
+    /** [list] with [item] in the place of the element [old] names, or at the end when it is gone. */
+    fun <T, K> place(item: T, replacing: K?, list: List<T>, id: (T) -> K): List<T> {
+        val i = if (replacing == null) -1 else list.indexOfFirst { id(it) == replacing }
+        return if (i < 0) list + item else list.toMutableList().also { it[i] = item }
+    }
+}

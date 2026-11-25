@@ -86,6 +86,7 @@ import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material.icons.outlined.Terminal
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -508,7 +509,15 @@ private fun ChatHead(
                 style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Normal, color = t.secondaryText, maxLines = 1,
                 overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
             )
-            if (running) HeadButton(Icons.Filled.Stop, stringResource(R.string.chat_stop)) { store.stop() }
+            if (running && store.stopping) {
+                // Stop was sent: a spinner until the turn ends, or until a failed stop gives it back.
+                val stopping = stringResource(R.string.chat_stopping)
+                Box(Modifier.size(40.dp).semantics { contentDescription = stopping }, contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = t.secondaryText)
+                }
+            } else if (running) {
+                HeadButton(Icons.Filled.Stop, stringResource(R.string.chat_stop)) { store.stop() }
+            }
             HeadButton(Icons.Outlined.History, stringResource(R.string.chat_history), on = history, enabled = !running) { onHistory() }
             HeadButton(Icons.Outlined.EditNote, stringResource(R.string.chat_new_conversation), enabled = !running) { onNew() }
         }

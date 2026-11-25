@@ -11,6 +11,8 @@ struct OmniboxView: View {
     @State private var selection: ShortcutIntent?
     @State private var chatError: String?
     @State private var pendingLink: String?
+    /// Set for a moment after a result was copied, so its row can say so.
+    @State private var copied: UUID?
 
     private var resolution: ShortcutResolution? { store.resolvedText == query ? store.resolution : nil }
     private var entries: [CatalogueEntry] {
@@ -87,13 +89,17 @@ struct OmniboxView: View {
     }
     @ViewBuilder private func actionRow(_ intent: ShortcutIntent) -> some View {
         Button {
-            if intent.kind == "calc" { if let value = store.preview?.text { UIPasteboard.general.string = value } }
+            if intent.kind == "calc" { copy(store.preview?.text) }
             else { selection = intent }
         } label: {
             if (intent.kind == "calc" || intent.kind == "convert"), let preview = store.preview {
                 HStack(alignment: .top, spacing: 12) {
                     if intent.kind == "calc" { Image(systemName: Self.calculator).foregroundStyle(Theme.accent).padding(.top, 3) }
                     ShortcutResultView(result: preview, open: open)
+                    if intent.kind == "calc", copied != nil {
+                        Label("Copied", systemImage: "checkmark").font(.caption.weight(.semibold)).foregroundStyle(Theme.accent)
+                            .padding(.top, 3).transition(.opacity)
+                    }
                 }
                 .padding(12).background(Theme.solid, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             } else {
@@ -112,10 +118,21 @@ struct OmniboxView: View {
         if let agent = resolution?.agentIntents.first { if agent.available { ask(agent) }; return }
         if let intent = strong.first {
             if intent.action?.available == false { return }
-            if intent.kind == "calc" { UIPasteboard.general.string = store.preview?.text }
+            if intent.kind == "calc" { copy(store.preview?.text) }
             else { selection = intent }
         } else if OmniboxRules.opensByDefault(query, entries.first), let entry = entries.first { openEntry(entry) }
         else { ask(nil) }
+    }
+    /// Copies a result and says so in its row for a moment.
+    private func copy(_ value: String?) {
+        guard let value, !value.isEmpty else { return }
+        UIPasteboard.general.string = value
+        let mark = UUID()
+        withAnimation { copied = mark }
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(1.5))
+            if copied == mark { withAnimation { copied = nil } }
+        }
     }
     private func ask(_ intent: ShortcutAgentIntent?) {
         let agent = intent?.agent ?? "space/assistant"
@@ -123,8 +140,8 @@ struct OmniboxView: View {
         let chat = model.chat(for: connection, base: base)
         guard !chat.isRunning else { chatError = String(localized: "This agent is still replying. Open its chat to continue."); return }
         chat.newChat()
-        chat.draft = query
-        chat.send(intentID: intent?.id, timezone: TimeZone.current.identifier)
+        // The question goes as it is: what is being written in that chat, and its pictures, stay.
+        chat.send(text: query, intentID: intent?.id, timezone: TimeZone.current.identifier)
         model.hubPage = .chat(agent: "agent:\(agent)")
         query = ""
     }

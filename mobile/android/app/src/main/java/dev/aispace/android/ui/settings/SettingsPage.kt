@@ -156,6 +156,7 @@ fun SettingsPage(
     val loading by settings.isLoading.collectAsState()
     val saving by settings.isSaving.collectAsState()
     val saveError by settings.saveError.collectAsState()
+    val modelsError by settings.modelsError.collectAsState()
     val connections by model.store.connections.collectAsState()
     val scope = rememberCoroutineScope()
     var refreshing by remember { mutableStateOf(false) }
@@ -198,7 +199,7 @@ fun SettingsPage(
             spaces(model, connection, connections, strings)
             general(model)
             appearance(model)
-            models(model, space?.models, status, saving, saveError) { value -> scope.launch { settings.setDefaultModel(value) } }
+            models(model, space?.models, modelsError, status, saving, saveError) { value -> scope.launch { settings.setDefaultModel(value) } }
             automation(model)
             feedback(model)
             usage(model)
@@ -621,20 +622,37 @@ private fun statusText(status: LoaderStatus): String = stringResource(
 private fun LazyListScope.models(
     model: AppModel,
     m: ModelPreferences?,
+    readError: String?,
     status: LoaderStatus,
     saving: Boolean,
     saveError: String?,
     choose: (String?) -> Unit,
 ) {
     sectionTitle("models") { stringResource(R.string.settings_models) }
-    if (m != null) defaultModel(m, status, saving, saveError, choose)
+    if (m != null) {
+        defaultModel(m, status, saving, saveError, choose)
+    } else if (readError != null) {
+        // The preferences could not be read: say so rather than leave the row out.
+        card(
+            "models-unavailable",
+            rows = listOf(
+                SettingsRow("default", content = {
+                    Text(stringResource(R.string.settings_default_model), style = HomeType.body, color = AiTheme.tokens.text, modifier = Modifier.weight(1f))
+                    Text(
+                        stringResource(R.string.hub_unavailable, readError), style = HomeType.footnote, color = AiTheme.tokens.secondaryText,
+                        maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false),
+                    )
+                }),
+            ),
+        )
+    }
     card(
         "app-models",
         rows = listOf(
             pageRow("app-models", R.string.settings_app_models, Icons.Outlined.Memory, HubPage.AppModels, model),
             pageRow("clis", R.string.clis_title, Icons.Outlined.Dns, HubPage.MachineClis, model),
         ),
-        spaced = m != null,
+        spaced = m != null || readError != null,
     )
 }
 

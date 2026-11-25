@@ -128,7 +128,7 @@ struct HomeView: View {
             ContentUnavailableView {
                 Label("Nothing on this screen yet", systemImage: "square.grid.2x2")
             } description: {
-                Text("Touch and hold an app, agent or widget on the Home tab and choose Add to Panel. Touch and hold here for the screen's own actions.")
+                Text("Touch and hold an app, agent or widget on Home and choose Add to Panel. Touch and hold here for the screen's own actions.")
             } actions: {
                 Button("Open Home") { withAnimation { model.tab = .home } }.buttonStyle(.borderedProminent)
             }
@@ -501,7 +501,7 @@ struct StatusCard: View {
             }
         case .signInNeeded:
             card(icon: "person.badge.key", tint: Theme.accent, title: Text("Sign in to \(connection.url.host ?? connection.name)"),
-                 detail: Text("Your Space is behind a sign-in. It opens on the Panel tab and is kept for this Space only.")) {
+                 detail: Text("Your Space is behind a sign-in. It opens over the pages and is kept for this Space only.")) {
                 HStack {
                     Button("Sign In") { model.signIn() }.buttonStyle(.borderedProminent)
                     spacesButton

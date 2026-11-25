@@ -840,14 +840,34 @@ data class SpaceLink(
     val apps: List<String>? = null,
     val enabled: Boolean? = null,
     val connected: Boolean? = null,
+    /** The name this Space gives the other one, and the name the other one gives itself. */
+    val alias: String? = null,
+    val remoteName: String? = null,
+    val peer: Peer? = null,
 ) {
+    /** How the other Space shows here as a peer. */
+    data class Peer(val name: String? = null, val state: String? = null)
+
+    /**
+     * What the other Space is called here, as the web panel names it: the alias, the name it
+     * gives itself, its peer name, or the start of its id.
+     */
+    val name: String
+        get() = listOf(alias, remoteName, peer?.name).firstNotNullOfOrNull { it?.trim()?.ifEmpty { null } }
+            ?: (remoteSpaceId ?: id).take(8)
+
     companion object : JsonReader<SpaceLink> {
         override fun from(o: JSONObject): SpaceLink? {
             return SpaceLink(
                 o.str("id") ?: return null, o.str("remoteSpaceId"), o.str("direction"), o.str("url"),
                 o.strings("apps"), o.bool("enabled"), o.bool("connected"),
+                o.str("alias"), o.str("remoteName"), o.obj("peer")?.let { Peer(it.str("name"), it.str("state")) },
             )
         }
+
+        /** The name of the Space behind a catalogue's remote: its connection's, or the start of its id. */
+        fun name(remote: PackageCatalogue.Remote, links: List<SpaceLink>): String =
+            links.firstOrNull { it.id == remote.connectionId }?.name ?: (remote.spaceId ?: remote.connectionId).take(8)
     }
 }
 

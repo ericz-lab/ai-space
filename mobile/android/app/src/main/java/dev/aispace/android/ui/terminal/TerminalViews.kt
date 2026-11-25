@@ -25,7 +25,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -126,8 +129,24 @@ fun TerminalPage(store: TerminalStore) {
                     .consumeWindowInsets(padding),
             ) {
                 TabStrip(store)
-                // A surface per tab: each keeps its own emulator and scrollback in its session.
-                TerminalSurface(tab.screen, dark, Modifier.weight(1f).fillMaxWidth())
+                Box(Modifier.weight(1f).fillMaxWidth()) {
+                    // A surface per tab: each keeps its own emulator and scrollback in its session.
+                    TerminalSurface(tab.screen, dark, Modifier.fillMaxSize())
+                    if (tab.session.state == TerminalSession.State.closed) {
+                        // A new shell on the same machine, in the tab's place.
+                        val machine = machines.firstOrNull { it.id == tab.session.machine.id }
+                        Button(
+                            onClick = { store.reopen(tab) },
+                            enabled = machine?.canOpen ?: true,
+                            colors = ButtonDefaults.buttonColors(containerColor = AiTheme.tokens.accent),
+                            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp),
+                        ) {
+                            Icon(Icons.Filled.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.size(6.dp))
+                            Text(stringResource(R.string.terminal_open_again))
+                        }
+                    }
+                }
             }
             LaunchedEffect(tab.id) {
                 // The view is in place after this frame.
@@ -140,6 +159,26 @@ fun TerminalPage(store: TerminalStore) {
     }
     if (store.showingRecent) RecentSheet(store)
     store.asking?.let { ask -> PassphraseDialog(store, ask) }
+    store.confirmingEnd?.let { id -> EndDialog(store, id) }
+}
+
+/** An open session is ended only after a question: what runs in it stops. */
+@Composable
+private fun EndDialog(store: TerminalStore, id: java.util.UUID) {
+    AlertDialog(
+        onDismissRequest = { store.confirmingEnd = null },
+        title = { Text(stringResource(R.string.terminal_end_title)) },
+        text = { Text(stringResource(R.string.terminal_end_detail)) },
+        confirmButton = {
+            TextButton(onClick = {
+                store.confirmingEnd = null
+                store.tabs.firstOrNull { it.id == id }?.let { store.close(it) }
+            }) { Text(stringResource(R.string.terminal_end_session), color = ThemeTokens.danger) }
+        },
+        dismissButton = {
+            TextButton(onClick = { store.confirmingEnd = null }) { Text(stringResource(R.string.hub_cancel)) }
+        },
+    )
 }
 
 /** The page before a session is open: where a shell can start, and what ran before. */
@@ -247,7 +286,7 @@ private fun TabStrip(store: TerminalStore) {
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         for (tab in store.tabs) {
-            TabChip(tab, tab.session, selected = tab.id == store.current, select = { store.current = tab.id }, close = { store.close(tab) })
+            TabChip(tab, tab.session, selected = tab.id == store.current, select = { store.current = tab.id }, close = { store.requestEnd(tab) })
         }
     }
 }
@@ -286,7 +325,8 @@ private fun TabChip(tab: TerminalTab, session: TerminalSession, selected: Boolea
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        IconButton(onClick = close, modifier = Modifier.size(30.dp)) {
+        // The mark stays small; the tap target is 48 dp.
+        IconButton(onClick = close, modifier = Modifier.size(48.dp)) {
             Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.terminal_end_session), tint = t.secondaryText, modifier = Modifier.size(14.dp))
         }
         Spacer(Modifier.size(2.dp))

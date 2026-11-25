@@ -9,6 +9,8 @@ final class SettingsLoader: ObservableObject {
     @Published private(set) var isSaving = false
     /// Why the last change was not taken, until the next one is.
     @Published private(set) var saveError: String?
+    /// Why the model preferences could not be read, while the other settings could.
+    @Published private(set) var modelsError: String?
     private let api: SpaceAPI
 
     init(api: SpaceAPI) {
@@ -20,11 +22,21 @@ final class SettingsLoader: ObservableObject {
         isLoading = true
         async let services = try? api.data("/api/services")
         async let backups = try? api.data("/api/backups")
-        async let models = try? api.data("/api/model/preferences")
-        let (s, b, m) = (await services, await backups, await models)
+        async let models = readModels()
+        let (s, b, (m, mError)) = (await services, await backups, await models)
         isLoading = false
         // No route answered (signed out, offline): what was shown is no longer known.
         settings = s == nil && b == nil && m == nil ? nil : SpaceSettings.decode(services: s, backups: b, models: m)
+        modelsError = settings == nil ? nil : mError
+    }
+
+    /// The model preferences, or why they could not be read.
+    private func readModels() async -> (Data?, String?) {
+        do {
+            return (try await api.data("/api/model/preferences"), nil)
+        } catch {
+            return (nil, HubStore.message(error))
+        }
     }
 
     /// Sets the Space's default model, or returns it to the environment's defaults with nil.
@@ -38,12 +50,13 @@ final class SettingsLoader: ObservableObject {
             if let fresh = try? JSONDecoder().decode(ModelPreferences.self, from: answer) { settings?.models = fresh }
             saveError = nil
         } catch {
-            saveError = (error as? SpaceAPIError).map { String(describing: $0) } ?? error.localizedDescription
+            saveError = HubStore.message(error)
         }
     }
 
     func forget() {
         saveError = nil
+        modelsError = nil
         settings = nil
     }
 }

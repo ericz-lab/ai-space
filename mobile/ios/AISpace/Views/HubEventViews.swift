@@ -189,15 +189,13 @@ struct PackagesPage: View {
                     }
                 } header: {
                     Text("Installed here")
-                } footer: {
-                    if let id = store.catalogue?.spaceId { Text("This Space: \(id)") }
                 }
                 ForEach(store.catalogue?.remotes?.elements ?? []) { remote in
                     Section {
                         if (remote.apps?.elements ?? []).isEmpty { Text("Nothing is shared over this connection.").foregroundStyle(.secondary) }
                         ForEach(remote.apps?.elements ?? []) { app in packageRow(app, opens: remote.available != false) }
                     } header: {
-                        Text("Shared by \(short(remote.spaceId ?? remote.connectionId))")
+                        Text("Shared by \(SpaceLink.name(of: remote, in: store.links))")
                     } footer: {
                         if remote.available == false { Text("That Space is not answering.") }
                     }
@@ -223,7 +221,7 @@ struct PackagesPage: View {
                             .disabled(store.isSaving)
                         }
                     } header: {
-                        Text("Connection to \(short(link.remoteSpaceId ?? link.id))")
+                        Text("Connection to \(link.name)")
                     } footer: {
                         Text("Select which local apps this connection may access. Nothing is shared by default. Turning sharing off closes active remote requests.")
                     }
@@ -254,9 +252,6 @@ struct PackagesPage: View {
             label
         }
     }
-
-    /// A Space's id is a UUID; its first group is enough to tell two apart.
-    private func short(_ id: String) -> String { String(id.prefix(8)) }
 }
 
 /// Every app's notifications in one list (src/web/Inbox.tsx). Opening a row marks it read;

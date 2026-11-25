@@ -69,4 +69,21 @@ struct TerminalModelsTests {
         #expect(TerminalControl.read(#"{"type":"pong"}"#) == nil)
         #expect(TerminalControl.read("not json") == nil)
     }
+    private struct Tab: Identifiable, Equatable {
+        let id: Int
+        let name: String
+    }
+
+    @Test func anOpenSessionIsAskedAboutAndAClosedOneIsNot() {
+        #expect(TerminalTabRules.asksBeforeEnding(closed: false))
+        #expect(!TerminalTabRules.asksBeforeEnding(closed: true))
+    }
+
+    @Test func aSessionOpenedAgainTakesThePlaceOfItsTab() {
+        let tabs = [Tab(id: 1, name: "a"), Tab(id: 2, name: "b"), Tab(id: 3, name: "c")]
+        #expect(TerminalTabRules.place(Tab(id: 4, name: "b again"), replacing: 2, in: tabs).map(\.id) == [1, 4, 3])
+        // A tab that is gone, or none named, puts the new one at the end.
+        #expect(TerminalTabRules.place(Tab(id: 5, name: "e"), replacing: 9, in: tabs).map(\.id) == [1, 2, 3, 5])
+        #expect(TerminalTabRules.place(Tab(id: 5, name: "e"), replacing: nil, in: tabs).map(\.id) == [1, 2, 3, 5])
+    }
 }

@@ -57,6 +57,15 @@ object Screens {
         screens.firstOrNull { it.id == id }?.items?.contains(key) ?: false
 
     /**
+     * Whether "Add to Panel" asks which screen, as Home's long press does: with one screen it is a
+     * toggle on that screen, with several a choice of screen, each marked when it has the entry.
+     */
+    fun asksForScreen(screens: List<PanelScreen>): Boolean = screens.size > 1
+
+    /** The screens that have the entry, in their order. */
+    fun holding(screens: List<PanelScreen>, key: String): List<String> = screens.filter { key in it.items }.map { it.id }
+
+    /**
      * Puts the entries of a group (the tiles, or the widgets, which a screen draws apart) in a
      * new order; entries outside the group keep their places, and a key of the group that the
      * new order leaves out stays where it was.

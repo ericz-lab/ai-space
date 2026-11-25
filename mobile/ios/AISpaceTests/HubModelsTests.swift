@@ -257,6 +257,16 @@ struct HubModelsTests {
         #expect(links.first?.connected == true)
     }
 
+    @Test func namesAConnectedSpaceAsTheWebPanelDoes() throws {
+        let links = try Hub.rows(SpaceLink.self, "connections", from: Data(#"{"connections":[{"id":"c1","remoteSpaceId":"0d8c1234-aaaa","alias":"office","remoteName":"david","peer":{"name":"david","state":"peer"}},{"id":"c2","remoteSpaceId":"9f00aaaa-bbbb","alias":null,"remoteName":"seoul","peer":{"name":"seoul-peer","state":"peer"}},{"id":"c3","remoteSpaceId":"77aa5500-cccc","alias":" ","peer":{"name":"mac","state":"peer"}},{"id":"c4","remoteSpaceId":"12345678-dddd"}]}"#.utf8))
+        #expect(links.map(\.name) == ["office", "seoul", "mac", "12345678"])
+        #expect(links[2].peer?.state == "peer")
+
+        let catalogue = try Hub.decode(PackageCatalogue.self, from: Data(#"{"spaceId":"c551","remotes":[{"connectionId":"c2","spaceId":"9f00aaaa-bbbb"},{"connectionId":"gone","spaceId":"abcdef0123"}]}"#.utf8))
+        let remotes = catalogue.remotes?.elements ?? []
+        #expect(remotes.map { SpaceLink.name(of: $0, in: links) } == ["seoul", "abcdef01"])
+    }
+
     @Test func readsTheInboxAndItsFilters() throws {
         let items = try Hub.rows(InboxThread.self, "items", from: Data(#"{"items":[{"thread":"n1","app":"trade","level":"alert","text":"first line\nsecond","count":3,"firstAt":"2026-10-13T03:33:34.175Z","lastAt":"2026-10-13T03:40:00.000Z","action":true,"unread":true,"done":false},{"thread":"n2","app":"trade","title":"Titled","text":"body"}]}"#.utf8))
         #expect(items.map(\.heading) == ["first line", "Titled"])

@@ -47,6 +47,7 @@ import dev.aispace.android.core.InboxThread
 import dev.aispace.android.core.PackageApp
 import dev.aispace.android.core.SpaceApi
 import dev.aispace.android.core.SpaceEvent
+import dev.aispace.android.core.SpaceLink
 import dev.aispace.android.core.Urls
 import dev.aispace.android.live.EventsStore
 import dev.aispace.android.live.InboxStore
@@ -254,7 +255,6 @@ internal fun PackagesPage(model: AppModel, connection: Connection, api: SpaceApi
                 key = "local",
                 header = null,
                 headerContent = { Header(stringResource(R.string.hub_installed_here)) },
-                footer = { catalogue?.spaceId?.let { id -> Text(stringResource(R.string.hub_this_space, id)) } },
             ) {
                 HubNotice(store)
                 if (loaded) {
@@ -266,7 +266,7 @@ internal fun PackagesPage(model: AppModel, connection: Connection, api: SpaceApi
                 val apps = remote.apps ?: emptyList()
                 group(
                     key = "remote:${remote.id}",
-                    headerContent = { Header(stringResource(R.string.hub_shared_by, short(remote.spaceId ?: remote.connectionId))) },
+                    headerContent = { Header(stringResource(R.string.hub_shared_by, SpaceLink.name(remote, links))) },
                     footer = { if (remote.available == false) Text(stringResource(R.string.hub_not_answering)) },
                 ) {
                     if (apps.isEmpty()) NoteCell(stringResource(R.string.hub_nothing_shared))
@@ -276,7 +276,7 @@ internal fun PackagesPage(model: AppModel, connection: Connection, api: SpaceApi
             for (link in links) {
                 group(
                     key = "link:${link.id}",
-                    headerContent = { Header(stringResource(R.string.hub_connection_to, short(link.remoteSpaceId ?: link.id))) },
+                    headerContent = { Header(stringResource(R.string.hub_connection_to, link.name)) },
                     footer = { Text(stringResource(R.string.hub_connection_footer)) },
                 ) {
                     LabeledRow(stringResource(R.string.hub_status)) {
@@ -335,9 +335,6 @@ private fun SwitchRow(label: String, checked: Boolean, enabled: Boolean, onChang
         Switch(checked = checked, onCheckedChange = onChange, enabled = enabled)
     }
 }
-
-/** A Space's id is a UUID; its first group is enough to tell two apart. */
-private fun short(id: String): String = id.take(8)
 
 /**
  * Every app's notifications in one list (src/web/Inbox.tsx). Opening a row marks it read;
