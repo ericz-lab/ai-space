@@ -36,6 +36,8 @@ final class OmniboxVoice: ObservableObject {
         error = nil; starting = true
         transcript = VoiceTranscript(prefix: prefix)
         self.deliver = deliver
+        // The language is read once per recording: Settings › General › Voice Language, else the app's.
+        let language = VoiceLanguage.current
         let generation = generation
         timeout(130, generation: generation)
         receiver = Task {
@@ -54,7 +56,7 @@ final class OmniboxVoice: ObservableObject {
                 guard generation == self.generation else { socket.cancel(); return }
                 self.socket = socket
                 socket.resume()
-                try await socket.send(.string("{\"type\":\"start\",\"format\":\"pcm_s16le\",\"sample_rate\":16000,\"channels\":1,\"language\":\"\"}"))
+                try await socket.send(.string(VoiceLanguage.startMessage(language: language)))
                 while !Task.isCancelled {
                     let message = try await socket.receive()
                     guard generation == self.generation else { return }

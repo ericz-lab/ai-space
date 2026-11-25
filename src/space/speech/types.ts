@@ -15,12 +15,13 @@ export const SPEECH_ROLES = ["asr", "tts", "live"] as const;
 export type SpeechRole = (typeof SPEECH_ROLES)[number];
 export const ROLE_CAPABILITY: Record<SpeechRole, SpeechCapability> = { asr: "transcribe", tts: "speak", live: "live" };
 
-export const SPEECH_KINDS = ["voice-studio", "openai-compatible", "minimax", "dashscope"] as const;
+export const SPEECH_KINDS = ["voice-studio", "speech-server", "openai-compatible", "minimax", "dashscope"] as const;
 export type SpeechKind = (typeof SPEECH_KINDS)[number];
 
 /** The capabilities of each kind, known without calling it, so the file can be checked when it loads. */
 export const KIND_CAPABILITIES: Record<SpeechKind, readonly SpeechCapability[]> = {
   "voice-studio": ["transcribe", "live", "speak"],
+  "speech-server": ["transcribe", "live", "speak"],
   "openai-compatible": ["transcribe", "speak"],
   minimax: ["transcribe", "speak"],
   // Reserved: a file naming it loads, the provider is off (docs/speech.md#later).
@@ -41,6 +42,36 @@ export type VoiceStudioSpec = {
   app: string;
   /** The peer it runs on; absent: this space when the app is here, else the one peer that provides it. */
   machine?: string;
+};
+
+/**
+ * A speech server reached at its own addresses (docs/speech.md#speech-server): any server that speaks
+ * the speech-server interface, the voice-studio app being the one that exists.
+ */
+export type SpeechServerSpec = {
+  name: string;
+  kind: "speech-server";
+  /** In order of preference: the first that proves it is the server is used. */
+  addresses: SpeechServerAddress[];
+  /** The variable that holds the server's token. */
+  apiKeyEnv: string;
+  /** The token read from `apiKeyEnv` at load; never written anywhere. */
+  token?: string;
+};
+
+export type SpeechServerAddress = {
+  /** The base URL without a trailing slash: `http://192.168.3.48:8920`, `https://voice.example.com/studio`. */
+  url: string;
+  /** `host[:port]`, what status and the ledger show. */
+  host: string;
+  /** The host is loopback, private-range, link-local or a `.local` / `.home.arpa` name: plain http is allowed, the probe is short. */
+  local: boolean;
+  /** The variable that holds an access layer's headers for this address (`CF-Access-Client-Id: …; CF-Access-Client-Secret: …`); https only. */
+  headersEnv?: string;
+  /** Those headers, read at load. */
+  headers?: Record<string, string>;
+  /** Why this address is never tried (its `headersEnv` is empty or unreadable). */
+  off?: string;
 };
 
 export type OpenAiSpec = {
@@ -89,7 +120,7 @@ export type MinimaxSpec = {
 
 export type DashscopeSpec = { name: string; kind: "dashscope"; apiKeyEnv?: string };
 
-export type ProviderSpec = VoiceStudioSpec | OpenAiSpec | MinimaxSpec | DashscopeSpec;
+export type ProviderSpec = VoiceStudioSpec | SpeechServerSpec | OpenAiSpec | MinimaxSpec | DashscopeSpec;
 
 export type SpeechConfig = {
   providers: ProviderSpec[];
@@ -107,6 +138,16 @@ export type SpeechConfig = {
 export type SpeechCaller = { app: string; tag: string };
 
 export type Segment = { start: number; end: number; text: string };
+
+/**
+ * A request's language as the providers take it (docs/speech.md#languages): the primary subtag,
+ * lowercased, so `zh-Hans`, `zh-CN` and `en-US` reach every provider as `zh` and `en`. voice-studio
+ * refuses a tag with a hyphen on its live socket and detects the language for one its model has no
+ * name for, so a client sending its locale would otherwise get no hint or a refusal.
+ */
+export function languageHint(tag: string): string {
+  return (tag.trim().split(/[-_]/)[0] ?? "").toLowerCase();
+}
 
 export type TranscribeInput = {
   file: Blob;
@@ -140,7 +181,17 @@ export type SpeakResult = { audio: ArrayBuffer; contentType: string; priced?: Ga
 
 /** Where a live session's provider socket is, speaking the Space's live protocol (docs/speech.md#live-protocol). */
 /** Where a live session's socket goes; `open`, when given, makes it (a peer's socket over a package connection) instead of `url` with `headers`. */
-export type LiveTarget = { url: string; headers: Record<string, string>; machine: string; open?: () => WebSocket };
+export type LiveTarget = {
+  url: string;
+  headers: Record<string, string>;
+  machine: string;
+  open?: () => WebSocket;
+  /**
+   * Called once when this target's socket never opened: the provider may know another address for the
+   * same server (a speech server, docs/speech.md#speech-server) and answers it, or undefined when it has none.
+   */
+  reroute?: () => Promise<LiveTarget | undefined>;
+};
 
 /** What a provider's cell shows before any call: whether it can be reached at all. */
 export type ProviderState = {
@@ -172,8 +223,8 @@ export interface SpeechAdapter {
   speak?(input: SpeakInput, caller: SpeechCaller): Promise<SpeakResult>;
   /** The voices it has; undefined when it cannot say (an API without a list). Throws when it cannot be asked. */
   voices?(signal?: AbortSignal): Promise<string[] | undefined>;
-  /** Where to open a live session; throws a ProviderError when it cannot be reached. */
-  live?(): LiveTarget;
+  /** Where to open a live session; throws (or rejects with) a ProviderError when it cannot be reached. */
+  live?(): LiveTarget | Promise<LiveTarget>;
   /** USD for one call, from its figures; undefined without a price. */
   cost?(capability: SpeechCapability, figures: { audioSeconds?: number; chars?: number }): number | undefined;
 }

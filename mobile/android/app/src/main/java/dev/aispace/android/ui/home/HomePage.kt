@@ -384,6 +384,7 @@ private fun UniversalSearch(env: HomeEnv, fieldTop: Dp, modifier: Modifier, page
             onFocusChange = { focused = it },
             onVoiceBusy = { voiceBusy = it },
             onSubmit = { submit += 1 },
+            voiceLanguage = { model.voiceLanguageCode },
             modifier = Modifier.align(Alignment.TopCenter).padding(top = fieldTop),
             resolving = query.isNotBlank() && model.omnibox(env.connection).resolving,
         )

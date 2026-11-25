@@ -84,6 +84,10 @@ final class AppModel: ObservableObject {
     @Published var showsPet = !UserDefaults.standard.bool(forKey: "hidesPet") {
         didSet { UserDefaults.standard.set(!showsPet, forKey: "hidesPet") }
     }
+    /// What voice input is transcribed in (VoiceLanguage): "" the app's language, "auto" detect, or a code.
+    @Published var voiceLanguage = UserDefaults.standard.string(forKey: VoiceLanguage.defaultsKey) ?? VoiceLanguage.sameAsApp {
+        didSet { UserDefaults.standard.set(voiceLanguage, forKey: VoiceLanguage.defaultsKey) }
+    }
     @Published var petSize = PetSize(rawValue: UserDefaults.standard.string(forKey: "petSize") ?? "") ?? .medium {
         didSet { UserDefaults.standard.set(petSize.rawValue, forKey: "petSize") }
     }

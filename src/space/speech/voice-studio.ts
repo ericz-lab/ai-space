@@ -4,7 +4,8 @@ import { ProviderError, type LiveTarget, type ProviderState, type SpeakInput, ty
 
 /**
  * The self-hosted provider (docs/speech.md#kinds): the `voice-studio` app, on this space or on a peer,
- * reached the way the panel reached it before this layer. Files and text go through the bus as a
+ * reached the way the panel reached it before this layer. (A speech server reached at its own addresses,
+ * voice-studio among them, is the `speech-server` kind: `speech-server.ts`.) Files and text go through the bus as a
  * capability call (`transcribe`, `speak`; `bus_calls` records them as before), a live session opens the
  * app's own socket (`/api/asr/realtime`, here on loopback or through the peer's WebSocket bridge), and the
  * voices come from the app's `/api/voices`. Its live protocol is the Space's, so nothing is translated.
@@ -104,16 +105,7 @@ export class VoiceStudioAdapter implements SpeechAdapter {
     if (input.language) form.append("language", input.language);
     if (input.context) form.append("context", input.context);
     const res = await this.call("transcribe", new Request("http://speech.invalid/", { method: "POST", body: form, ...(input.signal ? { signal: input.signal } : {}) }), caller);
-    const body = (await res.json().catch(() => null)) as { text?: unknown; language?: unknown; segments?: unknown } | null;
-    if (!body || typeof body.text !== "string") throw failure(`${this.name}: the answer has no text`, 502, "other");
-    const segments = Array.isArray(body.segments)
-      ? body.segments.flatMap((s) => {
-          const seg = s as { start?: unknown; end?: unknown; text?: unknown };
-          return typeof seg?.start === "number" && typeof seg.end === "number" && typeof seg.text === "string" ? [{ start: seg.start, end: seg.end, text: seg.text }] : [];
-        })
-      : [];
-    const end = segments.reduce((m, s) => Math.max(m, s.end), 0);
-    return { text: body.text, language: typeof body.language === "string" ? body.language : input.language, segments, ...(end > 0 ? { audioSeconds: end } : {}) };
+    return transcriptOf(this.name, await res.json().catch(() => null), input.language);
   }
 
   async speak(input: SpeakInput, caller: SpeechCaller): Promise<SpeakResult> {
@@ -185,6 +177,20 @@ export class VoiceStudioAdapter implements SpeechAdapter {
     // The provider's own refusal of the request keeps its status; a failure of the provider or the link is a 502.
     throw failure(`${this.name}: ${text}`, res.status === 400 || res.status === 413 || res.status === 422 ? res.status : 502);
   }
+}
+
+/** voice-studio's `/api/asr` answer (`{ text, language, segments }`, the bus capability's body too) as a result. */
+export function transcriptOf(name: string, raw: unknown, language: string): TranscribeResult {
+  const body = raw as { text?: unknown; language?: unknown; segments?: unknown } | null;
+  if (!body || typeof body.text !== "string") throw failure(`${name}: the answer has no text`, 502, "other");
+  const segments = Array.isArray(body.segments)
+    ? body.segments.flatMap((s) => {
+        const seg = s as { start?: unknown; end?: unknown; text?: unknown };
+        return typeof seg?.start === "number" && typeof seg.end === "number" && typeof seg.text === "string" ? [{ start: seg.start, end: seg.end, text: seg.text }] : [];
+      })
+    : [];
+  const end = segments.reduce((m, s) => Math.max(m, s.end), 0);
+  return { text: body.text, language: typeof body.language === "string" ? body.language : language, segments, ...(end > 0 ? { audioSeconds: end } : {}) };
 }
 
 /** `HTTP <status>: <what the body said>`: the shape `classifyFailure` reads a 5xx in as a link failure. */

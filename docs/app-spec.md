@@ -604,6 +604,7 @@ Environment, always:
 | `SPACE_NAME` | What this space calls itself ([machines.md](machines.md)); the name a hub and other machines know it by. Written to `space.env`. |
 | `SPACE_APP_TOKEN` | Per-app bearer token for the Space API; identifies the app on `POST /api/notify`, `POST /api/events`, `GET /api/events/stream`, `POST /api/call/*`, `POST /api/model/run` and the `/api/chat/*` routes. Written to `space.env`. |
 | `PORT` | For services, and for the app's http and command tasks: the declared `service.port`. |
+| `SPACE_AGENT_ID` | For an agent's chat turn: the agent's id, `<app>/<agent>`. A command the agent runs can record it next to the runtime's own session id, so that an app allowed to reach that agent can continue the conversation later. |
 | `SPACE_TRIGGER` | For task runs: `schedule`, `manual` or `event`. With events, `SPACE_EVENT` (the latest) and `SPACE_EVENTS` (all) as JSON. |
 
 Environment, when declared: `DATABASE_URL` (or `DATABASE_URL_<NAME>` for several), `BLOB_URL`, `S3_*`.
@@ -751,7 +752,7 @@ notify:
 | `agents`, chat route | Implemented (`src/space/agents/`) on every chat runtime; `skills` listed in the agent's prompt per turn; `memory` parsed but not applied yet; an app reaches its own agents with its token, and every app's when the operator lists it in `SPACE_AGENT_CALLERS` ([panel.md](panel.md#apps-and-their-agents)) |
 | Model service, `/api/model/run` | Implemented (`src/space/model/`) |
 | Built-in model gateway, `/api/model-gateway/*` | Implemented (`src/space/gateway/`): passthrough of Anthropic Messages, OpenAI audio and OpenAI Images for ai-space's own runtimes and speech, never for apps ([model-gateway.md](model-gateway.md)) |
-| Speech service, `/api/speech/*`, `speech` | Implemented (`src/space/speech/`): `voice-studio` and `openai-compatible` providers; `dashscope`, live through an API and `clone` later ([speech.md](speech.md#later)) |
+| Speech service, `/api/speech/*`, `speech` | Implemented (`src/space/speech/`): `voice-studio`, `speech-server`, `openai-compatible` and `minimax` providers; `dashscope`, live through an API and `clone` later ([speech.md](speech.md#later)) |
 | Chat service, `/api/chat/*`, the widget | Implemented (`src/space/chat/`, `src/web/chat-widget/`) |
 | `widgets`, `/api/widgets` | Implemented (`src/space/panel/`) |
 | `pets`, `/api/pets` | Implemented (`src/space/panel/pet-spec.ts`, `src/space/panel/pets.ts`, `src/web/Pet.tsx`); this space only, not across peers; not in package manifests |

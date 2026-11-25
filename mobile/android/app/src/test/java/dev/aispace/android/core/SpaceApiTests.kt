@@ -191,6 +191,31 @@ class SpaceApiTests {
         assertTrue(url.toString().startsWith("ws://"))
     }
 
+    @Test fun anUploadIsAMultipartWriteWithItsFieldsAndTheSessionsCookies() = runBlocking {
+        server.enqueue(MockResponse().setBody("""{"ok":true,"text":"你好"}"""))
+        val wav = VoiceRoutes.wav(ByteArray(4) { 7 })
+        val answer = api(CookieSource { "s=1" }).upload(
+            VoiceRoutes.TRANSCRIBE, "file", "voice.wav", "audio/wav", wav, VoiceLanguage.uploadFields("zh"),
+        )
+        assertEquals("你好", VoiceRoutes.transcribed(answer))
+        val request = server.takeRequest(5, TimeUnit.SECONDS)!!
+        assertEquals("POST", request.method)
+        assertEquals("/api/voice/transcribe", request.path)
+        assertEquals(origin(), request.getHeader("Origin"))
+        assertEquals("s=1", request.getHeader("Cookie"))
+        assertTrue(request.getHeader("Content-Type")!!.startsWith("multipart/form-data; boundary="))
+        val body = request.body.readUtf8()
+        assertTrue(Regex("form-data; name=\"language\"\r\n(?:[^\r\n]+\r\n)*\r\nzh\r\n").containsMatchIn(body))
+        assertTrue(body.contains("Content-Disposition: form-data; name=\"file\"; filename=\"voice.wav\"\r\nContent-Type: audio/wav"))
+        assertTrue(body.contains("RIFF"))
+    }
+
+    @Test fun anUploadThatIsRefusedThrows() = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(503).setBody("""{"ok":false,"error":"no provider"}"""))
+        val error = failure { api().upload(VoiceRoutes.TRANSCRIBE, "file", "voice.wav", "audio/wav", ByteArray(0)) }
+        assertTrue(error is SpaceApiError.Http)
+    }
+
     @Test fun aNetworkFailureIsNotASignIn() {
         val dead = SpaceApi(URI("http://127.0.0.1:1/"), CookieSource.none)
         try {

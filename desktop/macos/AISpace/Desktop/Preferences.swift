@@ -41,6 +41,14 @@ final class Preferences: ObservableObject {
     @Published var menuBar: Bool { didSet { defaults.set(menuBar, forKey: "menuBar") } }
     @Published var notifications: Bool { didSet { defaults.set(notifications, forKey: "notifications") } }
     @Published var quickChat: Shortcut { didSet { defaults.set(quickChat.rawValue, forKey: "quickChat") } }
+    /// Voice input in any app while fn is held (Dictation.swift): it watches every key press and
+    /// wants Accessibility, so it is off until the operator turns it on.
+    @Published var voiceInput: Bool { didSet { defaults.set(voiceInput, forKey: "voiceInputFn") } }
+    /// What voice input is transcribed in (VoiceLanguage): "" the app's language, "auto" detect, or a code.
+    @Published var voiceLanguage: String { didSet { defaults.set(voiceLanguage, forKey: VoiceLanguage.defaultsKey) } }
+    /// The Space that hears voice input, as a connection id; nil is the selected Space. Speech is
+    /// never sent to a Space the person did not choose: the saved Spaces may not all be theirs.
+    @Published var voiceInputSpace: String? { didSet { defaults.set(voiceInputSpace, forKey: "voiceInputSpace") } }
     /// The agent Quick Chat last talked to, as `<connection id> <agent id>`.
     @Published var quickChatAgent: String? { didSet { defaults.set(quickChatAgent, forKey: "quickChatAgent") } }
     /// How this Mac draws the app and which of the panel's themes, whatever a browser is set to.
@@ -94,6 +102,9 @@ final class Preferences: ObservableObject {
         menuBar = defaults.object(forKey: "menuBar") as? Bool ?? true
         notifications = defaults.object(forKey: "notifications") as? Bool ?? true
         quickChat = Shortcut(rawValue: defaults.string(forKey: "quickChat") ?? "") ?? .optionSpace
+        voiceInput = defaults.bool(forKey: "voiceInputFn")
+        voiceLanguage = defaults.string(forKey: VoiceLanguage.defaultsKey) ?? VoiceLanguage.sameAsApp
+        voiceInputSpace = defaults.string(forKey: "voiceInputSpace")
         quickChatAgent = defaults.string(forKey: "quickChatAgent")
         appearance = Appearance(rawValue: defaults.string(forKey: "appearance") ?? "") ?? .system
         themeID = defaults.string(forKey: "theme") ?? ThemePreset.aurora.id

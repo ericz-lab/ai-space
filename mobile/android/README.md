@@ -6,7 +6,7 @@ Status: builds with Gradle, the JVM tests pass, and runs on an Android 16 emulat
 
 ## What it does
 
-The same as the iPhone client, area by area (see `mobile/ios/README.md` → What it does): saved Spaces; Home (the library with one search), this phone's screens copied from the panel once and kept on the phone, Settings, swiped side by side, opening on the first screen (the system back on any other of them returns there), which carries universal search (the Space's resolver, calculations and conversions at once, action forms and runs, asking an agent, and streamed voice input); widget state cards; reach and peer states with the last catalogue and its age; app pages in retained tabs with one draggable More button (the tabs listed most recently used first; Return to Space, and the system back once the page cannot go back, return to the launcher page the tab was opened from, or the first screen when that screen is gone); the host list that keeps other sites in the browser; the Space's pages (inbox, chat with the agent's work in order, questions to answer and attached images, tasks, model and app usage, app models, events, apps and connections, feedback settings, the agent CLIs by machine); the terminal; the web panel; `aispace://` links; and the first four apps of the home screen as launcher shortcuts that carry their Space.
+The same as the iPhone client, area by area (see `mobile/ios/README.md` → What it does): saved Spaces; Home (the library with one search), this phone's screens copied from the panel once and kept on the phone, Settings, swiped side by side, opening on the first screen (the system back on any other of them returns there), which carries universal search (the Space's resolver, calculations and conversions at once, action forms and runs, asking an agent, and streamed voice input, see [Voice input](#voice-input)); widget state cards; reach and peer states with the last catalogue and its age; app pages in retained tabs with one draggable More button (the tabs listed most recently used first; Return to Space, and the system back once the page cannot go back, return to the launcher page the tab was opened from, or the first screen when that screen is gone); the host list that keeps other sites in the browser; the Space's pages (inbox, chat with the agent's work in order, questions to answer and attached images, tasks, model and app usage, app models, events, apps and connections, feedback settings, the agent CLIs by machine); the terminal; the web panel; `aispace://` links; and the first four apps of the home screen as launcher shortcuts that carry their Space.
 
 Across machines, as the web panel does: an agent deployed on several machines shows once in the library, search, the screens and the agents list (`core/AgentGroups.kt`: the local variant, else the first peer that answers), and the chat head has a Machine menu that switches to another machine's variant, each with its own conversation; an offline machine is shown and cannot be sent to, and the choice is remembered per agent on the phone. Model usage names the Space, shows `machine:model`, a hub's peers' calls as `<peer>/<app>` and the peers that are missing; App models lists each peer's apps under its name with the peer's own choices; every model picker greys a choice that is not signed in or offline and keeps a saved choice that is no longer offered, marked.
 
@@ -23,6 +23,12 @@ Where Android differs:
 | Terminal | Termux's terminal emulator and view (Apache-2.0, vendored in `terminal/`, see its README) in place of SwiftTerm, fed by the Space's socket instead of a local process. Links in the terminal are not detected. |
 | Language | English and Chinese resources; Android 13+ per-app language through `locales_config.xml`. |
 
+## Voice input
+
+The command box and the chat's message field have a microphone, shown when `GET /api/voice` says the Space can transcribe (asked once per Space while the app runs; a failed request is asked again). A tap records 16 kHz mono PCM and streams it to `WS /api/voice/realtime` ([docs/speech.md](../../docs/speech.md#live-protocol)): what is said before the transcriber is ready is held, up to 50 s, and sent first; a second tap stops; recording ends by itself after 90 s. The transcript fills the field after the text already there and is never sent: the field is read-only and Send is off while a recording runs. Segments are joined by a space, except between two Chinese or Japanese characters. When the live route is refused or drops before it was ready, the recording goes up as a WAV clip to `POST /api/voice/transcribe` instead, as on the Mac. Leaving the app, the page, or switching Space, chat or machine ends a recording.
+
+The `start` message (and the clip's `language` field) names the language, the rule of the other clients ([docs/speech.md](../../docs/speech.md#languages), `core/VoiceModels.kt` `VoiceLanguage`): Settings › General › Voice language (语音输入语言) offers Same as AI Space (the default: the app's language, `Lang.current`, when it is `zh`, `en`, `ja` or `ko`, else nothing), Detect automatically (sends nothing) and those four languages; the choice is kept in the app's preferences (`voiceLanguage`).
+
 ## Layout
 
 ```text
@@ -35,8 +41,9 @@ mobile/android/
                          (Connection, ConnectionStore, SpaceCheck, SpaceApi on OkHttp, models, ChatStream,
                          DesktopRules, NavigationPolicy), HubModels, TerminalModels, TerminalKeys (the
                          terminal's key row, the same table as iOS and the panel), widget blocks, screens,
-                         AgentGroups (one agent across machines), Feedback, MachineInventory (CLIs by machine)
-    live/                CatalogueLoader, SettingsLoader, IconStore (+ SVG via an offscreen WebView),
+                         AgentGroups (one agent across machines), Feedback, MachineInventory (CLIs by machine),
+                         VoiceModels (voice input's language, transcript, frames and clip)
+    live/                CatalogueLoader, OmniboxVoice (voice input), SettingsLoader, IconStore (+ SVG via an offscreen WebView),
                          BackdropStore, the stores of the Space's pages, ChatStore, TerminalStore and
                          TerminalConnection, AppPaths
     web/                 SpaceProfile, WebSession, downloads, the activity host for pickers and permissions
@@ -77,6 +84,8 @@ On the emulator (Pixel 7, API 36), by screenshots from the debug launch switches
 - Against a real Space behind Cloudflare Access: signing in through Access in the web panel; the catalogue, icons and widget cards over native calls with the profile's cookie; the same after a force-stop (the cookie survives the process); an app on another subdomain opening signed in; the terminal socket through Access to a peer's shell; the chat agents, their earlier chats and a long Markdown answer; swiping between screens, a long press on an app, landscape.
 
 Agents across machines and the machine menu, Settings → Feedback, peers in Model usage and App models, greyed model choices and the CLIs by machine were checked by JVM tests of their `core/` rules and a full compile only, not yet on the emulator or against a hub with peers.
+
+Voice input (the language sent, the Voice language setting, the microphone in the chat's field, the clip fallback, the `GET /api/voice` check) was checked by JVM tests of its `core/` rules and the upload, and a full build, not yet on the emulator or a phone against a Space with a transcriber.
 
 Not checked yet: a question or approval card in a live turn; the sheet before Android 12; signing out and in again; dragging the More button; TalkBack; downloads and file inputs; Google as an identity provider inside WebView (refused in an embedded view on iOS); a phone without WebView's multi-profile feature.
 

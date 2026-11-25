@@ -97,6 +97,9 @@ internal sealed class AppModel
     /// <summary>Set by the app: Quick Chat on a Space's agent, with a draft.</summary>
     public Action<Guid?, string?, string?>? OpenQuickChat { get; set; }
 
+    /// <summary>Set by the app: voice input, for the microphones beside the fields.</summary>
+    public VoiceInput? Voice { get; set; }
+
     public Guid? Selected { get; private set; }
     /// <summary>The native page the main window shows while no web tab is selected.</summary>
     public PageKind SelectedPage { get; private set; } = PageKind.Home;

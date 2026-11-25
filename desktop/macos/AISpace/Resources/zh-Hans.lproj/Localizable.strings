@@ -410,6 +410,30 @@
 "Could not record: %@" = "无法录音：%@";
 "AI Space may not use the microphone. Allow it in System Settings → Privacy & Security → Microphone." = "AI Space 没有麦克风权限。请在“系统设置 → 隐私与安全性 → 麦克风”中允许。";
 
+/* Voice input in any app (Dictation.swift) */
+"Hold fn to talk" = "按住 fn 说话";
+"Hold the fn (🌐) key in any app and talk: the words show at the bottom of the screen as you speak, and when you let go the text goes into the field you are typing in. Seeing fn in other apps and typing into them needs AI Space allowed in System Settings → Privacy & Security → Accessibility." = "在任何应用里按住 fn（🌐）键说话：说的话实时显示在屏幕底部，松开后文字填进你正在输入的地方。要在其他应用里识别 fn 并填入文字，需要在“系统设置 → 隐私与安全性 → 辅助功能”中允许 AI Space。";
+"AI Space is not allowed under Accessibility yet, so fn is seen only while AI Space is in front." = "AI Space 还没有辅助功能权限，所以只有 AI Space 在前台时才能识别 fn。";
+"macOS acts on this key too. Set System Settings → Keyboard → “Press 🌐 key to” to “Do Nothing”, or letting go of fn may also open the emoji picker, change the input source or start Dictation." = "macOS 自己也会响应这个键。请把“系统设置 → 键盘 → 按下 🌐 键时”设为“无操作”，否则松开 fn 时可能还会打开表情与符号、切换输入法或开始听写。";
+"Listening… let go of fn to finish" = "正在听… 松开 fn 结束";
+"Voice input failed." = "语音输入失败。";
+"Could not record audio." = "无法录音。";
+"The voice connection is too slow." = "语音连接太慢。";
+"Voice connection timed out." = "语音连接超时。";
+"Add a Space first to use voice input." = "先添加一个 Space 才能使用语音输入。";
+"%@ is not connected. Voice input needs the Space." = "%@ 未连接。语音输入需要连上 Space。";
+"%@ cannot transcribe speech. Choose another Space in Settings → General → Transcribe with." = "%@ 无法把语音转成文字。可在“设置 → 通用 → 转写使用”里换一个 Space。";
+"%@ cannot transcribe speech." = "%@ 无法把语音转成文字。";
+"Transcribe with" = "转写使用";
+"The selected Space" = "当前选中的 Space";
+"What you say is sent to this Space and to no other. When it cannot transcribe, voice input says so and sends nothing." = "你说的话只会发给这个 Space，不会发给别的。它无法转写时，语音输入会提示，并且什么都不发送。";
+"The text is on the clipboard. Press ⌘V to paste it." = "文字已在剪贴板里，按 ⌘V 粘贴。";
+"The text is on the clipboard. Press ⌘V to paste it. To have it go in by itself, allow AI Space in System Settings → Privacy & Security → Accessibility." = "文字已在剪贴板里，按 ⌘V 粘贴。想让它自动填入，请在“系统设置 → 隐私与安全性 → 辅助功能”中允许 AI Space。";
+"Voice language" = "语音输入语言";
+"Same as AI Space" = "与 AI Space 相同";
+"Detect automatically" = "自动识别";
+"The language you speak, for holding fn and for the microphone beside a field. Naming it makes the transcript faster and more accurate; by default it is the language AI Space is shown in." = "你说话用的语言，用于按住 fn 说话和输入框旁的麦克风。指定语言后转写更快、更准；默认与 AI Space 的显示语言相同。";
+
 // Device usage
 "Device usage" = "设备使用";
 "Device usage is unavailable on this Space." = "此 Space 的设备统计暂不可用。";
@@ -780,3 +804,13 @@
 "The App Store has %lld apps for this Space. Install the ones you want there." = "应用商店里有 %lld 个应用可以装到这个 Space，去那里挑想要的安装。";
 "Open the App Store" = "打开应用商店";
 "Not now" = "以后再说";
+
+/* Chat cards (the web's chat.card.*) */
+"chat.card.undo" = "撤回";
+"chat.card.undoAll" = "全部撤回";
+"chat.card.undoRest" = "撤回其余 %lld 条";
+"chat.card.undoItem" = "撤回：%@";
+"chat.card.undone" = "已撤回";
+"chat.card.done" = "已完成";
+"chat.card.changed" = "已在别处修改";
+"Read-only now: the conversation has moved on." = "对话已继续，这张卡片现在只读。";

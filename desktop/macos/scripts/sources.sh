@@ -8,6 +8,8 @@ $IOS_DIR/Core/HubModels.swift $IOS_DIR/Core/IconSource.swift $IOS_DIR/Core/Scree
 $IOS_DIR/Core/SpaceSettings.swift $IOS_DIR/Core/TerminalModels.swift $IOS_DIR/Core/WidgetBlocks.swift \
 $IOS_DIR/Live/CatalogueLoader.swift $IOS_DIR/Live/SettingsLoader.swift $IOS_DIR/Core/ChatRows.swift $IOS_DIR/Live/HubStores.swift \
 $IOS_DIR/Live/TerminalSession.swift $IOS_DIR/Live/TerminalStore.swift"
+# The live voice transcript and its PCM frames, for voice input in any app (Desktop/LiveVoice.swift).
+SHARED="$SHARED $IOS_DIR/Core/OmniboxModels.swift"
 # Of those, the ones the tests compile: the rest need the app's own types (TerminalTab).
 SHARED_CORE="$IOS_DIR/Core/Catalogue.swift $IOS_DIR/Core/CatalogueCache.swift $IOS_DIR/Core/CatalogueSearch.swift \
 $IOS_DIR/Core/HubModels.swift $IOS_DIR/Core/IconSource.swift $IOS_DIR/Core/Screens.swift $IOS_DIR/Core/ScreenStore.swift \
@@ -17,6 +19,10 @@ SHARED="$SHARED $IOS_DIR/Core/ScreenshotRules.swift $IOS_DIR/Core/SharedCaptureS
 SHARED_CORE="$SHARED_CORE $IOS_DIR/Core/ScreenshotRules.swift $IOS_DIR/Core/SharedCaptureStore.swift"
 
 SHARED="$SHARED ShareExtension/MacSharedPicture.swift"
+# Chat cards: the card and its rules, its state and undo, and its drawing (docs/chat-cards.md).
+# HubModels.swift reads a stored message's cards, so the tests compile the rules too.
+SHARED="$SHARED $IOS_DIR/Core/ChatCards.swift $IOS_DIR/Live/ChatCardStore.swift $IOS_DIR/Views/ChatCardsView.swift"
+SHARED_CORE="$SHARED_CORE $IOS_DIR/Core/ChatCards.swift"
 # The desk pet's drawing (its rules are Services/PetRules.swift, which the phone compiles in turn).
 SHARED="$SHARED $IOS_DIR/Views/PetView.swift"
 # The desk pet's sheet, the panel's own (src/web/public), copied into the app by build.sh.

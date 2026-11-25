@@ -28,6 +28,45 @@ enum Lang {
     }
 }
 
+/// The language voice input asks the Space to transcribe in (docs/speech.md#languages), the same
+/// rule on the Mac and the iPhone: by default the app's own language (`Lang.current`), else what
+/// Settings › General › Voice Language names. Sending one makes the transcriber faster and keeps
+/// Mandarin from being heard as Cantonese.
+enum VoiceLanguage {
+    /// Where the setting is kept, in the app's user defaults.
+    static let defaultsKey = "voiceLanguage"
+    /// The setting's value for "Same as AI Space", the default.
+    static let sameAsApp = ""
+    /// The setting's value for "Detect automatically": nothing is sent, the provider detects it.
+    static let detect = "auto"
+    /// The languages Settings offers: codes every speech provider of the Space takes as they are.
+    static let codes = ["zh", "en", "ja", "ko"]
+
+    /// The `language` to send for a setting; empty lets the provider detect it. The app's language
+    /// counts only when it is one of `codes`.
+    static func code(setting: String?, appLanguage: String = Lang.current) -> String {
+        let setting = setting ?? sameAsApp
+        if setting == detect { return "" }
+        if codes.contains(setting) { return setting }
+        let primary = String(appLanguage.split(separator: "-").first ?? "").lowercased()
+        return codes.contains(primary) ? primary : ""
+    }
+
+    /// The code for the setting saved on this device.
+    static var current: String { code(setting: UserDefaults.standard.string(forKey: defaultsKey)) }
+
+    /// The live protocol's `start` message (docs/speech.md#live-protocol).
+    static func startMessage(language: String) -> String {
+        let language = codes.contains(language) ? language : ""
+        return "{\"type\":\"start\",\"format\":\"pcm_s16le\",\"sample_rate\":16000,\"channels\":1,\"language\":\"\(language)\"}"
+    }
+
+    /// The multipart fields of a clip sent to `POST /api/voice/transcribe`: none when detecting.
+    static func uploadFields(language: String) -> [(String, String)] {
+        codes.contains(language) ? [("language", language)] : []
+    }
+}
+
 /// The placeholders a manifest `url` may carry for the client that opens it (docs/app-spec.md#app-pages):
 /// `{lang}`, and `{accent}`, the accent of the theme on show as `<light>.<dark>`, six hex digits each
 /// (docs/ui-kit.md#accent). The percent-encoded forms are the same placeholders after URL normalisation.

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { ChatSteps, allCommands, applyJobs, historySteps, submitsChat, toolSummary, toolVariant } from "./chat-steps.ts";
+import { ChatSteps, ReplyActivity, allCommands, applyJobs, historySteps, submitsChat, toolSummary, toolVariant } from "./chat-steps.ts";
 
 const tool = (id: string) => ({ type: "assistant", message: { content: [{ type: "tool_use", id, name: "Bash", input: { command: "pwd" } }] } });
 test("Codex work preserves text order, repeated tools and separate results", () => {
@@ -168,4 +168,50 @@ test("a background job's end in the same turn settles its row; the limit notice 
     ["notice", "completed", "The next ones run without being shown."],
   ]);
   expect(historySteps([{ kind: "notice", text: "Monitor event: tick", detail: "tick 2" }])).toEqual([{ id: "history:0", kind: "notice", name: "", text: "Monitor event: tick", output: "tick 2", state: "completed" }]);
+});
+
+/** Applies events as Chat.tsx does: the steps first, then the status rule on their snapshot. */
+const statusOf = () => {
+  const steps = new ChatSteps();
+  const activity = new ReplyActivity();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return (event: any) => {
+    steps.apply(event);
+    return activity.next(event, steps.snapshot());
+  };
+};
+const delta = (text: string) => ({ type: "stream_event", event: { type: "content_block_delta", index: 0, delta: { type: "text_delta", text } } });
+test("a finished paragraph keeps the turn's status until the next step", () => {
+  const next = statusOf();
+  expect(next(delta("Plan:"))).toBeNull();
+  expect(next({ type: "assistant", message: { content: [{ type: "text", text: "Plan:" }] } })).toEqual({ key: "chat.thinking" });
+  // Text and a new call in one message: the call wins.
+  expect(next({ type: "assistant", message: { content: [{ type: "text", text: "Writing." }, { type: "tool_use", id: "w", name: "Write", input: {} }] } })).toEqual({ key: "chat.running", name: "Write" });
+  // Its result, with nothing else running: back to thinking (Codex sends no partial messages).
+  expect(next({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "w", content: "ok" }] } })).toEqual({ key: "chat.thinking" });
+  expect(next({ type: "result" })).toBeUndefined();
+});
+test("a tool call shows as running while its input is still being written", () => {
+  const next = statusOf();
+  expect(next({ type: "stream_event", event: { type: "message_start", message: {} } })).toBeUndefined();
+  expect(next({ type: "stream_event", event: { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } } })).toBeUndefined();
+  expect(next(delta("Now the file."))).toBeNull();
+  expect(next({ type: "stream_event", event: { type: "content_block_stop", index: 0 } })).toEqual({ key: "chat.thinking" });
+  expect(next({ type: "stream_event", event: { type: "content_block_start", index: 1, content_block: { type: "tool_use", id: "w", name: "Write", input: {} } } })).toEqual({ key: "chat.running", name: "Write" });
+  // The paragraph's own message after the call started does not hide the call.
+  expect(next({ type: "assistant", message: { content: [{ type: "text", text: "Now the file." }] } })).toEqual({ key: "chat.running", name: "Write" });
+  expect(next({ type: "stream_event", event: { type: "content_block_delta", index: 1, delta: { type: "input_json_delta", partial_json: "{" } } })).toBeUndefined();
+  expect(next({ type: "stream_event", event: { type: "content_block_stop", index: 1 } })).toBeUndefined();
+  expect(next({ type: "assistant", message: { content: [{ type: "tool_use", id: "w", name: "Write", input: { file_path: "a.md" } }] } })).toEqual({ key: "chat.running", name: "Write" });
+  expect(next({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "w", content: "ok" }] } })).toEqual({ key: "chat.thinking" });
+});
+test("an answered approval resumes the status once nothing else waits", () => {
+  const next = statusOf();
+  next(tool("b"));
+  expect(next({ type: "approval_request", id: "1", tool: "Bash", title: "make" })).toBeUndefined();
+  next({ type: "approval_request", id: "2", tool: "Bash", title: "make test" });
+  expect(next({ type: "approval_resolved", id: "1", decision: "allow" })).toBeUndefined();
+  // A result while an approval waits leaves the waiting line alone.
+  expect(next({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "x", content: "ok" }] } })).toBeUndefined();
+  expect(next({ type: "approval_resolved", id: "2", decision: "allow" })).toEqual({ key: "chat.running", name: "Bash" });
 });

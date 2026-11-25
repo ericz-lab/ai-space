@@ -8,7 +8,7 @@ import type { Entry } from "./Library.tsx";
 import { opensByDefault, rank } from "./omnibox.ts";
 import { parseKey } from "./screens.ts";
 import { type Intent, type RunResult, type RunView, actionText, browserZone, complete } from "./shortcuts.ts";
-import { LiveVoice, type VoiceState } from "./voice.ts";
+import { LiveVoice, loadVoiceLanguage, voiceLanguage, type VoiceState } from "./voice.ts";
 import { wantsInterpretation } from "../space/shortcuts/interpret.ts";
 import type { Action } from "../space/shortcuts/types.ts";
 import { Icon } from "./Tiles.tsx";
@@ -225,7 +225,7 @@ export default function Omnibox({ entries, onOpen, onAsk, focusSignal, onOpenSho
     const session = new LiveVoice(q, setQ, (state) => {
       setVoice(state);
       if (state === "idle") { recorder.current = null; field.current?.focus(); }
-    }, (error) => setVoiceError(t("omni.voiceFailed", { error })));
+    }, (error) => setVoiceError(t("omni.voiceFailed", { error })), voiceLanguage(loadVoiceLanguage(), lang));
     recorder.current = session;
     void session.start();
   };

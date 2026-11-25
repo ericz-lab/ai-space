@@ -1,0 +1,245 @@
+import AppKit
+import ApplicationServices
+import Carbon.HIToolbox
+import Combine
+import SwiftUI
+
+/// Voice input in any app (docs/macos-desktop.md#voice-input): holding fn (FnKey) records, the
+/// words show live in a capsule at the bottom of the screen (LiveVoice), and on release the text
+/// goes once into whatever field has the keyboard, through the clipboard and a paste
+/// (DictationRules). What the clipboard held comes back afterwards. Provisional text is never typed
+/// into the field and corrected: that cannot be done reliably across apps.
+@MainActor
+final class Dictation {
+    private unowned let model: AppModel
+    private let live = LiveVoice()
+    /// Only asks each Space whether it can transcribe (`GET /api/voice`), as a field's microphone does.
+    private let probe = VoiceInput()
+    private let hud = DictationHUD()
+    private var watchers: Set<AnyCancellable> = []
+    /// Between fn and the recorder starting, while a Space is chosen.
+    private var choosing = false
+    /// fn came up while a Space was being chosen: nothing is recorded.
+    private var released = false
+    private static let transient = NSPasteboard.PasteboardType("org.nspasteboard.TransientType")
+
+    init(model: AppModel) {
+        self.model = model
+        live.$state.combineLatest(live.$text).sink { [weak self] state, text in self?.hud.follow(state, text: text) }.store(in: &watchers)
+        live.$error.sink { [weak self] error in if let error { self?.hud.note(error) } }.store(in: &watchers)
+    }
+
+    /// fn held: a press while the previous transcript is still on its way does nothing.
+    func begin() {
+        guard live.state == .idle, !choosing else { return }
+        choosing = true
+        released = false
+        hud.follow(.starting, text: "")
+        Task {
+            await start()
+            choosing = false
+        }
+    }
+
+    /// fn let go.
+    func end() {
+        if choosing { released = true; return }
+        live.stop()
+    }
+
+    private func start() async {
+        // One Space, the one chosen in Settings or else the selected one, and never another: the
+        // saved Spaces may not all be the person's own, and speech goes nowhere unasked.
+        let pinned = Preferences.shared.voiceInputSpace.flatMap { id in model.store.connections.first { $0.id.uuidString == id } }
+        guard let c = pinned ?? model.selected ?? model.store.defaultConnection else {
+            hud.note(String(localized: "Add a Space first to use voice input."))
+            return
+        }
+        guard let space = model.lives[c.id], space.status == .ok || space.status == .unknown else {
+            hud.note(String(localized: "\(c.name) is not connected. Voice input needs the Space."))
+            return
+        }
+        await probe.check(space.api)
+        guard probe.state != .unavailable else {
+            hud.note(model.store.connections.count > 1
+                ? String(localized: "\(c.name) cannot transcribe speech. Choose another Space in Settings → General → Transcribe with.")
+                : String(localized: "\(c.name) cannot transcribe speech."))
+            return
+        }
+        let chosen = space.api
+        // Released before a Space answered: too short to have said anything.
+        guard !released else { hud.follow(.idle, text: ""); return }
+        live.start(api: chosen) { [weak self] text in self?.insert(text) }
+    }
+
+    /// The transcript goes through the clipboard: written, pasted, and the earlier contents put
+    /// back once the field has read it.
+    private func insert(_ text: String) {
+        let text = DictationRules.tidy(text)
+        let board = NSPasteboard.general
+        var delivery = DictationRules.delivery(ownKeyWindow: NSApp.keyWindow != nil, active: NSApp.isActive, trusted: AXIsProcessTrusted())
+        let saved = delivery == .clipboardOnly ? [] : snapshot(board)
+        // Marked transient while it is only passing through, so clipboard managers skip it.
+        write(text, to: board, transient: delivery != .clipboardOnly)
+        switch delivery {
+        case .ownPaste:
+            if !NSApp.sendAction(#selector(NSText.paste(_:)), to: nil, from: nil) {
+                delivery = .clipboardOnly
+                write(text, to: board, transient: false)
+                hud.note(String(localized: "The text is on the clipboard. Press ⌘V to paste it."))
+            }
+        case .systemPaste:
+            postCommandV()
+        case .clipboardOnly:
+            hud.note(String(localized: "The text is on the clipboard. Press ⌘V to paste it. To have it go in by itself, allow AI Space in System Settings → Privacy & Security → Accessibility."))
+        }
+        let written = board.changeCount
+        DispatchQueue.main.asyncAfter(deadline: .now() + DictationRules.restoreDelay) {
+            guard DictationRules.restores(delivery, changeCount: board.changeCount, written: written) else { return }
+            board.clearContents()
+            if !saved.isEmpty { board.writeObjects(saved) }
+        }
+    }
+
+    private func write(_ text: String, to board: NSPasteboard, transient: Bool) {
+        board.clearContents()
+        let item = NSPasteboardItem()
+        item.setString(text, forType: .string)
+        if transient { item.setData(Data(), forType: Self.transient) }
+        board.writeObjects([item])
+    }
+
+    /// Every item of the clipboard with every type's data, read now: the items themselves belong
+    /// to the pasteboard and are gone once it is cleared.
+    private func snapshot(_ board: NSPasteboard) -> [NSPasteboardItem] {
+        (board.pasteboardItems ?? []).compactMap { item in
+            let copy = NSPasteboardItem()
+            for type in item.types {
+                if let data = item.data(forType: type) { copy.setData(data, forType: type) }
+            }
+            return copy.types.isEmpty ? nil : copy
+        }
+    }
+
+    /// ⌘V to the app in front, by the physical V key.
+    private func postCommandV() {
+        let source = CGEventSource(stateID: .combinedSessionState)
+        for down in [true, false] {
+            let event = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_V), keyDown: down)
+            event?.flags = .maskCommand
+            event?.post(tap: .cghidEventTap)
+        }
+    }
+}
+
+/// The capsule at the bottom of the screen that says what voice input is doing. It never takes
+/// the keyboard or the pointer, so the field being dictated into keeps both.
+@MainActor
+final class DictationHUD {
+    enum Look: Equatable {
+        case listening(String)
+        /// Released: what was heard so far, until the final text is in.
+        case transcribing(String)
+        case note(String)
+    }
+
+    private var look: Look?
+    private lazy var panel: NSPanel = makePanel()
+    private var host: NSHostingView<DictationHUDView>?
+    /// Counts what was shown, so a note's timer hides only that note.
+    private var shown = 0
+
+    func follow(_ state: LiveVoice.State, text: String) {
+        switch state {
+        case .starting, .recording:
+            show(.listening(text.isEmpty ? String(localized: "Listening… let go of fn to finish") : DictationRules.tail(DictationRules.tidy(text))))
+        case .finishing: show(.transcribing(DictationRules.tail(DictationRules.tidy(text))))
+        case .idle:
+            // A note just shown (a failed transcription) outlives the end of the recording.
+            if case .note = look { return }
+            hide()
+        }
+    }
+
+    func note(_ text: String) {
+        show(.note(text))
+        let mine = shown
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
+            guard let self, self.shown == mine else { return }
+            self.hide()
+        }
+    }
+
+    private func show(_ look: Look) {
+        shown += 1
+        self.look = look
+        let panel = self.panel
+        guard let host else { return }
+        // Set, not observed: the size below must be the new look's, measured now.
+        host.rootView = DictationHUDView(look: look)
+        host.layoutSubtreeIfNeeded()
+        let size = host.fittingSize
+        let pointer = NSEvent.mouseLocation
+        let screen = NSScreen.screens.first { NSMouseInRect(pointer, $0.frame, false) } ?? NSScreen.main
+        guard let visible = screen?.visibleFrame else { return }
+        panel.setFrame(NSRect(x: visible.midX - size.width / 2, y: visible.minY + 72, width: size.width, height: size.height), display: true)
+        panel.orderFrontRegardless()
+    }
+
+    private func hide() {
+        shown += 1
+        look = nil
+        panel.orderOut(nil)
+    }
+
+    private func makePanel() -> NSPanel {
+        let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 240, height: 40),
+                            styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        panel.level = .statusBar
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle, .stationary]
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
+        panel.hidesOnDeactivate = false
+        panel.isReleasedWhenClosed = false
+        panel.animationBehavior = .none
+        panel.isExcludedFromWindowsMenu = true
+        panel.ignoresMouseEvents = true
+        let host = NSHostingView(rootView: DictationHUDView(look: nil))
+        panel.contentView = host
+        self.host = host
+        return panel
+    }
+}
+
+struct DictationHUDView: View {
+    let look: DictationHUD.Look?
+
+    var body: some View {
+        HStack(spacing: 8) {
+            switch look {
+            case .listening(let text):
+                Image(systemName: "mic.fill").foregroundStyle(Theme.danger).symbolEffect(.pulse, isActive: true)
+                Text(verbatim: text).lineLimit(3).fixedSize(horizontal: false, vertical: true)
+            case .transcribing(let text):
+                ProgressView().controlSize(.small)
+                if text.isEmpty { Text("Transcribing…") }
+                else { Text(verbatim: text).lineLimit(3).fixedSize(horizontal: false, vertical: true).foregroundStyle(.secondary) }
+            case .note(let text):
+                Image(systemName: "mic.slash").foregroundStyle(.secondary)
+                Text(verbatim: text).fixedSize(horizontal: false, vertical: true)
+            case nil:
+                EmptyView()
+            }
+        }
+        .font(.callout)
+        .foregroundStyle(Theme.text)
+        .frame(maxWidth: 420)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(Color.primary.opacity(0.14), lineWidth: 1))
+        .padding(4)
+        .accessibilityElement(children: .combine)
+    }
+}
