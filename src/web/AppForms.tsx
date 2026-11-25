@@ -1,9 +1,22 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { sendJson, type AppInfo } from "./api.ts";
 import { localized, useLang } from "./i18n.ts";
 
 // The panel's two dialogs in edit mode: add an app (make a new one inside the Space, or from a link;
 // the app catalog is the App Store, which the dialog opens), and confirm an uninstall.
+
+/** Escape closes a dialog, as it does the panel's windows; not while its request is under way. */
+function useEscape(onClose: () => void, busy: boolean) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || busy) return;
+      e.stopPropagation();
+      onClose();
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [onClose, busy]);
+}
 
 export type CreatedApp = { app: string; version: string; dir: string; description: string };
 
@@ -20,6 +33,9 @@ export function AddForm({ onClose, onSaved, onCreated, onOpenStore }: { onClose:
   const [busy, setBusy] = useState(false);
   // A name from the title the user types, until they type a name themselves.
   const [nameTouched, setNameTouched] = useState(false);
+  useEscape(onClose, busy);
+  // A click outside closes an untouched dialog only: what was typed is not lost to a stray click.
+  const dirty = !!(link.trim() || title.trim() || name.trim() || description.trim());
   const slug = (s: string) => s.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 64);
   const create = async () => {
     const n = name.trim();
@@ -50,7 +66,7 @@ export function AddForm({ onClose, onSaved, onCreated, onOpenStore }: { onClose:
     }
   };
   return (
-    <div className="overlay" onClick={busy ? undefined : onClose}>
+    <div className="overlay" onClick={busy || dirty ? undefined : onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <h3>
           {t("add.title")}
@@ -137,6 +153,7 @@ export function UninstallForm({ app, onClose, onDone }: { app: AppInfo; onClose:
   const { lang, t } = useLang();
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+  useEscape(onClose, busy);
   const path = app.peer ? `/api/peers/${encodeURIComponent(app.peer)}/apps/${encodeURIComponent(app.name)}` : `/api/apps/${encodeURIComponent(app.name)}`;
   const run = async () => {
     setErr("");

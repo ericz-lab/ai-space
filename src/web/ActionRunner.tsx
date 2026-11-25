@@ -72,11 +72,13 @@ function initialArgs(action: Action, args: Record<string, unknown>): Record<stri
   return out;
 }
 
-export default function ActionRunner({ action, args, autoRun, submitSignal, onOpenTasks, compact }: { action: Action; args: Record<string, unknown>; autoRun?: boolean; submitSignal?: number; onOpenTasks?: () => void; compact?: boolean }) {
+export default function ActionRunner({ action, args, autoRun, submitSignal, onOpenTasks, onSubmitted, compact }: { action: Action; args: Record<string, unknown>; autoRun?: boolean; submitSignal?: number; onOpenTasks?: () => void; onSubmitted?: () => void; compact?: boolean }) {
   const { lang, t } = useLang();
   const text = actionText(action, lang);
   const [values, setValues] = useState(() => initialArgs(action, args));
   const { run, error, busy, submit, retry, reset } = useRun();
+  // A list of runs beside this form shows the new run as soon as it exists, and its end.
+  useEffect(() => { if (run) onSubmitted?.(); }, [run?.id, run?.status]);
   const tz = browserZone();
   const payload = () => Object.fromEntries(Object.entries(values).filter(([, v]) => v !== "").map(([k, v]) => [k, action.inputs.find((i) => i.name === k)?.type === "number" ? Number(v.replace(/,/g, "")) : v]));
   const missing = action.inputs.filter((i) => i.required && !values[i.name]?.trim());

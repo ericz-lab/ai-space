@@ -31,7 +31,7 @@ import SettingsStatus from "./SettingsStatus.tsx";
 import { SECTION_LABEL, type SettingsSection, SettingsNav, saveSection, savedSection } from "./SettingsNav.tsx";
 import Packages from "./Packages.tsx";
 import FeedbackSettings from "./FeedbackSettings.tsx";
-import { backdropOf, useAccentParam, useAppearance, withAccent } from "./theme.ts";
+import { backdropOf, previewAppearance, useAccentParam, useAppearance, withAccent } from "./theme.ts";
 import ThemeSettings from "./ThemeSettings.tsx";
 import { type DragProps, HEALTH, STATUS, Tile, Widget } from "./Tiles.tsx";
 
@@ -147,9 +147,21 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
   const setsOpen = panel === "settings";
   useEffect(() => {
     if (!setsOpen || PAGE) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setPanel(null);
+    // Escape goes one step back: out of the field being typed in, then from a page to its section,
+    // then out of the settings. What is half typed is not lost to one key.
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      const el = e.target;
+      if (el instanceof HTMLElement && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) && !(el instanceof HTMLInputElement && /^(checkbox|radio|button|range|color|file)$/.test(el.type))) return el.blur();
+      settingsEscape.current();
+    };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
+  }, [setsOpen]);
+  const settingsEscape = useRef<() => void>(() => setPanel(null));
+  // An appearance draft is previewed while the settings are open, whichever section is shown, and dropped when they close.
+  useEffect(() => {
+    if (!setsOpen) previewAppearance(null);
   }, [setsOpen]);
   // The account section exists only under built-in sign-in (docs/auth.md).
   const [hasAccount, setHasAccount] = useState(false);
@@ -400,13 +412,14 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
     editingRef.current = editing;
   }, [editing]);
   useEffect(() => {
-    const blank = (e: MouseEvent) => e.button === 0 && !(e.target as Element).closest(".tile, .modal, .overlay, .pop, .empty, .pet, .widget, .screens-hint, .lib-toast, a, button, input, select, textarea");
+    const blank = (e: MouseEvent | PointerEvent) => e.button === 0 && !(e.target as Element).closest(".tile, .modal, .overlay, .pop, .empty, .pet, .widget, .screens-hint, .lib-toast, a, button, input, select, textarea");
     let timer: ReturnType<typeof setTimeout> | undefined;
     let sx = 0;
     let sy = 0;
     let fired = false;
-    const down = (e: MouseEvent) => {
-      if (editingRef.current || !blank(e)) return;
+    // Pointer events, so a finger held on the background counts as well as a mouse button.
+    const down = (e: PointerEvent) => {
+      if (editingRef.current || !e.isPrimary || !blank(e)) return;
       sx = e.clientX;
       sy = e.clientY;
       timer = setTimeout(() => {
@@ -414,7 +427,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
         setEditing(true);
       }, 550);
     };
-    const move = (e: MouseEvent) => {
+    const move = (e: PointerEvent) => {
       if (Math.hypot(e.clientX - sx, e.clientY - sy) > 8) clearTimeout(timer);
     };
     const up = () => {
@@ -427,15 +440,17 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
       if (fired) return;
       if (editingRef.current && blank(e)) setEditing(false);
     };
-    document.addEventListener("mousedown", down);
-    document.addEventListener("mousemove", move);
-    document.addEventListener("mouseup", up);
+    document.addEventListener("pointerdown", down);
+    document.addEventListener("pointermove", move);
+    document.addEventListener("pointerup", up);
+    document.addEventListener("pointercancel", up);
     document.addEventListener("click", click);
     return () => {
       clearTimeout(timer);
-      document.removeEventListener("mousedown", down);
-      document.removeEventListener("mousemove", move);
-      document.removeEventListener("mouseup", up);
+      document.removeEventListener("pointerdown", down);
+      document.removeEventListener("pointermove", move);
+      document.removeEventListener("pointerup", up);
+      document.removeEventListener("pointercancel", up);
       document.removeEventListener("click", click);
     };
   }, []);
@@ -468,15 +483,30 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
     document.addEventListener("visibilitychange", visible);
     return () => document.removeEventListener("visibilitychange", visible);
   }, []);
-  // The new order or size stays on screen either way; a failed save only shows after a reload, so say it in the console.
-  const layoutNotSaved = (e: unknown) => console.warn("panel layout not saved:", e);
+  // The new order or size stays on screen either way, so a save that failed says so and offers to
+  // send it again; otherwise it would only show as a change undone after a reload.
+  const [layoutUnsaved, setLayoutUnsaved] = useState(false);
+  const unsavedLayout = useRef<Record<string, unknown>>({});
+  const putLayout = (body: Record<string, unknown>) =>
+    sendJson("PUT", "/api/panel/layout", body).catch((e) => {
+      console.warn("panel layout not saved:", e);
+      const kept = unsavedLayout.current;
+      for (const [k, v] of Object.entries(body)) kept[k] = k !== "screens" && kept[k] && typeof v === "object" ? { ...(kept[k] as object), ...(v as object) } : v;
+      setLayoutUnsaved(true);
+    });
+  const retryLayout = () => {
+    const body = unsavedLayout.current;
+    unsavedLayout.current = {};
+    setLayoutUnsaved(false);
+    void putLayout(body);
+  };
   // Changes go through the latest list, not the render's: two Adds before a re-render both land.
   const screensRef = useRef(screens);
   screensRef.current = screens;
   const saveScreens = (next: Screen[]) => {
     screensRef.current = next;
     setScreens(next);
-    sendJson("PUT", "/api/panel/layout", { screens: next }).catch(layoutNotSaved);
+    void putLayout({ screens: next });
   };
   const updateScreens = (fn: (cur: Screen[]) => Screen[]) => {
     if (screensRef.current) saveScreens(fn(screensRef.current));
@@ -592,6 +622,8 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
       }
       // Escape in the library's empty search field leaves the library too.
       const emptySearch = e.target instanceof HTMLInputElement && e.target.classList.contains("lib-search") && !e.target.value;
+      // Escape leaves edit mode, as the Done button does.
+      if (e.key === "Escape" && k.editing && !k.floating) return setEditing(false);
       if (e.key === "Escape" && k.pos === -1 && !k.floating && (emptySearch || !typing(e.target))) return k.go(0);
       if (IN_PHONE_APP || k.floating || k.editing || e.metaKey || e.ctrlKey || e.altKey || typing(e.target)) return;
       if (e.key === "ArrowLeft") k.go(k.pos - 1);
@@ -631,14 +663,12 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
   // override of the manifest's) when the handle is released.
   const resizeWidget = (w: WidgetInfo, size: string, commit: boolean) => {
     setWidgets((cur) => cur.map((x) => (x.id === w.id ? { ...x, size } : x)));
-    if (commit) sendJson("PUT", "/api/panel/layout", { sizes: { [w.id]: size } }).catch(layoutNotSaved);
+    if (commit) void putLayout({ sizes: { [w.id]: size } });
   };
   const showHiddenWidgets = () => {
     const ids = hiddenWidgets;
     setHiddenWidgets([]);
-    sendJson("PUT", "/api/panel/layout", { hiddenWidgets: Object.fromEntries(ids.map((id) => [id, false])) })
-      .catch(layoutNotSaved)
-      .then(() => pullWidgets());
+    void putLayout({ hiddenWidgets: Object.fromEntries(ids.map((id) => [id, false])) }).then(() => pullWidgets());
   };
   const dragProps = (kind: "tiles" | "widgets", group: string[], i: number): DragProps =>
     editing
@@ -753,7 +783,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
             {shown.title}
             <span className="status">
               <i />
-              {a.app === "space" ? t("status.base") : a.id}
+              {a.app === "space" ? t("status.base") : (() => { const owner = apps.find((x) => x.name === a.app && (x.peer ?? null) === (a.peer ?? null)); return owner ? localized(lang, owner).title : a.app; })()}
             </span>
           </p>
           {machines.length > 1 ? <p className="pop-hint">{t("agents.onMachines", { machines: machines.join(lang === "zh" ? "、" : ", ") })}</p> : a.peer && <p className="pop-hint">{t("common.onPeer", { peer: a.peer })}</p>}
@@ -932,12 +962,14 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
     onLang(next);
   };
 
+  settingsEscape.current = () => (settingsPage ? (settingsPage === "tasks" && tasksApp ? setTasksApp(null) : setSettingsPage(null)) : setPanel(null));
+
   return (
     <>
       <Backdrop />
       <div className={`shell${pos === -1 ? " wide" : ""}`}>
         {/* A phone has no dock: its buttons head the page instead (ScreenNav.tsx). */}
-        {screens && !IN_PHONE_APP && !PAGE && <PhoneNav pos={pos} names={rows.map(screenName)} onGo={go} onSearch={searchLibrary} />}
+        {screens && !IN_PHONE_APP && !PAGE && <PhoneNav pos={pos} names={rows.map(screenName)} onGo={go} onNew={newScreen} onSearch={searchLibrary} />}
         {pos === -1 ? (
           <section className={`screen ${dir}`} key="library">
             <h2>{t("screens.library")}</h2>
@@ -968,11 +1000,14 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
           <section className={`screen ${dir}`} key={screen.id}>
             {/* No visible titles: a screen is the page itself, and the dock says which one it is. */}
             <h2 className="sr-only">{screenName(screen)}</h2>
-            {editing && screen.id !== HOME && (
+            {editing && (
               <div className="screen-tools">
-                <button className={`btn2${confirmDelete ? " danger" : ""}`} onClick={() => (confirmDelete ? deleteScreen(screen.id) : setConfirmDelete(true))}>
-                  {confirmDelete ? t("screens.deleteConfirm") : t("screens.delete")}
+                <button className="btn2 primary" onClick={() => setEditing(false)}>
+                  {t("screens.done")}
                 </button>
+                {screen.id !== HOME && <button className={`btn2${confirmDelete ? " danger" : ""}`} onClick={() => (confirmDelete ? deleteScreen(screen.id) : setConfirmDelete(true))}>
+                  {confirmDelete ? t("screens.deleteConfirm") : t("screens.delete")}
+                </button>}
               </div>
             )}
             {screen.id === HOME && !editing && <Omnibox entries={entries} onOpen={openEntry} onAsk={askAssistant} focusSignal={omniFocus} onOpenShortcuts={openShortcuts} onOpenTasks={openTasks} onAgentIntent={askSkillAgent} />}
@@ -982,6 +1017,12 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
         ) : null}
       </div>
       {screens && !IN_PHONE_APP && !PAGE && <ScreenNav pos={pos} names={rows.map(screenName)} onGo={go} onNew={newScreen} onSearch={searchLibrary} />}
+      {layoutUnsaved && (
+        <div className="lib-toast" role="alert">
+          <span>{t("screens.notSaved")}</span>
+          <button onClick={retryLayout}>{t("screens.retrySave")}</button>
+        </div>
+      )}
       {!prefs.noPet && !PAGE && <Pet name={pet} />}
       {uninstalling && (
         <UninstallForm

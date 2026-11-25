@@ -126,9 +126,9 @@ export default function Shortcuts({ open, onClose, onOpenTasks }: { open: boolea
                   <h4>{actionText(current, lang).title}</h4>
                   {actionText(current, lang).description && <p className="sc-sub">{actionText(current, lang).description}</p>}
                   {prefill?.key === actionKey(current) ? (
-                    <ActionRunner key={`${actionKey(current)}#${prefill.serial}`} action={current} args={prefill.args} autoRun onOpenTasks={onOpenTasks} />
+                    <ActionRunner key={`${actionKey(current)}#${prefill.serial}`} action={current} args={prefill.args} autoRun onOpenTasks={onOpenTasks} onSubmitted={() => void loadRuns()} />
                   ) : (
-                    <ActionRunner key={actionKey(current)} action={current} args={{}} onOpenTasks={onOpenTasks} />
+                    <ActionRunner key={actionKey(current)} action={current} args={{}} onOpenTasks={onOpenTasks} onSubmitted={() => void loadRuns()} />
                   )}
                 </div>
               )}

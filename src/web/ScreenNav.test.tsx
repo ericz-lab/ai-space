@@ -14,10 +14,10 @@ const media = (query: string, needle: string) =>
 const phone = "(hover: none) and (max-width: 640px)";
 
 test("a phone's row at the top has the dock's buttons, the current one marked", () => {
-  const html = renderToStaticMarkup(<PhoneNav pos={1} names={["Home", "Screen 2"]} onGo={noop} onSearch={noop} />);
+  const html = renderToStaticMarkup(<PhoneNav pos={1} names={["Home", "Screen 2"]} onGo={noop} onNew={noop} onSearch={noop} />);
   expect(html).toStartWith('<nav class="phone-nav" aria-label="Screens">');
   const labels = [...html.matchAll(/aria-label="([^"]+)"/g)].map((m) => m[1]);
-  expect(labels).toEqual(["Screens", "Library", "Home", "Screen 2", "Search"]);
+  expect(labels).toEqual(["Screens", "Library", "Home", "Screen 2", "New screen", "Search"]);
   expect(html).toContain('class="dock-btn dock-screen on" aria-label="Screen 2" aria-current="page"');
   expect(html).not.toContain("dock ");
 });

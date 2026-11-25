@@ -137,8 +137,17 @@ export function AccountSettings() {
       setBusy(false);
     }
   };
+  const [revoking, setRevoking] = useState<number | null>(null);
   const revoke = async (id: number) => {
-    await sendJson("DELETE", `/api/auth/sessions/${id}`).catch(() => {});
+    setRevoking(id);
+    setMsg("");
+    try {
+      await sendJson("DELETE", `/api/auth/sessions/${id}`);
+    } catch (e) {
+      setMsg((e as Error).message);
+    } finally {
+      setRevoking(null);
+    }
     void refresh();
   };
   const when = (iso: string) => new Date(iso).toLocaleString(lang === "zh" ? "zh-CN" : "en-US", { dateStyle: "medium", timeStyle: "short" });
@@ -176,7 +185,7 @@ export function AccountSettings() {
             <small>{s.current ? t("auth.thisSession") : t("auth.lastSeen", { at: when(s.lastSeenAt) })}</small>
           </span>
           {!s.current && (
-            <button className="btn2" onClick={() => void revoke(s.id)}>
+            <button className="btn2" disabled={revoking !== null} onClick={() => void revoke(s.id)}>
               {t("auth.revoke")}
             </button>
           )}

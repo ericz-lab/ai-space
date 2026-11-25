@@ -11,7 +11,7 @@ import { agentBase, type AgentInfo, type AppInfo, type ChatSession, getJson, isI
 import { ChoiceOption, SavedChoice } from "./model-choices.tsx";
 import { queuedChatTurn, type QueuedChatTurn } from "./chat-request.ts";
 import { localized, useLang } from "./i18n.ts";
-import { chatHref, withDraft } from "./panel-link.ts";
+import { PAGE, chatHref, withDraft } from "./panel-link.ts";
 
 // Chat window (a floating panel). The server streams the runtime's stream-json events over SSE.
 // - Every turn is a background run on the server (docs/panel.md#chat): closing or refreshing the page
@@ -78,12 +78,13 @@ const RECONNECT_TRIES = 5;
 const RESTORE_RECENT_S = 1800;
 
 /** Stop a run on the server; before the server has named it, the stop is sent as soon as it does. */
+/** Rejects when the stop did not reach the server: the caller that shows it says so. */
 async function stopRun(a: Active): Promise<void> {
   if (!a.runId) {
     a.stopRequested = true;
     return;
   }
-  await fetch(`${a.base}/runs/${encodeURIComponent(a.runId)}/stop`, { method: "POST" }).catch(() => {});
+  await fetch(`${a.base}/runs/${encodeURIComponent(a.runId)}/stop`, { method: "POST" }).then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); });
 }
 
 /** A question from the home screen's box; a new `id` sends `text` once. */
@@ -100,7 +101,16 @@ export default function Chat({ open, agent, agents = [], apps = [], onClose, onS
   const settledRef = useRef(onTurnSettled);
   settledRef.current = onTurnSettled;
   const [convs, setConvs] = useState<Record<string, Conv>>({});
-  const [input, setInput] = useState("");
+  // What is being typed belongs to its agent, as the attached pictures do: switching agent neither
+  // carries a half-written message over nor loses it.
+  const [inputDrafts, setInputDrafts] = useState<Record<string, string>>({});
+  const input = inputDrafts[agent.id] ?? "";
+  const setInput = (next: string | ((cur: string) => string)) => setInputDrafts((d) => ({ ...d, [agent.id]: typeof next === "function" ? next(d[agent.id] ?? "") : next }));
+  // Which conversations were told to stop, and one whose stop did not reach the Space.
+  const [stopping, setStopping] = useState<Record<string, boolean>>({});
+  const [stopFailed, setStopFailed] = useState("");
+  const [recentFailed, setRecentFailed] = useState(false);
+  const [histFailed, setHistFailed] = useState(false);
   const [imageDrafts, setImageDrafts] = useState<Record<string, ChatImage[]>>({});
   const [imageError, setImageError] = useState("");
   const [readingImages, setReadingImages] = useState(false);
@@ -118,6 +128,8 @@ export default function Chat({ open, agent, agents = [], apps = [], onClose, onS
   };
   const [perm, setPerm] = useState(localStorage.getItem("chat-perm") || ""); // '' read-only | acceptEdits | bypassPermissions
   const [hist, setHist] = useState<ChatSession[] | null>(null); // null = history panel closed
+  const histRef = useRef(hist);
+  histRef.current = hist;
   // The sidebar's recent sessions of the shown agent; refreshed when it changes and when a turn ends.
   const [recent, setRecent] = useState<ChatSession[] | null>(null);
   const modelRef = useRef(model);
@@ -369,7 +381,7 @@ export default function Chat({ open, agent, agents = [], apps = [], onClose, onS
           throw new Error(j.error || `HTTP ${r.status}`);
         }
         active.runId ||= r.headers.get("x-run-id");
-        if (active.stopRequested) void stopRun(active);
+        if (active.stopRequested) void stopRun(active).catch(() => {});
         const reader = r.body.getReader();
         const dec = new TextDecoder();
         let buf = "";
@@ -632,15 +644,38 @@ export default function Chat({ open, agent, agents = [], apps = [], onClose, onS
   // ⏹ stops the run on the server; its stream then ends with the "stopped" error and "done".
   const stop = () => {
     const a = runner(key).active;
-    if (a) void stopRun(a);
+    if (!a || stopping[key]) return;
+    const k = key;
+    setStopFailed("");
+    setStopping((s) => ({ ...s, [k]: true }));
+    stopRun(a).catch((e) => {
+      setStopping((s) => ({ ...s, [k]: false }));
+      setStopFailed(t("chat.stopFailed", { error: (e as Error).message }));
+    });
   };
+  useEffect(() => {
+    if (conv.busy) return;
+    setStopping((s) => (s[key] ? { ...s, [key]: false } : s));
+    setStopFailed("");
+  }, [conv.busy, key]);
+  // Escape closes the window, as it does the Inbox, Tasks and Settings; what is typed stays for next time.
+  useEffect(() => {
+    if (!open || PAGE) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented || e.isComposing) return;
+      if (histRef.current) return setHist(null);
+      onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
   // Leaving a conversation (new one, a past session) stops its running turn and detaches.
   const leave = (k: string) => {
     const r = runner(k);
     r.queue = [];
     r.attach = [];
     if (r.active) {
-      void stopRun(r.active);
+      void stopRun(r.active).catch(() => {});
       r.active.ctrl.abort();
     }
   };
@@ -666,8 +701,8 @@ export default function Chat({ open, agent, agents = [], apps = [], onClose, onS
     if (!open || conv.busy) return;
     let live = true;
     getJson<{ sessions: ChatSession[] }>(`${base}/sessions`)
-      .then((j) => live && setRecent(j.sessions))
-      .catch(() => live && setRecent([]));
+      .then((j) => { if (live) { setRecent(j.sessions); setRecentFailed(false); } })
+      .catch(() => { if (live) { setRecent((cur) => cur ?? []); setRecentFailed(true); } });
     return () => { live = false; };
   }, [open, key, base, conv.busy, conv.sid]);
 
@@ -676,8 +711,10 @@ export default function Chat({ open, agent, agents = [], apps = [], onClose, onS
     try {
       const j = await getJson<{ sessions: ChatSession[] }>(`${base}/sessions`);
       setHist(j.sessions);
+      setHistFailed(false);
     } catch {
       setHist([]);
+      setHistFailed(true);
     }
   };
   // Pick a past session: restore its transcript and resume it; without a transcript the session still resumes.
@@ -764,7 +801,7 @@ export default function Chat({ open, agent, agents = [], apps = [], onClose, onS
         )}
         <p className="chat-side-head">{t("chat.recent")}</p>
         <div className="chat-side-sessions">
-          {recent?.length === 0 && <p className="hist-empty">{t("chat.noSessions")}</p>}
+          {recent?.length === 0 && <p className="hist-empty">{t(recentFailed ? "chat.sessionsFailed" : "chat.noSessions")}</p>}
           {recent?.map((s) => (
             <button key={s.sid} className={`chat-side-item${s.sid === conv.sid ? " on" : ""}`} title={s.title || t("chat.untitled")} onClick={() => pickSession(s)}>
               <span className="chat-side-title">{s.title || t("chat.untitled")}</span>
@@ -786,7 +823,7 @@ export default function Chat({ open, agent, agents = [], apps = [], onClose, onS
             </span>
             <JobsBadge jobs={conv.jobs ?? []} />
             {conv.busy && (
-              <button className="chat-hbtn" title={t("chat.interrupt")} aria-label={t("chat.interrupt")} onClick={stop}>
+              <button className="chat-hbtn" title={t(stopping[key] ? "chat.stopping" : "chat.interrupt")} aria-label={t(stopping[key] ? "chat.stopping" : "chat.interrupt")} disabled={!!stopping[key]} aria-busy={!!stopping[key]} onClick={stop}>
                 <Glyph name="stop" size={15} />
               </button>
             )}
@@ -843,7 +880,7 @@ export default function Chat({ open, agent, agents = [], apps = [], onClose, onS
           </div>
           {hist && (
             <div className="chat-hist">
-              {hist.length === 0 && <p className="hist-empty">{t("chat.noSessions")}</p>}
+              {hist.length === 0 && <p className="hist-empty">{t(histFailed ? "chat.sessionsFailed" : "chat.noSessions")}</p>}
               {hist.map((s) => (
                 <button key={s.sid} className="hist-item" onClick={() => pickSession(s)}>
                   <span className="hist-title">{s.title || t("chat.untitled")}</span>
@@ -902,6 +939,7 @@ export default function Chat({ open, agent, agents = [], apps = [], onClose, onS
           </button>
         )}
         {imageError && <div className="msg-note" role="alert">{imageError}</div>}
+        {stopFailed && <div className="msg-note" role="alert">{stopFailed}</div>}
         {agent.stale && <div className="msg-note" role="status">{t("chat.machineOfflineNote", { machine: agent.peer ?? t("chat.thisMachine") })}</div>}
         {!!images.length && <div className="chat-images chat-image-drafts">{images.map((image, index) => <div key={index}>
           <img src={imageURL(image)} alt={image.name} />

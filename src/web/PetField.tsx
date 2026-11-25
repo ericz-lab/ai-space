@@ -6,7 +6,8 @@ export default function PetField({ pet, onPet }: { pet: string; onPet: (name: st
   const { t } = useLang();
   return (
     <div className="setfield">
-      <div className="setinput">
+      {/* A menu with one choice asks nothing: it shows once there is a second pet. */}
+      {Object.keys(BUILTIN).length > 1 && <div className="setinput">
         <select aria-label={t("pet.kind")} value={pet} onChange={(e) => onPet(e.target.value)}>
           {Object.entries(BUILTIN).map(([name, p]) => (
             <option key={name} value={name}>
@@ -14,7 +15,7 @@ export default function PetField({ pet, onPet }: { pet: string; onPet: (name: st
             </option>
           ))}
         </select>
-      </div>
+      </div>}
       {pet === "claude" && <p className="setnote">{t("pet.fromSpace")}</p>}
     </div>
   );

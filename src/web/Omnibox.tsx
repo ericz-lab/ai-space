@@ -37,12 +37,16 @@ type Row = { type: "agentIntent"; intent: AgentIntentView } | { type: "intent"; 
 type Guess = { kind: "action"; key: string; action: Action; args: Record<string, unknown> } | { kind: "agent"; intent: AgentIntentView };
 /** The model is asked only after a longer pause than the deterministic resolver. */
 const GUESS_DELAY_MS = 600;
+let draftText = "";
+
 /** How many loose action matches (names, tasks) follow the library's entries. */
 const LOOSE = 3;
 
 export default function Omnibox({ entries, onOpen, onAsk, focusSignal, onOpenShortcuts, onOpenTasks, onAgentIntent }: { entries: Entry[]; onOpen: (key: string) => void; onAsk: (text: string) => void; focusSignal: number; onOpenShortcuts: () => void; onOpenTasks: () => void; onAgentIntent: (intent: AgentIntentView, text: string) => Promise<void> }) {
   const { lang, t } = useLang();
-  const [q, setQ] = useState("");
+  // What was typed survives a look at the library or another screen: the box is unmounted there.
+  const [q, setQ] = useState(draftText);
+  useEffect(() => { draftText = q; }, [q]);
   const [focused, setFocused] = useState(false);
   const [sel, setSel] = useState(0);
   const field = useRef<HTMLTextAreaElement>(null);
@@ -50,6 +54,9 @@ export default function Omnibox({ entries, onOpen, onAsk, focusSignal, onOpenSho
   const agentStarting = useRef(false);
   const [agentError, setAgentError] = useState("");
   const [resolving, setResolving] = useState(false);
+  // Enter pressed while the text was still being resolved: acted on as soon as the answer is in.
+  const pendingEnter = useRef(false);
+  const [copied, setCopied] = useState(false);
   const [guess, setGuess] = useState<{ query: string; guess: Guess | null } | null>(null);
   const [guessing, setGuessing] = useState(false);
   const [panel, setPanel] = useState<{ intent: Intent; autoRun: boolean } | null>(null);
@@ -76,13 +83,15 @@ export default function Omnibox({ entries, onOpen, onAsk, focusSignal, onOpenSho
   const results = useMemo(() => rank(q, entries), [q, entries]);
   useEffect(() => {
     let active = true;
+    pendingEnter.current = false;
+    setCopied(false);
     setResolution(null);
     setResolving(!!q.trim());
     if (!q.trim()) return;
     const timer = setTimeout(() => {
       sendJson<{ intents: Intent[]; agentIntents: AgentIntentView[]; ambiguous: boolean }>("POST", "/api/shortcuts/resolve", { text: q, timezone: browserZone() })
         .then((r) => { if (active) { setResolution({ query: q, ...r }); setResolving(false); } })
-        .catch((e) => { if (active) { setAgentError(String(e.message || e)); setResolving(false); } });
+        .catch(() => { if (active) { setResolution({ query: q, intents: [], agentIntents: [], ambiguous: false }); setResolving(false); } });
     }, 180);
     return () => { active = false; clearTimeout(timer); };
   }, [q]);
@@ -118,7 +127,8 @@ export default function Omnibox({ entries, onOpen, onAsk, focusSignal, onOpenSho
   const ambiguous = resolution?.query === q && resolution.ambiguous;
   const direct = agentMatches.length > 0 || found.length > 0 && (found[0]!.kind !== "action" || found[0]!.strong);
   // A new query highlights the row Enter would pick.
-  useEffect(() => setSel(ambiguous ? -1 : direct ? 0 : opensByDefault(q, results[0]) ? 0 : askIndex), [q, resolution, results]);
+  const defaultSel = ambiguous ? -1 : direct ? 0 : opensByDefault(q, results[0]) ? 0 : askIndex;
+  useEffect(() => setSel(defaultSel), [q, resolution, results]);
   // The model's row arriving later does not move the highlight off the row it was on.
   const hadGuess = useRef(false);
   useEffect(() => {
@@ -154,7 +164,9 @@ export default function Omnibox({ entries, onOpen, onAsk, focusSignal, onOpenSho
   const runIntent = (intent: Intent) => {
     if (intent.kind === "calc") {
       try {
-        void navigator.clipboard?.writeText(format(evaluate(intent.expression))).catch(() => {});
+        const copy = navigator.clipboard?.writeText(format(evaluate(intent.expression)));
+        if (!copy) setAgentError(t("omni.copyFailed"));
+        else void copy.then(() => setCopied(true)).catch(() => setAgentError(t("omni.copyFailed")));
       } catch {
         // an expression that does not evaluate has nothing to copy
       }
@@ -179,6 +191,12 @@ export default function Omnibox({ entries, onOpen, onAsk, focusSignal, onOpenSho
     else if (row.type === "intent") runIntent(row.intent);
   };
 
+  useEffect(() => {
+    if (!pendingEnter.current || resolution?.query !== q) return;
+    pendingEnter.current = false;
+    act(defaultSel);
+  }, [resolution]);
+
   const onKey = (e: React.KeyboardEvent) => {
     if (recorder.current) { if (e.key === "Escape") recorder.current.stop(); if (e.key === "Enter") e.preventDefault(); return; }
     if (e.nativeEvent.isComposing || e.keyCode === 229) return;
@@ -187,7 +205,7 @@ export default function Omnibox({ entries, onOpen, onAsk, focusSignal, onOpenSho
       if (e.metaKey || e.ctrlKey) ask();
       else if (panel) setSubmitTick((n) => n + 1);
       else if (q.trim() && resolution?.query === q) act(sel);
-      else if (!resolving && rows[sel]?.type === "entry") act(sel);
+      else if (q.trim()) pendingEnter.current = true;
     } else if (e.key === "ArrowDown" && q) {
       e.preventDefault();
       setSel((i) => Math.min(askIndex, i + 1));
@@ -288,7 +306,7 @@ export default function Omnibox({ entries, onOpen, onAsk, focusSignal, onOpenSho
               </li>
             );
             if (row.type === "guess") return <GuessRow key={`guess:${row.guess.kind === "agent" ? row.guess.intent.id : row.guess.key}`} guess={row.guess} on={i === sel} onHover={() => setSel(i)} onPick={() => act(i)} />;
-            if (row.type === "intent") return <IntentRow key={row.intent.key} intent={row.intent} on={i === sel} onHover={() => setSel(i)} onPick={() => act(i)} />;
+            if (row.type === "intent") return <IntentRow key={row.intent.key} intent={row.intent} on={i === sel} copied={copied} onHover={() => setSel(i)} onPick={() => act(i)} />;
             const e = row.entry;
             return (
               <li key={e.key} role="option" aria-selected={i === sel} className={i === sel ? "on" : ""} onMouseEnter={() => setSel(i)} onMouseDown={(ev) => ev.preventDefault()} onClick={() => act(i)}>
@@ -366,7 +384,7 @@ function GuessRow({ guess, on, onHover, onPick }: { guess: Guess; on: boolean; o
 }
 
 /** One action row: the value right away for arithmetic, the quoted conversion, or what Enter opens. */
-function IntentRow({ intent, on, onHover, onPick }: { intent: Intent; on: boolean; onHover: () => void; onPick: () => void }) {
+function IntentRow({ intent, on, copied, onHover, onPick }: { intent: Intent; on: boolean; copied?: boolean; onHover: () => void; onPick: () => void }) {
   const { lang, t } = useLang();
   const [preview, setPreview] = useState<RunResult | { error: string } | null>(null);
   const convertKey = intent.kind === "convert" ? JSON.stringify(intent.args) : "";
@@ -406,7 +424,7 @@ function IntentRow({ intent, on, onHover, onPick }: { intent: Intent; on: boolea
       value = e instanceof CalcError ? e.message : String(e);
     }
     title = <span className="omni-value">= {value}</span>;
-    kind = on ? t("omni.copyHint") : t("omni.result");
+    kind = copied ? t("sc.copied") : on ? t("omni.copyHint") : t("omni.result");
   } else if (intent.kind === "convert") {
     title = preview && "kind" in preview && preview.kind === "value" ? <ValueCard result={preview} /> : preview && "error" in preview ? <span className="omni-error-inline">{preview.error}</span> : <span className="omni-value">…</span>;
     kind = t("omni.convert");
