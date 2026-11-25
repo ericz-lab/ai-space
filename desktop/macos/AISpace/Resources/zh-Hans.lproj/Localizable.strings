@@ -422,7 +422,11 @@
 "Voice connection timed out." = "语音连接超时。";
 "Add a Space first to use voice input." = "先添加一个 Space 才能使用语音输入。";
 "%@ is not connected. Voice input needs the Space." = "%@ 未连接。语音输入需要连上 Space。";
-"None of your Spaces can transcribe speech." = "已连接的 Space 都无法把语音转成文字。";
+"%@ cannot transcribe speech. Choose another Space in Settings → General → Transcribe with." = "%@ 无法把语音转成文字。可在“设置 → 通用 → 转写使用”里换一个 Space。";
+"%@ cannot transcribe speech." = "%@ 无法把语音转成文字。";
+"Transcribe with" = "转写使用";
+"The selected Space" = "当前选中的 Space";
+"What you say is sent to this Space and to no other. When it cannot transcribe, voice input says so and sends nothing." = "你说的话只会发给这个 Space，不会发给别的。它无法转写时，语音输入会提示，并且什么都不发送。";
 "The text is on the clipboard. Press ⌘V to paste it." = "文字已在剪贴板里，按 ⌘V 粘贴。";
 "The text is on the clipboard. Press ⌘V to paste it. To have it go in by itself, allow AI Space in System Settings → Privacy & Security → Accessibility." = "文字已在剪贴板里，按 ⌘V 粘贴。想让它自动填入，请在“系统设置 → 隐私与安全性 → 辅助功能”中允许 AI Space。";
 

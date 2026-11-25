@@ -48,34 +48,25 @@ final class Dictation {
     }
 
     private func start() async {
-        // The selected Space first, then the others: this Mac's own Space often has no
-        // transcriber while a Space it is also connected to does.
-        let first = model.selected ?? model.store.defaultConnection
-        let order = ([first].compactMap { $0 } + model.store.connections.filter { $0.id != first?.id })
-        guard let first else {
+        // One Space, the one chosen in Settings or else the selected one, and never another: the
+        // saved Spaces may not all be the person's own, and speech goes nowhere unasked.
+        let pinned = Preferences.shared.voiceInputSpace.flatMap { id in model.store.connections.first { $0.id.uuidString == id } }
+        guard let c = pinned ?? model.selected ?? model.store.defaultConnection else {
             hud.note(String(localized: "Add a Space first to use voice input."))
             return
         }
-        var reachable = false
-        var chosen: SpaceAPI?
-        for c in order {
-            guard let space = model.lives[c.id] else { continue }
-            switch space.status {
-            case .signInNeeded, .offline: continue
-            case .ok, .unknown: break
-            }
-            reachable = true
-            await probe.check(space.api)
-            if probe.state != .unavailable { chosen = space.api; break }
-        }
-        guard let chosen else {
-            if !reachable {
-                hud.note(String(localized: "\(first.name) is not connected. Voice input needs the Space."))
-            } else {
-                hud.note(String(localized: "None of your Spaces can transcribe speech."))
-            }
+        guard let space = model.lives[c.id], space.status == .ok || space.status == .unknown else {
+            hud.note(String(localized: "\(c.name) is not connected. Voice input needs the Space."))
             return
         }
+        await probe.check(space.api)
+        guard probe.state != .unavailable else {
+            hud.note(model.store.connections.count > 1
+                ? String(localized: "\(c.name) cannot transcribe speech. Choose another Space in Settings → General → Transcribe with.")
+                : String(localized: "\(c.name) cannot transcribe speech."))
+            return
+        }
+        let chosen = space.api
         // Released before a Space answered: too short to have said anything.
         guard !released else { hud.follow(.idle, text: ""); return }
         live.start(api: chosen) { [weak self] text in self?.insert(text) }
