@@ -4,6 +4,7 @@ import SwiftUI
 /// Settings > General: the desktop conveniences, each optional.
 struct GeneralSettings: View {
     @ObservedObject var prefs: Preferences
+    @ObservedObject var store: ConnectionStore
 
     var body: some View {
         Form {
@@ -19,6 +20,14 @@ struct GeneralSettings: View {
                 }
             Text("Hold the fn (🌐) key in any app and talk: the words show at the bottom of the screen as you speak, and when you let go the text goes into the field you are typing in. Seeing fn in other apps and typing into them needs AI Space allowed in System Settings → Privacy & Security → Accessibility.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            if prefs.voiceInput, store.connections.count > 1 {
+                Picker("Transcribe with", selection: Binding(get: { prefs.voiceInputSpace ?? "" }, set: { prefs.voiceInputSpace = $0.isEmpty ? nil : $0 })) {
+                    Text("The selected Space").tag("")
+                    ForEach(store.connections) { Text($0.name).tag($0.id.uuidString) }
+                }
+                Text("What you say is sent to this Space and to no other. When it cannot transcribe, voice input says so and sends nothing.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
             if prefs.voiceInput, !AXIsProcessTrusted() {
                 Text("AI Space is not allowed under Accessibility yet, so fn is seen only while AI Space is in front.")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)

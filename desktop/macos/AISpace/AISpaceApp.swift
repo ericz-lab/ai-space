@@ -9,7 +9,7 @@ struct AISpaceApp: App {
     var body: some Scene {
         Settings {
             TabView {
-                GeneralSettings(prefs: prefs)
+                GeneralSettings(prefs: prefs, store: delegate.model.store)
                     .tabItem { Label("General", systemImage: "gearshape") }
                 ConnectionSettings(model: delegate.model, store: delegate.model.store)
                     .tabItem { Label("Connections", systemImage: "network") }
