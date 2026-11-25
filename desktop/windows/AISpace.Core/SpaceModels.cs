@@ -33,6 +33,12 @@ public static class Lang
 public sealed record AgentInfo(string Id, string App, string Name, string Title, string? Peer, string? Description, IReadOnlyDictionary<string, LocalizedText>? I18n, string? Avatar, bool Stale)
 {
     public string DisplayTitle(string? lang = null) => Lang.Pick(Title, I18n, true, lang);
+
+    /// <summary>The runtime its chat runs on by default (<c>runtime</c>), when the Space says.</summary>
+    public string? Runtime { get; init; }
+
+    /// <summary>The runtime and tier choices of its chat (<c>modelOptions</c>); null from an older Space or peer without them.</summary>
+    public IReadOnlyList<ChatModelChoice>? ModelOptions { get; init; }
 }
 
 public sealed record AppInfo(string Id, string Name, string Title, string? Peer, string? Description, IReadOnlyDictionary<string, LocalizedText>? I18n, string? Icon, string? Url, string? Status, bool Hidden)
@@ -63,7 +69,14 @@ public sealed record InboxItem(string Thread, string App, string Level, string? 
 
 public sealed record InboxSummary(int Unread, int Open);
 
-public sealed record ChatRun(string Id, string Agent, string Message, string Status);
+public sealed record ChatRun(string Id, string Agent, string Message, string Status)
+{
+    /// <summary>The stored session the turn continues, if any.</summary>
+    public string? SessionId { get; init; }
+
+    /// <summary>The session the runtime named for the turn, once it has.</summary>
+    public string? Sid { get; init; }
+}
 
 public sealed record Inbox(IReadOnlyList<InboxItem> Items, InboxSummary Summary);
 
@@ -83,8 +96,21 @@ public static partial class SpaceJson
         var app = Str(r, "app");
         var name = Str(r, "name");
         if (id is null || app is null || name is null) return null;
-        return new AgentInfo(id, app, name, Str(r, "title") ?? name, Str(r, "peer"), Str(r, "description"), I18n(r), Str(r, "avatar"), Bool(r, "stale"));
+        return new AgentInfo(id, app, name, Str(r, "title") ?? name, Str(r, "peer"), Str(r, "description"), I18n(r), Str(r, "avatar"), Bool(r, "stale")) { Runtime = Str(r, "runtime"), ModelOptions = ModelOptions(r) };
     });
+
+    /// <summary>An agent's <c>modelOptions</c>; null when it lists none (an older Space or peer).</summary>
+    private static List<ChatModelChoice>? ModelOptions(JsonElement r)
+    {
+        if (!r.TryGetProperty("modelOptions", out var list) || list.ValueKind != JsonValueKind.Array) return null;
+        var options = new List<ChatModelChoice>();
+        foreach (var o in list.EnumerateArray())
+        {
+            if (o.ValueKind != JsonValueKind.Object || Str(o, "value") is not { } value || Str(o, "runtime") is not { } runtime) continue;
+            options.Add(new ChatModelChoice(value, runtime, Str(o, "tier") ?? "", Str(o, "model") ?? "", Str(o, "unavailable")));
+        }
+        return options;
+    }
 
     public static Inbox Inbox(JsonElement root)
     {
@@ -109,7 +135,7 @@ public static partial class SpaceJson
         var id = Str(r, "id");
         var agent = Str(r, "agent");
         var status = Str(r, "status");
-        return id is null || agent is null || status is null ? null : new ChatRun(id, agent, Str(r, "message") ?? "", status);
+        return id is null || agent is null || status is null ? null : new ChatRun(id, agent, Str(r, "message") ?? "", status) { SessionId = Str(r, "sessionId"), Sid = Str(r, "sid") };
     });
 
     /// <summary>The panel's first screen (<c>GET /api/panel/layout</c>): its tiles' keys, <c>app:&lt;id&gt;</c>, <c>agent:&lt;id&gt;</c>, ….</summary>

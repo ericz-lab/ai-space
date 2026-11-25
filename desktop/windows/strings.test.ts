@@ -42,7 +42,7 @@ const placeholders = (s: string) => [...new Set(s.match(/\{\d+\}/g) ?? [])].sort
 describe("the Windows client's strings", () => {
   test("the tables are the shell's and the areas'", async () => {
     const { files } = await tables();
-    expect(files).toEqual(["Strings.zh.Home.cs", "Strings.zh.Inbox.cs", "Strings.zh.SpaceSettings.cs", "Strings.zh.cs"]);
+    expect(files).toEqual(["Strings.zh.Chat.cs", "Strings.zh.Home.cs", "Strings.zh.Inbox.cs", "Strings.zh.SpaceSettings.cs", "Strings.zh.cs"]);
     // Every table is merged at startup (Strings.cs).
     const merge = await Bun.file(join(APP, "Strings.cs")).text();
     for (const f of files) expect(merge).toContain(`Zh${f.split(".")[2] === "cs" ? "Core" : f.split(".")[2]}`);

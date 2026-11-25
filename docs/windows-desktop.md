@@ -1,8 +1,9 @@
 # Windows desktop client
 
 Status: built, its core library tested (`dotnet test`), and run on a Windows 11 laptop against an
-AI Space on the same machine. Home, Inbox, Shortcuts and the Space's Settings are native pages;
-the terminal and agent chat are the Space's own pages in tabs of the window. It is a client: it opens Spaces
+AI Space on the same machine. Home, Inbox, Shortcuts, the Space's Settings and the agents' chat
+are native pages (the native chat is built and its core tested, not yet run on a Windows machine);
+the terminal is the Space's own page in a tab of the window. It is a client: it opens Spaces
 that run on this computer or elsewhere and carries no AI Space of its own. At its first launch it
 offers to connect to the AI Space on this computer (installed first with AI Space's own installer
 when there is none) or to one on another machine ([below](#this-computer)). It follows the Mac client
@@ -12,17 +13,18 @@ below where it does less.
 ## What it is
 
 A window with the Space's own pages, natively where the app has them, and Windows around it. The
-terminal and the agents' chat are the Space's own pages in tabs of the window, the web panel stays
-one click away, and the app adds what a page cannot do.
+agents' chat is native ([below](#chat)), the terminal is the Space's own page in a tab of the
+window, the web panel stays one click away, and the app adds what a page cannot do.
 
 | Part | What it does |
 | --- | --- |
-| Window | The bar: the Space menu (each saved Space with its state, Add a Space…); Home's places, the Library and then a tab per screen, each opening Home there ([below](#the-window)); the web tabs, one per open app, the chat, the terminal and the web panel (past five, under More); while a web tab is shown, Back, Forward, Reload and Open in Browser; and the Inbox with its count, only while something is unread. The bar has no menu: the Space's App Store, Inbox, Shortcuts, Terminal and Settings are tiles on Home and in the Library, the last four also Ctrl+2 to Ctrl+5 (Ctrl+1 is Home), the web panel has no entry of its own (it shows by itself while a Space needs a sign-in, and Settings opens its Settings for what has no native copy: Appearance, Fix this' recent requests, installing apps and connections, a task's model, peers' app models), an agent's chat is its tile, Quick Chat is the notification area's, its shortcut's and the floating ball's, and AI Space Settings… is in the notification area's menu and Settings › This Computer. The Space picker keeps one width, from the selected Space's name (a long one ends in an ellipsis), whether its list is open or not. A middle click or Ctrl+W closes a tab, F5 reloads. Before any Space is saved it shows the welcome page: Connect to Local AI Space (installing it first when there is none), or Connect to a Remote AI Space with the address form ([below](#this-computer)). The window keeps its size and place, always wholly on one monitor's work area, so its title bar can be reached ([below](#the-window)) |
+| Window | The bar: the Space menu (each saved Space with its state, Add a Space…); Home's places, the Library and then a tab per screen, each opening Home there ([below](#the-window)); the native Chat's tab while it is open, then the web tabs, one per open app, the terminal and the web panel (past five, under More); while a web tab is shown, Back, Forward, Reload and Open in Browser; and the Inbox with its count, only while something is unread. The bar has no menu: the Space's App Store, Inbox, Shortcuts, Terminal and Settings are tiles on Home and in the Library, the last four also Ctrl+2 to Ctrl+5 (Ctrl+1 is Home), the web panel has no entry of its own (it shows by itself while a Space needs a sign-in, and Settings opens its Settings for what has no native copy: Appearance, Fix this' recent requests, installing apps and connections, a task's model, peers' app models), an agent's chat is its tile, Quick Chat is the notification area's, its shortcut's and the floating ball's, and AI Space Settings… is in the notification area's menu and Settings › This Computer. The Space picker keeps one width, from the selected Space's name (a long one ends in an ellipsis), whether its list is open or not. A middle click or Ctrl+W closes a tab (closing Chat's only hides it: its conversations go on), F5 reloads. Before any Space is saved it shows the welcome page: Connect to Local AI Space (installing it first when there is none), or Connect to a Remote AI Space with the address form ([below](#this-computer)). The window keeps its size and place, always wholly on one monitor's work area, so its title bar can be reached ([below](#the-window)) |
 | Native pages | Home, Inbox, Shortcuts and Settings are the app's own (WPF, one set per Space, kept while hidden). Settings is the Space's own settings; it leads to AI Space Settings…, the app's. Not built yet: each says so and offers Open in Web Panel ([below](#the-window)) |
-| Web pages | The terminal (`/?page=terminal`), an agent's chat (`/?page=chat&agent=…`), the App Store (`/?page=store`), each open app and the web panel are web pages in tabs. Each saved Space has its own WebView2 profile (cookies, storage, cache), so signing in on the panel signs in everything that Space's pages and native calls do. A link to one of the Space's own pages never leaves the app: it opens the native page, or its tab; a link to an app of the Space opens in that app's tab, a link off the Space in the default browser. A page that cannot load shows why, with Try Again, Open in Browser and Edit Space… |
+| Chat | A native conversation with one of the Space's agents, in the main window's Chat tab and in Quick Chat, the same conversation in both ([below](#chat)): replies with formatting, tool calls as rows, approvals and questions answered in the thread, the turn's status, a failure with Try Again, chat cards with Undo, the permission and model pickers, pictures, earlier conversations |
+| Web pages | The terminal (`/?page=terminal`), the App Store (`/?page=store`), each open app and the web panel are web pages in tabs. Each saved Space has its own WebView2 profile (cookies, storage, cache), so signing in on the panel signs in everything that Space's pages and native calls do. A link to one of the Space's own pages never leaves the app: it opens the native page, or its tab; a link to an app of the Space opens in that app's tab, a link off the Space in the default browser. A page that cannot load shows why, with Try Again, Open in Browser and Edit Space… |
 | Sign-in | While a Space needs a sign-in, the window shows its web panel, where the sign-in page appears, in place of the native pages, and the native page again once the panel has signed in |
-| Quick Chat | A small window over every app with one agent's chat (the panel's own, so a conversation there is the same one): Ctrl+Alt+Space by default (Ctrl+Shift+Space, Alt+Shift+Space or off in Settings), the notification area menu, the jump list, a section of the floating ball, or `aispace://chat`. 380 wide as the Mac's, with no title bar: a 40 high header to drag it by (the Space, the agent, Open in Main Window, Close), then the page's chat in its narrow layout, whose header holds the model and the permission choice. The shortcut opens it in the upper middle of the screen, the ball beside itself ([below](#the-floating-ball)). It remembers the agent last used; Escape or Close hides it, and an answer being written goes on |
-| Voice input | A microphone at the end of Home's command box and in Quick Chat's header puts what is said into the field, never sent; and, off until Settings › General turns it on, hold Right Ctrl (or Right Alt) in any app to talk: the words show live at the bottom of the screen and go into the field in front on release ([below](#voice-input)) |
+| Quick Chat | A small window over every app with one agent's native chat (the app's, so a conversation there is the same one the Chat tab shows): Ctrl+Alt+Space by default (Ctrl+Shift+Space, Alt+Shift+Space or off in Settings), the notification area menu, the jump list, a section of the floating ball, or `aispace://chat`. 380 wide as the Mac's, with no title bar: a 40 high header to drag it by (the Space, the agent, Earlier Conversations, New Conversation, Open in Main Window, Close), then the chat in its narrow layout, the permission and model pickers above the field. Open in Main Window takes what is being written along. The shortcut opens it in the upper middle of the screen, the ball beside itself ([below](#the-floating-ball)). It remembers the agent last used; Escape or Close hides it, and an answer being written goes on |
+| Voice input | A microphone at the end of Home's command box and beside the chat's message field puts what is said into the field, never sent; and, off until Settings › General turns it on, hold Right Ctrl (or Right Alt) in any app to talk: the words show live at the bottom of the screen and go into the field in front on release ([below](#voice-input)) |
 | Floating ball | A 52 px ball over every app that never takes the keyboard (off until Settings › General turns it on; the notification area menu and its own right-click menu show and hide it) ([below](#the-floating-ball)) |
 | Notification area | The icon (the Mac's menu bar extra): a click opens the window; the menu has each Space with its state (it opens its Home), a sign-in when it needs one, who is working (each opens that agent's chat), the unread threads and the Inbox, and its apps, then Quick Chat, Show the Floating Ball, Settings… and Quit AI Space. Its tooltip counts what is unread and who is working |
 | Notifications | New unread inbox threads of every saved Space as Windows notifications, with Mark as Read and Done; a click opens the thread's link, else the Inbox. The taskbar button carries a badge while something is unread |
@@ -72,10 +74,11 @@ sign-in, the bar has no places.
 links `#inbox`, `#shortcuts`, `#settings`) open the native Home, Inbox, Shortcuts and Settings;
 `/?page=terminal` and `#terminal` the Terminal tab; `/?page=store` and `#store` the App Store tab
 (the web panel's own page, [app-catalog.md](app-catalog.md), shown alone in its tab);
-`/?page=chat&agent=…&session=…` and `#chat=…&text=…` the Chat tab on that agent, the text as a draft. Only the Space's own origin and
-the panel's own path count. So the panel's built-in tiles and its chat's "open in a new tab", which
+`/?page=chat&agent=…&session=…` and `#chat=…&text=…` the native Chat on that agent (and that
+stored conversation), the text as a draft. Only the Space's own origin and
+the panel's own path count. So the panel's built-in tiles and its "open in a new tab", which
 ask for a new window, stay in the app, and a native page's link goes the same way. A navigation in
-the Terminal or Chat tab to another of the Space's pages (closing the page leads to the root) goes
+the Terminal or App Store tab to another of the Space's pages (closing the page leads to the root) goes
 to that page's own place instead of loading the web launcher in the tab.
 
 ## Home
@@ -206,8 +209,8 @@ down; the Linux client's `core/floating-ball.ts` is the same port):
   on a section opens Quick Chat there with the picture attached; on the hub it goes to Space
   Assistant. A picture that is not PNG, JPEG, GIF or WebP (a bitmap, a TIFF) is converted to PNG.
   More than one file, a file that is not a picture, or one over 5 MB is refused with a notice
-  from the notification area. The picture is handed to the chat page as a dropped file once the
-  page has opened the agent's chat; it is never sent by itself.
+  from the notification area. The picture is attached to Quick Chat's message (its limits: 4
+  pictures, 5 MB each, 10 MB in all); it is never sent by itself.
 - **Sections per Space.** The sections come from the Space the main window shows. Settings ›
   General sets what each opens in that Space (Default, None, any app or agent); each Space keeps
   its own choices (`floatingBallSlots`, by the saved Space's id).
@@ -216,9 +219,8 @@ down; the Linux client's `core/floating-ball.ts` is the same port):
 with the Space's sign-in) and turns what the ball reports into Quick Chat; `Views/BallWindow.cs`
 draws the ball and the dial and reads the pointer and drags.
 
-Where it differs from the Mac: Quick Chat is the Space's chat page rather than a native view, so it
-keeps one height (520) instead of growing from 96 to 420 with the replies, and a click elsewhere
-does not hide it.
+Where it differs from the Mac: Quick Chat keeps one height (520) instead of growing from 96 to 420
+with the replies, and a click elsewhere does not hide it.
 
 ## Voice input
 
@@ -257,12 +259,11 @@ none), Detect automatically (sends none), Chinese, English, Japanese or Korean (
 the Mac's rule). Read when a recording starts; sent in the live `start` and on the clip.
 
 **The microphone beside a field** (`Views/VoiceButton.cs`): at the right end of Home's command box
-and in Quick Chat's header. A click records, a second click ends it (red while listening, greyed
-while transcribing); the overlay shows the live words. The transcript goes after what Home's box
-holds (it searches as typed text does and is never submitted), or into Quick Chat's message field
-through the chat page's draft link (`#chat=…&text=`, added to the draft, never sent). The Chat tab
-of the main window and other pages are the Space's web pages, with no native field: holding the
-key reaches them.
+and beside the chat's message field (the Chat tab and Quick Chat). A click records, a second click
+ends it (red while listening, greyed while transcribing); the overlay shows the live words. The
+transcript goes after what Home's box holds (it searches as typed text does and is never
+submitted), or after what the chat's field holds (never sent). The Space's web pages have no
+native field: holding the key reaches them.
 
 **Holding a key in any app** (Settings › General › Hold a key to talk in any app, off by default;
 `Shell/HoldKeyHook.cs`, `HoldKeyRules`). Windows has no fn key programs can see, so the key is
@@ -431,14 +432,59 @@ app's model, a service's start, stop or restart, re-checking the CLIs, Fix this'
 password, signing a session out), each followed by a notice that says what it did or why it failed. A link to the web
 panel opens its tab in the app, never the browser.
 
+## Chat
+
+Status: built, its core tested (`ChatTests`: the Mac's stream tests and the conversation against
+a stand-in Space), not yet run on a Windows machine.
+
+The agents' chat is native, as on the Mac and Linux (`Views/ChatView.cs`, drawn in the main
+window's Chat tab by `ChatPage` and in Quick Chat). The app keeps one conversation per Space and
+agent (`AppModel.Conversation`, `AISpace.Core/ChatConversation.cs`), so the Chat tab and Quick Chat
+show the same one, and a reply goes on while neither shows it.
+
+- **A turn** is a background run on the Space (`POST /api/agents/<app>/<agent>/chat`, or through
+  `/api/peers/<peer>/…` for a peer's agent; `SpaceApi.Chat.cs`). Its events stream back and are
+  reduced to the reply (`ChatStream.cs`, the Mac's `ChatStream`); a dropped stream reattaches after
+  the last event it saw (`…/runs/<id>/events?after=`), every 2 seconds more up to 10, and gives up
+  after 20 failures in a row. Hiding a window never resends a prompt; only Stop ends the run, and a
+  Stop pressed before the Space has named the run is sent as soon as it does. A run of a local agent
+  started elsewhere (the web panel, another client) is followed when the chat shows that agent,
+  from the Space's run list.
+- **The thread**: the person's messages (their pictures above), the agent's text with formatting
+  (headings, lists, quotes, code and tables in a monospace box, bold, italics, inline code, links;
+  `ChatMarkdown.cs`, the Linux client's reading), its tool calls as quiet rows (glyph, title, first
+  line; Running, Failed or No result received; a click opens the input and output, 12,000
+  characters at most), a stored conversation's runs of two or more calls folded to "Ran commands"
+  or "Called tools". The status row stays up for the whole turn and clears only while text streams:
+  Starting…, Thinking…, Running <tool>… (at once, while the call is still being written),
+  Reconnecting…; a waiting approval shows "Waiting for your approval…" instead.
+- **Approvals and questions** are cards in the thread (Allow and Deny; the agent's options, a typed
+  answer, Send and Skip), answered on `…/runs/<id>/approvals/<request>`. A runtime that cannot ask
+  shows what was refused for lack of permission, with Grant and Retry.
+- **Writing during a turn** adds to it (`…/runs/<id>/steer`): the line shows under the reply until
+  the agent has read it. A message the turn cannot take waits and goes next, its reply right after
+  it. The field says "Add to the reply in progress…" then; Stop stays beside Send.
+- **A failed turn** shows why in words (busy, signed out, timed out, exited, could not start, the
+  connection) under what the agent wrote, with Try Again when sending once more may work.
+- **Chat cards** ([chat-cards.md](chat-cards.md)) under the reply, every look drawn as rows (title,
+  details, time, tags, value, progress, Done, Undone or Changed elsewhere), with Undo on the latest
+  reply while its token is good; the state is read again each time the chat is shown.
+- **Pickers** above the field: the permission (Ask before changes, Edit files, All permissions;
+  one choice for every chat, remembered as `chatPermission`) and the model (an agent's runtime and
+  tier choices from `/api/agents`' `modelOptions`, else the Claude words; per agent, remembered in
+  `chatModels`, not changed during a turn; opening a stored conversation picks the model it ran on).
+- **The field**: Enter sends, Shift+Enter starts a new line; pictures by the attach button, drag
+  and drop or Ctrl+V (4 at most, 5 MB each, 10 MB in all; a type the Space does not take is
+  converted to PNG); the microphone.
+- **Earlier Conversations** lists the agent's stored sessions (`…/sessions`) and opens one
+  (`…/sessions/<sid>`): the next message continues it. New Conversation starts an empty one.
+
 ## How the app opens the Space's pages
 
-The terminal and the chat are the Space's built-in pages ([panel.md](panel.md#built-in-pages)),
-`/?page=terminal` and `/?page=chat&agent=<id>`, each in its tab. A draft goes to the chat by the
-address's fragment ([panel.md](panel.md#panel-links)), `#chat=<app>/<agent>&text=…`, which puts the
-text in the message field, never sent; the page reads the fragment once it is up, clears it, and
-follows a later change without reloading, so a new draft for the agent the Chat tab shows needs no
-reload. Quick Chat is the panel's root with that fragment.
+The terminal is the Space's built-in page ([panel.md](panel.md#built-in-pages)), `/?page=terminal`,
+in its tab, as the App Store's is. A link to a chat (`/?page=chat&agent=<id>&session=…`, or the
+fragment `#chat=<app>/<agent>&text=…`) opens the native Chat on that agent, the text in its field,
+never sent.
 
 ## How it is built
 
@@ -458,7 +504,10 @@ desktop/windows/
                        its installer's command (ThisComputer.cs), voice input's rules (Voice.cs:
                        language, transcript, frames, clip, which Space; VoiceSession.cs: the live
                        session and its fallback; HoldKey.cs: the hold key and the paste;
-                       SpaceApi.Voice.cs: its routes)
+                       SpaceApi.Voice.cs: its routes), the chat (ChatStream.cs: the stream
+                       reducer and its models; ChatConversation.cs: a conversation's turns,
+                       steering, queue, reattach and sessions; ChatCards.cs; ChatMarkdown.cs;
+                       SpaceApi.Chat.cs: its routes and the model picker's rules)
   AISpace.Core.Tests/  its tests (xUnit), run on any system
   AISpace/             the app (Windows only): App.xaml.cs (the Mac's AppDelegate), AppModel.cs
                        (the Spaces, their native pages and web tabs, where links go),
@@ -467,7 +516,8 @@ desktop/windows/
                        sign-in), Ui.cs (the pieces the native windows and pages are made of),
                        ThisComputerSetup.cs (the first launch), Web/ (WebView2 profiles and
                        PanelView, the Mac's PanelSession), Views/ (the native pages: NativePage.cs
-                       the contract, HomePage, InboxPage, ShortcutsPage, SpaceSettingsPage, PetView;
+                       the contract, HomePage, InboxPage, ShortcutsPage, SpaceSettingsPage, PetView,
+                       ChatPage with ChatView and ChatParts (the native chat);
                        welcome, connection, Settings, Quick Chat, the floating ball's window and
                        dial, the voice overlay and the fields' microphone), Shell/ (single
                        instance, notification area, notifications, the shortcut, the hold-to-talk
@@ -528,7 +578,7 @@ What the app keeps:
 | Path | What |
 | --- | --- |
 | `%APPDATA%\ai-space\connections.json` | the saved Spaces (an unreadable file is set aside as `connections.unreadable.json` and the app says so) |
-| `%APPDATA%\ai-space\preferences.json` | keep running, notifications, the shortcut, the window's place, the Quick Chat agent, the floating ball (shown, its place, each Space's sections), voice input (`voiceInput`, `voiceInputKey`: `RightCtrl` or `RightAlt`, `voiceInputSpace`: a saved Space's id or unset, `voiceLanguage`: `""` same as AI Space, `auto`, or `zh`/`en`/`ja`/`ko`) |
+| `%APPDATA%\ai-space\preferences.json` | keep running, notifications, the shortcut, the window's place, the Quick Chat agent, the floating ball (shown, its place, each Space's sections), voice input (`voiceInput`, `voiceInputKey`: `RightCtrl` or `RightAlt`, `voiceInputSpace`: a saved Space's id or unset, `voiceLanguage`: `""` same as AI Space, `auto`, or `zh`/`en`/`ja`/`ko`), the chat's permission (`chatPermission`) and each agent's model (`chatModels`) |
 | `%LOCALAPPDATA%\ai-space-desktop\web\` | WebView2's data, one profile per saved Space: cookies (its sign-in), storage, cache |
 | `%LOCALAPPDATA%\ai-space-desktop\inbox-seen\` | which inbox threads were already notified, per Space |
 | `%LOCALAPPDATA%\ai-space-desktop\logs\windows.log` | the app's log (Settings › General › Open Log Folder) |
@@ -599,10 +649,13 @@ on the talk key alone: it keeps nothing, writes nothing down and changes no key.
 
 ## What the Mac client has and this one does not (yet)
 
-- A microphone in the chat's own message field: the chat is the Space's page, so holding the key
-  (or Quick Chat's microphone) is how speech reaches it.
-
-- Native chat and terminals: the window shows the Space's own pages in tabs.
+- Several conversations at once and the Mac's list of them: the chat keeps one conversation per
+  agent (with Earlier Conversations and New Conversation), as the Linux client does.
+- The machine picker for an agent on several machines: a peer's agent shows under its own name.
+- Chat cards in their own looks (agenda, gallery, …): every card is drawn as rows.
+- Selecting part of a formatted reply: a reply is copied whole from its menu (code and tool
+  output can be selected).
+- Native terminals: the window shows the Space's terminal page in a tab.
 - The desk pet on the desktop: it walks along the bottom of Home only.
 - The Share extension.
 - Updating itself from the published releases; a newer download replaces the installed copy when

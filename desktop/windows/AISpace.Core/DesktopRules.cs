@@ -115,29 +115,6 @@ public abstract record DeepLink
     }
 }
 
-/// <summary>
-/// The web panel's own windows, opened from its address (src/web/panel-link.ts): <c>#inbox</c>,
-/// <c>#terminal</c>, <c>#settings</c>, <c>#shortcuts</c>, and <c>#chat=&lt;agent&gt;&amp;text=…</c>,
-/// whose text fills the message field and is not sent.
-/// </summary>
-public static class PanelLink
-{
-    public static Uri Inbox(Uri panel) => With(panel, "inbox");
-
-    public static Uri Terminal(Uri panel) => With(panel, "terminal");
-
-    public static Uri Settings(Uri panel) => With(panel, "settings");
-
-    public static Uri Chat(Uri panel, string? agent, string? text = null)
-    {
-        var parts = new List<string> { "chat" + (agent is null ? "" : "=" + Uri.EscapeDataString(agent)) };
-        if (!string.IsNullOrEmpty(text)) parts.Add("text=" + Uri.EscapeDataString(text));
-        return With(panel, string.Join("&", parts));
-    }
-
-    private static Uri With(Uri panel, string fragment) => new(ConnectionRules.Origin(panel), panel.AbsolutePath + "#" + fragment);
-}
-
 public static class Query
 {
     /// <summary>The query of a URL as pairs, decoded; <c>+</c> is a space as in a form; the first of a repeated key wins.</summary>

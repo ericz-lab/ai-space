@@ -96,6 +96,10 @@ public sealed class Preferences
     [JsonPropertyName("voiceInputSpace")] public Guid? VoiceInputSpace { get; set; }
     /// <summary>The language spoken (<see cref="Core.VoiceLanguage"/>): "" Same as AI Space, "auto" Detect automatically, or a code.</summary>
     [JsonPropertyName("voiceLanguage")] public string VoiceLanguage { get; set; } = Core.VoiceLanguage.SameAsApp;
+    /// <summary>The chat's permission for new messages, as sent (<see cref="ChatPermissions.Wire"/>): "" Ask before changes.</summary>
+    [JsonPropertyName("chatPermission")] public string ChatPermission { get; set; } = "";
+    /// <summary>The model picked for each agent's chat, by <c>&lt;connection id&gt; &lt;agent id&gt;</c>; missing: the agent's default.</summary>
+    [JsonPropertyName("chatModels")] public Dictionary<string, string> ChatModels { get; set; } = [];
 
     [JsonIgnore]
     public ScreenPoint? BallOrigin
