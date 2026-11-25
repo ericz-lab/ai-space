@@ -37,10 +37,39 @@ export type Price = { transcribePerMinute?: number; speakPerMillionChars?: numbe
 export type VoiceStudioSpec = {
   name: string;
   kind: "voice-studio";
-  /** The app that provides `transcribe` and `speak`; default `voice-studio`. */
+  /** The app that provides `transcribe` and `speak`; default `voice-studio`. Unused in direct mode. */
   app: string;
   /** The peer it runs on; absent: this space when the app is here, else the one peer that provides it. */
   machine?: string;
+  /**
+   * Direct mode (docs/speech.md#direct): a voice-studio server reached at its own addresses, not through
+   * this space's bus or a peer. Exclusive with `machine`.
+   */
+  direct?: VoiceStudioDirect;
+};
+
+export type VoiceStudioDirect = {
+  /** In order of preference: the first that proves it is the server is used. */
+  addresses: VoiceStudioAddress[];
+  /** The variable that holds the server's token. */
+  apiKeyEnv: string;
+  /** The token read from `apiKeyEnv` at load; never written anywhere. */
+  token?: string;
+};
+
+export type VoiceStudioAddress = {
+  /** The base URL without a trailing slash: `http://192.168.3.48:8920`, `https://voice.example.com/studio`. */
+  url: string;
+  /** `host[:port]`, what status and the ledger show. */
+  host: string;
+  /** The host is loopback, private-range, link-local or a `.local` / `.home.arpa` name: plain http is allowed, the probe is short. */
+  local: boolean;
+  /** The variable that holds an access layer's headers for this address (`CF-Access-Client-Id: …; CF-Access-Client-Secret: …`); https only. */
+  headersEnv?: string;
+  /** Those headers, read at load. */
+  headers?: Record<string, string>;
+  /** Why this address is never tried (its `headersEnv` is empty or unreadable). */
+  off?: string;
 };
 
 export type OpenAiSpec = {
@@ -140,7 +169,17 @@ export type SpeakResult = { audio: ArrayBuffer; contentType: string; priced?: Ga
 
 /** Where a live session's provider socket is, speaking the Space's live protocol (docs/speech.md#live-protocol). */
 /** Where a live session's socket goes; `open`, when given, makes it (a peer's socket over a package connection) instead of `url` with `headers`. */
-export type LiveTarget = { url: string; headers: Record<string, string>; machine: string; open?: () => WebSocket };
+export type LiveTarget = {
+  url: string;
+  headers: Record<string, string>;
+  machine: string;
+  open?: () => WebSocket;
+  /**
+   * Called once when this target's socket never opened: the provider may know another address for the
+   * same server (a direct voice-studio, docs/speech.md#direct) and answers it, or undefined when it has none.
+   */
+  reroute?: () => Promise<LiveTarget | undefined>;
+};
 
 /** What a provider's cell shows before any call: whether it can be reached at all. */
 export type ProviderState = {
@@ -172,8 +211,8 @@ export interface SpeechAdapter {
   speak?(input: SpeakInput, caller: SpeechCaller): Promise<SpeakResult>;
   /** The voices it has; undefined when it cannot say (an API without a list). Throws when it cannot be asked. */
   voices?(signal?: AbortSignal): Promise<string[] | undefined>;
-  /** Where to open a live session; throws a ProviderError when it cannot be reached. */
-  live?(): LiveTarget;
+  /** Where to open a live session; throws (or rejects with) a ProviderError when it cannot be reached. */
+  live?(): LiveTarget | Promise<LiveTarget>;
   /** USD for one call, from its figures; undefined without a price. */
   cost?(capability: SpeechCapability, figures: { audioSeconds?: number; chars?: number }): number | undefined;
 }

@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { parseHeaders } from "../peers/config.ts";
 import { MAGPIE_CALLER_KEY, magpieAddress } from "../runtimes/magpie.ts";
 import {
   KIND_CAPABILITIES,
@@ -14,6 +15,8 @@ import {
   type SpeechConfig,
   type SpeechKind,
   type SpeechRole,
+  type VoiceStudioAddress,
+  type VoiceStudioSpec,
 } from "./types.ts";
 
 /**
@@ -158,7 +161,7 @@ export function parseSpeech(raw: unknown, env: Record<string, string | undefined
 function parseProvider(name: string, kind: SpeechKind, raw: Record<string, unknown>, env: Record<string, string | undefined>): { spec: ProviderSpec; off?: string } {
   const ctx = `${PROVIDERS_FILE}: speech provider ${name}`;
   const allowed: Record<SpeechKind, string[]> = {
-    "voice-studio": ["kind", "app", "machine"],
+    "voice-studio": ["kind", "app", "machine", "url", "urls", "apiKeyEnv"],
     "openai-compatible": ["kind", "url", "apiKeyEnv", "asrModel", "ttsModel", "voice", "voices", "selfHosted", "responseFormat", "price", "gateway", "provider"],
     minimax: ["kind", "url", "site", "apiKeyEnv", "asrModel", "ttsModel", "voice", "voices", "price", "gateway", "provider"],
     dashscope: ["kind", "apiKeyEnv", "url", "asrModel", "ttsModel", "voice", "voices", "price"],
@@ -166,6 +169,7 @@ function parseProvider(name: string, kind: SpeechKind, raw: Record<string, unkno
   for (const key of Object.keys(raw)) if (!allowed[kind].includes(key)) throw new Error(`${ctx} has unknown key "${key}"`);
   switch (kind) {
     case "voice-studio": {
+      if (raw.url !== undefined || raw.urls !== undefined || raw.apiKeyEnv !== undefined) return parseVoiceStudioDirect(name, raw, ctx, env);
       const app = optionalString(raw.app, `${ctx}: app`) ?? "voice-studio";
       if (!PROVIDER_NAME_PATTERN.test(app)) throw new Error(`${ctx}: app must be an app name`);
       const machine = optionalString(raw.machine, `${ctx}: machine`);
@@ -209,6 +213,114 @@ function parseProvider(name: string, kind: SpeechKind, raw: Record<string, unkno
       return { spec: { name, kind, ...(apiKeyEnv ? { apiKeyEnv } : {}) }, off: "the dashscope kind is not built yet (docs/speech.md#later)" };
     }
   }
+}
+
+/**
+ * `kind: voice-studio` in direct mode (docs/speech.md#direct): a voice-studio server at its own
+ * addresses, with its token in the environment.
+ *
+ *   gpu:
+ *     kind: voice-studio
+ *     urls:
+ *       - http://192.168.3.48:8920                            # home: the LAN address, preferred
+ *       - { url: https://voice.example.com, headersEnv: VOICE_ACCESS }   # away: the tunnel, behind Cloudflare Access
+ *     apiKeyEnv: VOICE_STUDIO_TOKEN
+ *
+ * `url:` is the one-address form. `machine:` (a peer) and `app:` (an app on this space or a peer) do
+ * not apply. Each address is an http(s) base URL, optionally with a path prefix, no credentials, no
+ * query; plain http only for a host `isLocalHost` accepts, since the token travels in a header.
+ */
+function parseVoiceStudioDirect(name: string, raw: Record<string, unknown>, ctx: string, env: Record<string, string | undefined>): { spec: VoiceStudioSpec; off?: string } {
+  if (raw.machine !== undefined) throw new Error(`${ctx}: machine (a peer) and url/urls (the server's own addresses) are two ways to reach it; give one`);
+  if (raw.app !== undefined) throw new Error(`${ctx}: app does not apply to a server reached at its own address; drop it`);
+  if (raw.url !== undefined && raw.urls !== undefined) throw new Error(`${ctx}: give url (one address) or urls (a list), not both`);
+  const list: unknown[] = raw.urls !== undefined ? (Array.isArray(raw.urls) ? raw.urls : [null]) : raw.url !== undefined ? [raw.url] : [];
+  if (raw.urls !== undefined && (!Array.isArray(raw.urls) || raw.urls.length === 0)) throw new Error(`${ctx}: urls must be a non-empty list of addresses`);
+  if (!list.length) throw new Error(`${ctx}: apiKeyEnv is the token of a server reached at its own address; add url or urls`);
+  const addresses = list.map((entry, i) => parseAddress(entry, `${ctx}: ${raw.urls !== undefined ? `urls[${i}]` : "url"}`, env));
+  const seen = new Set<string>();
+  for (const a of addresses) {
+    if (seen.has(a.url)) throw new Error(`${ctx}: ${a.url} is listed twice`);
+    seen.add(a.url);
+  }
+  const apiKeyEnv = optionalString(raw.apiKeyEnv, `${ctx}: apiKeyEnv`);
+  if (!apiKeyEnv || !ENV_NAME.test(apiKeyEnv)) throw new Error(`${ctx}: apiKeyEnv must name the environment variable that holds the server's token`);
+  const token = env[apiKeyEnv]?.trim() || undefined;
+  const spec: VoiceStudioSpec = { name, kind: "voice-studio", app: "voice-studio", direct: { addresses, apiKeyEnv, ...(token ? { token } : {}) } };
+  const off = !token ? `${apiKeyEnv} is not set`
+    : addresses.every((a) => a.off) ? addresses.map((a) => `${a.host}: ${a.off}`).join("; ")
+    : undefined;
+  return { spec, ...(off ? { off } : {}) };
+}
+
+const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+/** Headers the adapter sets itself; an access layer's headers may not replace them. */
+const OWN_HEADERS = new Set(["authorization", "host", "cookie", "content-type", "content-length", "transfer-encoding", "connection", "upgrade"]);
+
+function parseAddress(entry: unknown, ctx: string, env: Record<string, string | undefined>): VoiceStudioAddress {
+  let raw: unknown = entry;
+  let headersEnv: string | undefined;
+  if (isRecord(entry)) {
+    for (const key of Object.keys(entry)) if (key !== "url" && key !== "headersEnv") throw new Error(`${ctx} has unknown key "${key}"`);
+    raw = entry.url;
+    headersEnv = optionalString(entry.headersEnv, `${ctx}: headersEnv`);
+    if (headersEnv !== undefined && !ENV_NAME.test(headersEnv)) throw new Error(`${ctx}: headersEnv must name an environment variable`);
+  }
+  if (typeof raw !== "string" || !raw.trim()) throw new Error(`${ctx} must be an address (http://host:port) or { url, headersEnv }`);
+  const text = raw.trim();
+  let u: URL;
+  try {
+    u = new URL(text);
+  } catch {
+    throw new Error(`${ctx}: ${text} is not a URL`);
+  }
+  if (u.protocol !== "http:" && u.protocol !== "https:") throw new Error(`${ctx}: ${text} must be http:// or https://`);
+  if (u.username || u.password) throw new Error(`${ctx}: ${text} carries credentials; the token goes in apiKeyEnv`);
+  if (u.search || u.hash || text.includes("?") || text.includes("#")) throw new Error(`${ctx}: ${text} must not carry a query or a fragment`);
+  const local = isLocalHost(u.hostname);
+  if (u.protocol === "http:" && !local) throw new Error(`${ctx}: ${text}: plain http only for a loopback, private-range, link-local, .local or .home.arpa host; use https://, the token travels in a header`);
+  if (headersEnv && u.protocol !== "https:") throw new Error(`${ctx}: headersEnv (an access layer's credentials) is sent to https:// addresses only`);
+  const url = `${u.origin}${u.pathname.replace(/\/+$/, "")}`;
+  let headers: Record<string, string> | undefined;
+  let off: string | undefined;
+  if (headersEnv) {
+    const value = env[headersEnv]?.trim();
+    if (!value) off = `${headersEnv} is not set`;
+    else {
+      try {
+        headers = parseHeaders(value);
+        const own = Object.keys(headers).find((h) => OWN_HEADERS.has(h.toLowerCase()) || h.toLowerCase().startsWith("sec-websocket-"));
+        if (own) throw new Error(`${own} is set by the adapter itself`);
+      } catch (e) {
+        headers = undefined;
+        off = `${headersEnv}: ${(e as Error).message}`;
+      }
+    }
+  }
+  return { url, host: u.host, local, ...(headersEnv ? { headersEnv } : {}), ...(headers ? { headers } : {}), ...(off ? { off } : {}) };
+}
+
+/**
+ * Hosts plain http may go to (docs/speech.md#direct), by the name as written, without resolving it:
+ * IPv4 loopback 127/8, RFC 1918 (10/8, 172.16/12, 192.168/16) and link-local 169.254/16; IPv6 loopback
+ * ::1, link-local fe80::/10 and unique-local fc00::/7; the names `localhost`, `*.local` (mDNS) and
+ * `*.home.arpa` (RFC 8375). Not 100.64/10 (carrier-grade NAT is shared with strangers), not a bare
+ * single-label name (it resolves through whatever search domain the network hands out).
+ */
+export function isLocalHost(hostname: string): boolean {
+  const h = hostname.toLowerCase().replace(/^\[|\]$/g, "").replace(/\.$/, "");
+  if (h === "localhost" || h.endsWith(".localhost") || h.endsWith(".local") || h.endsWith(".home.arpa")) return true;
+  const v4 = h.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (v4) {
+    const [a, b] = [Number(v4[1]), Number(v4[2])];
+    return a === 127 || a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254);
+  }
+  if (h.includes(":")) {
+    if (h === "::1") return true;
+    const first = parseInt(h.split(":")[0] || "0", 16);
+    return (first & 0xffc0) === 0xfe80 || (first & 0xfe00) === 0xfc00;
+  }
+  return false;
 }
 
 function parseVoices(raw: Record<string, unknown>, ctx: string): { voice?: string; voices?: string[] } {

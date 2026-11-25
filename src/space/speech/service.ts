@@ -27,6 +27,7 @@ import {
   type TryTrace,
 } from "./types.ts";
 import { VoiceStudioAdapter, type VoiceStudioDeps } from "./voice-studio.ts";
+import { VoiceStudioDirectAdapter, type DirectDeps } from "./voice-studio-direct.ts";
 import { wavSeconds } from "./wav.ts";
 
 /**
@@ -330,7 +331,7 @@ export class SpeechService {
     return {
       first: plan.first,
       candidates: plan.candidates.map((c) => c.adapter),
-      target(adapter: SpeechAdapter): LiveTarget {
+      target(adapter: SpeechAdapter): LiveTarget | Promise<LiveTarget> {
         return adapter.live!();
       },
       failed(adapter: SpeechAdapter, message: string, kind?: Failure["kind"]): boolean {
@@ -460,7 +461,8 @@ export class SpeechService {
 export type LiveSession = {
   first: string;
   candidates: SpeechAdapter[];
-  target(adapter: SpeechAdapter): LiveTarget;
+  /** Where the adapter's socket is; a direct voice-studio first chooses its address, so it may take a moment. */
+  target(adapter: SpeechAdapter): LiveTarget | Promise<LiveTarget>;
   /** A socket that could not be opened; true when the next candidate may be tried. */
   failed(adapter: SpeechAdapter, message: string, kind?: Failure["kind"]): boolean;
   opened(adapter: SpeechAdapter, machine: string): void;
@@ -469,13 +471,17 @@ export type LiveSession = {
 
 /** One adapter per configured provider; a provider that is off still has one, for its cell and its refusals. */
 /** `gateway`: the built-in model gateway, for an openai-compatible or minimax provider with `gateway: space`. */
-export function buildAdapters(config: SpeechConfig, deps: { voiceStudio: VoiceStudioDeps; fetch?: typeof fetch; gateway?: GatewayLink }): SpeechAdapter[] {
+/** `direct`: what a voice-studio reached at its own addresses uses (its `fetch` defaults to `fetch`'s). */
+export type AdapterDeps = { voiceStudio: VoiceStudioDeps; fetch?: typeof fetch; gateway?: GatewayLink; direct?: DirectDeps };
+
+export function buildAdapters(config: SpeechConfig, deps: AdapterDeps): SpeechAdapter[] {
   return config.providers.map((spec) => adapterFor(spec, deps));
 }
 
-function adapterFor(spec: ProviderSpec, deps: { voiceStudio: VoiceStudioDeps; fetch?: typeof fetch; gateway?: GatewayLink }): SpeechAdapter {
+function adapterFor(spec: ProviderSpec, deps: AdapterDeps): SpeechAdapter {
   switch (spec.kind) {
     case "voice-studio":
+      if (spec.direct) return new VoiceStudioDirectAdapter(spec, { ...(deps.fetch ? { fetch: deps.fetch } : {}), ...deps.direct });
       return new VoiceStudioAdapter(spec, deps.voiceStudio);
     case "openai-compatible":
       return new OpenAiAdapter(spec, { ...(deps.fetch ? { fetch: deps.fetch } : {}), ...(deps.gateway ? { gateway: deps.gateway } : {}) });

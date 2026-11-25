@@ -2,7 +2,7 @@ import type { ServerWebSocket } from "bun";
 import type { FailureKind } from "../model/failure.ts";
 import type { WsAttachment, WsData } from "../terminal/service.ts";
 import type { LiveSession, SpeechService } from "./service.ts";
-import { ProviderError, SpeechError, TAG_PATTERN, PROVIDER_NAME_PATTERN, type SpeechAdapter, type SpeechCaller } from "./types.ts";
+import { ProviderError, SpeechError, TAG_PATTERN, PROVIDER_NAME_PATTERN, type LiveTarget, type SpeechAdapter, type SpeechCaller } from "./types.ts";
 
 /**
  * One live dictation session (docs/speech.md#live-protocol) between the client's socket and a
@@ -84,13 +84,28 @@ export function liveAttachment(opts: { service: SpeechService; caller: SpeechCal
     adapter = candidate;
     /** A socket that never opened: the next candidate when it was a link failure, else the end. */
     const notOpened = (message: string, kind?: FailureKind) => (session!.failed(candidate, message, kind) ? next(message) : fail(message, kind ?? "other"));
-    let target;
-    try {
-      target = session.target(candidate);
-    } catch (e) {
+    const unreached = (e: unknown) => {
+      if (ended || client?.readyState !== 1) return;
       const err = e instanceof ProviderError ? e : new ProviderError((e as Error).message);
-      return notOpened(err.message, err.kind);
+      notOpened(err.message, err.kind);
+    };
+    let pending: LiveTarget | Promise<LiveTarget>;
+    try {
+      pending = session.target(candidate);
+    } catch (e) {
+      return unreached(e);
     }
+    // A direct voice-studio first proves which of its addresses is the server; the client's frames are held meanwhile.
+    if (pending instanceof Promise) return void pending.then((t) => open(candidate, t, notOpened), unreached);
+    open(candidate, pending, notOpened);
+  };
+
+  /**
+   * Open one target's socket. One that never opens is a link failure; when the target can be rerouted
+   * (another address of the same server) that is tried once first, since nothing reached the client yet.
+   */
+  const open = (candidate: SpeechAdapter, target: LiveTarget, notOpened: (message: string, kind?: FailureKind) => void): void => {
+    if (ended || !session || client?.readyState !== 1) return;
     machine = target.machine;
     let socket: WebSocket;
     try {
@@ -132,7 +147,14 @@ export function liveAttachment(opts: { service: SpeechService; caller: SpeechCal
       if (!upOpen) {
         // Never opened: the machine is off or the peer refused. Nothing reached the client, so the next one may answer.
         up = undefined;
-        return notOpened(`${candidate.name}: could not open its live socket (${e.code}${e.reason ? ` ${e.reason}` : ""})`, "transport");
+        const message = `${candidate.name}: could not open its live socket (${e.code}${e.reason ? ` ${e.reason}` : ""})`;
+        if (target.reroute) {
+          return void target.reroute().then(
+            (again) => (ended || client?.readyState !== 1 ? undefined : again ? open(candidate, again, notOpened) : notOpened(message, "transport")),
+            () => (ended || client?.readyState !== 1 ? undefined : notOpened(message, "transport")),
+          );
+        }
+        return notOpened(message, "transport");
       }
       if (!done && !providerError && client?.readyState === 1) providerError = { message: `${candidate.name}: the live socket closed before done (${e.code}${e.reason ? ` ${e.reason}` : ""})`, kind: e.code === 1006 ? "transport" : "other" };
       if (client?.readyState === 1) {
