@@ -74,7 +74,7 @@ function peer(name: string, url = "https://peer.invalid"): StudioPeer & { forwar
     forwarded,
     knownDown: () => false,
     health: () => "ok",
-    provides: (app) => app === "voice-studio",
+    provides: (app, cap) => app === "voice-studio" && (!cap || cap === "transcribe" || cap === "speak"),
     authHeaders: () => ({ authorization: "Bearer peer-token" }),
     snapshot: { asOf: new Date().toISOString() },
     async forward(req, path, o) {
