@@ -369,6 +369,19 @@ struct ChatReply: Equatable {
     /// event: the reply no longer shows them waiting.
     var consumedSteers: [String] = []
     private var toolNames: [String: String] = [:]
+    /// The type of each content block of the model message being streamed, by index, so the end
+    /// of a text block (`content_block_stop` carries only the index) can be told apart.
+    private var blockTypes: [Int: String] = [:]
+    /// A tool call whose input the model is still writing: started, not yet in an `assistant` event.
+    private var generatingTool: String?
+
+    /// What the turn is doing when nothing more specific is known: the tool still running, else
+    /// thinking. The turn keeps a visible row until it ends, so a long pause between a paragraph
+    /// and the next tool call does not look like a stalled reply.
+    private var resumed: ChatActivity {
+        if let tool = generatingTool { return .running(tool: tool) }
+        return steps.last(where: { $0.kind == .tool && $0.state == .running }).map { .running(tool: $0.title) } ?? .thinking(model: "")
+    }
 
     /// What the agent wrote, without any note.
     var body: String {
@@ -408,6 +421,8 @@ struct ChatReply: Equatable {
             default: steps[i].state = .cancelled
             }
             if let answers = ev["answers"] as? [String: [String]] { steps[i].answers = answers }
+            // Answered: the turn goes on, unless it still waits for another answer.
+            if !finished && !steps.contains(where: { $0.kind == .approval && $0.state == .waiting }) { activity = resumed }
         case "steer":
             let text = ev["text"] as? String ?? ""
             consumedSteers.append(text)
@@ -421,7 +436,28 @@ struct ChatReply: Equatable {
             if delta?["type"] as? String == "text_delta", let t = delta?["text"] as? String {
                 recordText(t, final: false)
                 streaming += t
+                // The text appearing is the sign the turn runs.
                 activity = nil
+            }
+            // Claude's partial messages (--include-partial-messages) mark where each block starts and
+            // ends; a tool call shows as running while its input is still being written.
+            let index = event?["index"] as? Int
+            switch event?["type"] as? String {
+            case "message_start":
+                blockTypes = [:]
+                generatingTool = nil
+            case "content_block_start":
+                let block = event?["content_block"] as? [String: Any]
+                let kind = block?["type"] as? String ?? ""
+                if let index { blockTypes[index] = kind }
+                if kind == "tool_use" {
+                    generatingTool = block?["name"] as? String ?? "tool"
+                    activity = resumed
+                }
+            case "content_block_stop":
+                if let index, blockTypes[index] == "text" { activity = resumed }
+            default:
+                break
             }
         case "assistant":
             let blocks = (ev["message"] as? [String: Any])?["content"] as? [[String: Any]] ?? []
@@ -429,7 +465,9 @@ struct ChatReply: Equatable {
             if !text.isEmpty {
                 finishedText += (finishedText.isEmpty ? "" : "\n\n") + text
                 streaming = ""
-                activity = nil
+                // The paragraph is complete; the turn goes on until `done`. A tool call in the same
+                // message replaces this below.
+                activity = resumed
             }
             for b in blocks {
                 if b["type"] as? String == "text", let text = b["text"] as? String, !text.isEmpty {
@@ -437,6 +475,7 @@ struct ChatReply: Equatable {
                     continue
                 }
                 guard b["type"] as? String == "tool_use", let id = b["id"] as? String else { continue }
+                generatingTool = nil
                 let input = b["input"] as? [String: Any] ?? [:]
                 let hint = Self.detail(input["command"] ?? input["file_path"] ?? input["path"] ?? input["query"] ?? input)
                 if let i = steps.firstIndex(where: { $0.id == "tool:" + id }) {
@@ -458,7 +497,7 @@ struct ChatReply: Equatable {
                     steps[i].output = text
                     steps[i].state = block["is_error"] as? Bool == true ? .failed : .succeeded
                 }
-                activity = steps.last(where: { $0.kind == .tool && $0.state == .running }).map { .running(tool: $0.title) } ?? .thinking(model: "")
+                activity = resumed
                 guard block["is_error"] as? Bool == true else { continue }
                 guard text.range(of: "requires approval|permission|granted|denied", options: [.regularExpression, .caseInsensitive]) != nil else { continue }
                 let tool = toolNames[block["tool_use_id"] as? String ?? ""] ?? "tool"

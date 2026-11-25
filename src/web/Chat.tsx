@@ -1,6 +1,6 @@
 import { mdHtml, BARE_URL, trimUrl } from "./chat-markdown.ts";
 import { readChatImages, imageURL, type ChatImage } from "./chat-images.ts";
-import { applyJobs, ChatSteps, historySteps, stepGroups, submitsChat, type ChatJob, type ChatQuestion, type ChatStep, type HistoryStep } from "./chat-steps.ts";
+import { applyJobs, ChatSteps, historySteps, ReplyActivity, stepGroups, submitsChat, type ChatJob, type ChatQuestion, type ChatStep, type HistoryStep } from "./chat-steps.ts";
 import { Glyph, JobsBadge, NoticeStep, ToolGroup, WorkStep } from "./ChatToolRow.tsx";
 import { cardApp, ChatCards, type ShownCard } from "./ChatCards.tsx";
 import type { Card } from "../space/agents/cards.ts";
@@ -261,9 +261,10 @@ export default function Chat({ open, agent, agents = [], apps = [], onClose, onS
       });
     const typer = { target: "" };
     const steps = new ChatSteps();
+    const activity = new ReplyActivity();
     const setTarget = (text: string) => {
       typer.target = text;
-      upd((x) => ({ ...x, text, status: null }));
+      upd((x) => ({ ...x, text }));
     };
     const setNote = (note: string) => upd((x) => ({ ...x, note }));
     const ctrl = new AbortController();
@@ -281,6 +282,8 @@ export default function Chat({ open, agent, agents = [], apps = [], onClose, onS
       steps.apply(ev);
       const snapshot = steps.snapshot();
       upd((x) => ({ ...x, steps: snapshot }));
+      const status = activity.next(ev, snapshot);
+      if (status !== undefined) upd((x) => ({ ...x, status: status && (status.key === "chat.running" ? tRef.current(status.key, { name: status.name }) : tRef.current(status.key)) }));
       if (ev.type === "cards" && Array.isArray(ev.cards)) {
         // What a tool did, checked by ai-space (docs/chat-cards.md); the token lets this reply's cards act.
         const shown: ShownCard[] = ev.cards.map((card: Card, index: number) => ({ card, index, ...(typeof ev.token === "string" ? { token: ev.token } : {}) }));
@@ -315,7 +318,7 @@ export default function Chat({ open, agent, agents = [], apps = [], onClose, onS
           if (b.type === "tool_use" && b.id && !seenTools.has(b.id)) {
             seenTools.add(b.id);
             toolNames.set(b.id, b.name || "tool");
-            upd((x) => ({ ...x, status: tRef.current("chat.running", { name: b.name || "tool" }), tools: [...x.tools, { name: b.name || "tool", hint: toolHint(b.input) }] }));
+            upd((x) => ({ ...x, tools: [...x.tools, { name: b.name || "tool", hint: toolHint(b.input) }] }));
           }
       } else if (ev.type === "user") {
         // Tool results: a call the headless run was not allowed to make comes back as an error; show it.
