@@ -1,4 +1,4 @@
-import { costOf as gatewayCost, pricedAnswer } from "../gateway/prices.ts";
+import { costOf as gatewayCost, pricedAnswer } from "../prices/price.ts";
 import type { GatewayLink } from "../gateway/types.ts";
 import type { FailureKind } from "../model/failure.ts";
 import { costOf, minimaxPriceFor } from "./prices.ts";

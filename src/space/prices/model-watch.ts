@@ -1,6 +1,6 @@
-import bundled from "./model-watch-prices.json" with { type: "json" };
-import type { Price } from "./prices.ts";
-import type { GatewayProvider } from "./types.ts";
+import bundled from "./tables/model-watch.json" with { type: "json" };
+import type { Price } from "./price.ts";
+import type { GatewayProvider } from "../gateway/types.ts";
 
 /**
  * The prices Model Watch reads off the vendors' pricing pages (docs/model-gateway.md#from-model-watch),

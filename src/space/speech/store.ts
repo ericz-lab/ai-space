@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { repriceBasis, type Price } from "../gateway/prices.ts";
+import { repriceBasis, type Price } from "../prices/price.ts";
 import type { PriceBasis } from "../runtimes/types.ts";
 import type { SpeechCall, SpeechCallInput, SpeechTotals, SpeechTrace } from "./types.ts";
 

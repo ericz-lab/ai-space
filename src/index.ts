@@ -7,9 +7,9 @@ import { AppRegistry, HealthProbe, IconPacks, LayoutStore, PetFeed, SpaceMood, W
 import { ConnectionPeers, PeerHub, PeerLedgers, PeerStore, createAdoptHandler, createConnectionPeerServe, createMigrateRoutes, createPeerRoutes, createPeerServeHandlers, createPeerServeRoutes, loadPeers, peerRuntimes, renamePeer } from "./space/peers/index.ts";
 import { ModelService, ModelStore, RuntimeHealth, createModelRoutes, createPeerModelRoutes, createPeerUsageRoutes, recordAgentRun } from "./space/model/index.ts";
 import { probeTargets, statusTable } from "./space/model/machines.ts";
-import { useModelsDev } from "./space/model/pricing.ts";
+import { setActivePrices } from "./space/prices/index.ts";
 import { availabilityOf, probeRuntime } from "./space/model/health.ts";
-import { ModelGateway, ModelWatchPrices, PriceBook, createGatewayRoutes, gatewayBase, loadGateway } from "./space/gateway/index.ts";
+import { ModelGateway, PriceBook, createGatewayRoutes, gatewayBase, loadGateway } from "./space/gateway/index.ts";
 import { createInventoryRoutes, machineRow, peerRow } from "./space/model/inventory.ts";
 import { createGatewaySettingsRoutes } from "./space/gateway/settings.ts";
 import { ModelPreferences, createModelPreferenceRoutes } from "./space/model/preferences.ts";
@@ -187,19 +187,11 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   const gatewayLoaded = await loadGateway(ws.home, env, { runtimes: [...loaded.config.runtimes.map((r) => r.name)] }).then((l) => ({ loaded: l, error: undefined }), (e: Error) => ({ loaded: undefined, error: e.message }));
   if (gatewayLoaded.error) console.error(`[model-gateway] ${gatewayLoaded.error}; the built-in model gateway answers 503 until it is fixed`);
   for (const w of gatewayLoaded.loaded?.warnings ?? []) console.warn(`[model-gateway] ${w}`);
-  // What its calls cost: gateway-prices.yaml, then Model Watch's copy of the vendors' pages (started
-  // below, once the bus and the peers are up), then models.dev's catalogue; both kept in run/.
-  // Model Watch's prices ship with ai-space (src/space/gateway/model-watch-prices.json, `bun run sync-prices`).
-  const modelWatchPrices = new ModelWatchPrices({ env });
-  const gatewayPrices = new PriceBook({ home: ws.home, modelWatch: modelWatchPrices });
+  // Every price, from one book (docs/prices.md): the owner's gateway-prices.yaml, ai-space's price
+  // catalogue (fetched daily from SPACE_PRICES_URL, this release's own copy until then), models.dev.
+  const gatewayPrices = new PriceBook({ home: ws.home, env });
   await gatewayPrices.load();
-  // The ledger's GPT list prices (gpt-prices.json) take the models only models.dev knows, and follow its refreshes.
-  let gptFilled = useModelsDev(gatewayPrices.catalogue()).join(",");
-  gatewayPrices.onChange(() => {
-    const filled = useModelsDev(gatewayPrices.catalogue()).join(",");
-    if (filled !== gptFilled) console.log(`[model] GPT prices from models.dev: ${filled || "none"}`);
-    gptFilled = filled;
-  });
+  setActivePrices(gatewayPrices);
   const modelGateway = new ModelGateway({ ...(gatewayLoaded.loaded ? { config: gatewayLoaded.loaded.config } : {}), ...(gatewayLoaded.error ? { error: gatewayLoaded.error } : {}), prices: gatewayPrices });
   for (const w of loaded.warnings) console.warn(`[runtimes] ${w}`);
   for (const r of loaded.config.runtimes) if ("gateway" in r && r.gateway === "space" && !gatewayLoaded.loaded) console.error(`[runtimes] runtime ${r.name} answers through the built-in model gateway, but ${gatewayLoaded.error ?? "there is no gateway.yaml in the workspace"}`);

@@ -1,7 +1,7 @@
 import type { ResolvedModel } from "./app-models.ts";
 import { parseImages, type RunImage, spoolImages } from "./images.ts";
 import { type FinalEvent, type PeerRun, PeerRuns, REF_PATTERN } from "./peer-runs.ts";
-import { gptPricing } from "./pricing.ts";
+import { gptPricing } from "../prices/gpt.ts";
 import { type CallChoice, type ModelService, needsLocal } from "./service.ts";
 import { parseImageInput, parseRunInput, parseWindow } from "./spec.ts";
 import { mergeReports, peerReport, type UsageReport, usageReport } from "./report.ts";

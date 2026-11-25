@@ -4,11 +4,11 @@ import { Database } from "bun:sqlite";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import fixture from "./fixtures/model-watch-prices.json";
-import { GATEWAY_PRESETS, GATEWAY_SITES } from "./config.ts";
+import { GATEWAY_PRESETS, GATEWAY_SITES } from "../gateway/config.ts";
 import { ModelWatchPrices, RATE_ENV, matchRows, modelKey, priceFromRows, type WatchFile, type WatchPayload, type WatchRow } from "./model-watch.ts";
-import bundled from "./model-watch-prices.json";
+import bundled from "./tables/model-watch.json";
 import { diffPrices, formatPrices, readModelWatch } from "../../../scripts/sync-model-watch-prices.ts";
-import { costOf, MODELS_DEV_CACHE, PriceBook, PRICES_FILE } from "./prices.ts";
+import { costOf, MODELS_DEV_CACHE, PriceBook, PRICES_FILE } from "./index.ts";
 
 // Rows copied from a Model Watch database on 2026-11-25 (its /api/prices answer), never the live one.
 const PAYLOAD = fixture as unknown as WatchPayload;

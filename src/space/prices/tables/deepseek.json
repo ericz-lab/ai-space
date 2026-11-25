@@ -1,0 +1,12 @@
+{
+  "name": "DeepSeek",
+  "asOf": "2026-11-24",
+  "source": "https://api-docs.deepseek.com/quick_start/pricing",
+  "hosts": ["api.deepseek.com"],
+  "note": "USD per million tokens at peak: input (cache miss), cache write (the API charges no extra for writing, so it is the input price), cache hit, output. Off-peak is half; a call's billing window is not recorded, so the peak figure is used and overstates off-peak calls.",
+  "models": {
+    "deepseek-flash": {"input":0.3,"output":1.2,"cacheRead":0.006,"cacheWrite":0.3},
+    "deepseek-v4-flash": {"input":0.3,"output":1.2,"cacheRead":0.006,"cacheWrite":0.3},
+    "deepseek-v4-pro": {"input":1.32,"output":3.96,"cacheRead":0.044,"cacheWrite":1.32}
+  }
+}

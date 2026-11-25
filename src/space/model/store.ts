@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
-import { repriceBasis, type Price } from "../gateway/prices.ts";
+import { repriceBasis, type Price } from "../prices/price.ts";
 import type { PriceBasis } from "../runtimes/types.ts";
-import { modelCostSql } from "./pricing.ts";
+import { modelCostSql } from "../prices/gpt.ts";
 import { type CallStatus, type CallTrace, type ModelCall, type ModelCallInput, type Origin, type Usage, type UsageTotals } from "./types.ts";
 
 /**

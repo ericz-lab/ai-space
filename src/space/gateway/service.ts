@@ -3,7 +3,7 @@ import { retryAfterSeconds } from "../runtimes/anthropic-api.ts";
 import { splitModelId } from "./config.ts";
 import { carriesThinking, downstreamHeaders, errorText, readUsage, tapMessagesStream, upstreamHeaders } from "./forward.ts";
 import { GatewayTokens } from "./tokens.ts";
-import { costOf, pricedAnswer, type Price, type PriceBook } from "./prices.ts";
+import { costOf, pricedAnswer, type Price, type PriceBook } from "../prices/index.ts";
 import { TraceStore } from "./trace.ts";
 import { forwardsOf, kindOf } from "./kinds.ts";
 import type { Usage } from "../runtimes/types.ts";

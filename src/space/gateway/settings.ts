@@ -11,7 +11,7 @@ import { GATEWAY_FILE, GATEWAY_PRESETS, parseGatewayYaml, runtimeClash, setGatew
 import { GatewayEditError, PAGE_KEY_PREFIX, type ProviderEntry, editProblem, pageKeyVar, removeEnvKeysText, setEnvKeyText, setGroupsText, setProviderText } from "./edit.ts";
 import type { ModelGateway } from "./service.ts";
 import { GATEWAY_AUTH, GATEWAY_KINDS, type GatewayKind, GATEWAY_MODEL_PATTERN, GATEWAY_NAME_PATTERN, GATEWAY_TIERS, type GatewayAuth, type GatewayConfig, type GatewayProvider, type GatewayTier, type GatewayTiers } from "./types.ts";
-import { PRICES_FILE } from "./prices.ts";
+import { PRICES_FILE } from "../prices/price.ts";
 import { createGatewayMediaRoutes, type MediaOptions } from "./settings-media.ts";
 import { documentedIds, documentedKind, kindOf, servesOf } from "./kinds.ts";
 import { VENDORS, customList, fetchModelList, presetList, redact, testProvider } from "./vendors.ts";

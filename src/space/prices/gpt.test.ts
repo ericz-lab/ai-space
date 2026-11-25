@@ -1,6 +1,15 @@
 import { expect, test } from "bun:test";
-import type { PriceCatalog } from "../gateway/prices.ts";
-import { GPT_FILE, mergeGptPricing, rateFromModelsDev } from "./pricing.ts";
+import { PriceBook } from "./book.ts";
+import { pricingFrom, rateFromModelsDev } from "./gpt.ts";
+import type { PriceCatalog } from "./price.ts";
+
+/** The document a Space serves with this models.dev catalogue and nothing in the owner's file. */
+const mergeGptPricing = (c: PriceCatalog | undefined) => {
+  const book = new PriceBook({ offline: true, env: {} });
+  if (c) book.useCatalog(c);
+  return pricingFrom(book);
+};
+const GPT_FILE = mergeGptPricing(undefined);
 
 const dev = (openai: PriceCatalog["providers"][string]["models"], anthropic: PriceCatalog["providers"][string]["models"] = {}): PriceCatalog => ({
   fetchedAt: "2026-11-24T12:00:00.000Z",
@@ -42,7 +51,9 @@ test("without the catalogue the table is the file, with no Anthropic section", (
   const m = mergeGptPricing(undefined);
   expect(m.models).toEqual(GPT_FILE.models);
   expect(m.filled).toEqual({});
-  expect(m.anthropic).toBeUndefined();
+  // The release's own Claude and DeepSeek prices are served without models.dev.
+  expect(Object.keys(m.anthropic!.models)).toEqual(["claude-haiku-4-5", "claude-opus-5", "claude-sonnet-5"]);
+  expect(Object.keys(m.deepseek!.models)).toEqual(["deepseek-flash", "deepseek-v4-flash", "deepseek-v4-pro"]);
 });
 
 test("Anthropic's list prices are served beside the GPT table", () => {
@@ -51,11 +62,10 @@ test("Anthropic's list prices are served beside the GPT table", () => {
     "claude-haiku-5-5": { input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite: 0.125, tiers: [{ over: 100000, input: 0.5, output: 2.5, cacheRead: 0.05, cacheWrite: 0.625 }] },
     "not a claude id": { input: 1, output: 1 },
   }));
-  expect(m.anthropic).toEqual({
-    source: "https://models.dev", fetchedAt: "2026-11-24T12:00:00.000Z", unitTokens: 1_000_000,
-    models: {
-      "claude-opus-5-5": { input: 4, cacheWrite: 5, cacheRead: 0.2, output: 20, longContext: null },
-      "claude-haiku-5-5": { input: 0.1, cacheWrite: 0.125, cacheRead: 0.01, output: 0.5, longContext: { threshold: 100000, inputMultiplier: 5, outputMultiplier: 5 } },
-    },
-  });
+  expect(m.anthropic).toMatchObject({ fetchedAt: "2026-11-24T12:00:00.000Z", unitTokens: 1_000_000 });
+  expect(m.anthropic!.models["claude-opus-5-5"]).toEqual({ input: 4, cacheWrite: 5, cacheRead: 0.2, output: 20, longContext: null });
+  expect(m.anthropic!.models["claude-haiku-5-5"]).toEqual({ input: 0.1, cacheWrite: 0.125, cacheRead: 0.01, output: 0.5, longContext: { threshold: 100000, inputMultiplier: 5, outputMultiplier: 5 } });
+  expect(m.anthropic!.models["not a claude id"]).toBeUndefined();
+  expect(m.anthropic!.sources["claude-opus-5-5"]).toBe("models.dev anthropic");
+  expect(m.anthropic!.sources["claude-opus-5"]).toBe("ai-space anthropic 2026-11-24");
 });
