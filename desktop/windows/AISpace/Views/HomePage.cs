@@ -39,6 +39,7 @@ internal sealed partial class HomePage : NativePage
     private readonly ContentControl _banner = new() { Focusable = false };
     private readonly FrameworkElement _box;
     private readonly TextBox _field;
+    private readonly VoiceButton? _mic;
     private readonly StackPanel _body = new();
     private HomeCatalogue? _catalogue;
     private DateTimeOffset? _catalogueAt;
@@ -70,6 +71,18 @@ internal sealed partial class HomePage : NativePage
         _field.FontSize = 15;
         _field.MinHeight = 40;
         _field.PreviewKeyDown += OnBoxKey;
+        if (context.Model.Voice is { } voice && _box is Grid boxHost)
+        {
+            // The microphone at the box's right end: what is said goes into the box, never asked by itself.
+            _mic = new VoiceButton(voice, () => Context.Api, text =>
+            {
+                _field.Text = VoiceText.Append(_field.Text, text);
+                _field.CaretIndex = _field.Text.Length;
+                _field.Focus();
+            }) { HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 4, 0) };
+            _mic.IsVisibleChanged += (_, _) => _field.Padding = new Thickness(30, 6, _mic.IsVisible ? 40 : 8, 6);
+            boxHost.Children.Add(_mic);
+        }
 
         // The screens and the Library are tabs of the main window's bar (Places, below), not of the page.
         var headerFrame = new Border { Child = _box, MaxWidth = 1100, Padding = new Thickness(32, 20, 32, 10) };
@@ -102,6 +115,7 @@ internal sealed partial class HomePage : NativePage
     public override void Shown()
     {
         _shortcut?.SetActive(true);
+        _mic?.Check();
         if (_stale || _catalogue is null) Load();
         Draw();
         Dispatcher.BeginInvoke(() =>
@@ -112,6 +126,8 @@ internal sealed partial class HomePage : NativePage
 
     public override void LiveChanged()
     {
+        // A Space that did not answer (signed out, offline) is asked again once it does.
+        if (IsShown && Context.Live?.Status == LiveStatus.Ok) _mic?.Check();
         if (IsShown) Load();
         else _stale = true;
     }
