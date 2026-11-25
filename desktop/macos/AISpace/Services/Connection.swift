@@ -84,6 +84,32 @@ enum ConnectionRules {
         return url
     }
 
+    /// The address to hand the default browser for an app page shown at `current`, opened from `home`.
+    /// A package app's page is `/_space/apps/<app>` (or `/_space/connections/<id>/apps/<app>`) on the
+    /// Space, which redirects through a one-time ticket to the app's own origin; that origin only
+    /// admits the web view that redeemed the ticket (src/space/packages/gateway.ts). So the browser
+    /// gets the entry again, with the page it was on in `path`, and redeems a ticket of its own.
+    static func browserURL(current: URL?, home: URL) -> URL {
+        guard let current else { return home }
+        guard !sameOrigin(current, home), isPackageEntry(home.path),
+              var entry = URLComponents(url: home, resolvingAgainstBaseURL: true),
+              let page = URLComponents(url: current, resolvingAgainstBaseURL: true)
+        else { return current }
+        // Kept percent-encoded, without the fragment: the Space takes `path` as a request target and refuses `#` or spaces.
+        var path = page.percentEncodedPath.isEmpty ? "/" : page.percentEncodedPath
+        if let query = page.percentEncodedQuery { path += "?" + query }
+        entry.queryItems = (entry.queryItems ?? []).filter { $0.name != "path" } + (path == "/" ? [] : [URLQueryItem(name: "path", value: path)])
+        if entry.queryItems?.isEmpty == true { entry.queryItems = nil }
+        return entry.url ?? home
+    }
+
+    /// Whether a Space path is a package app's entry (src/space/packages/panel.ts).
+    static func isPackageEntry(_ path: String) -> Bool {
+        let parts = path.split(separator: "/", omittingEmptySubsequences: true)
+        guard parts.first == "_space" else { return false }
+        return (parts.count == 3 && parts[1] == "apps") || (parts.count == 5 && parts[1] == "connections" && parts[3] == "apps")
+    }
+
     /// Whether two URLs share scheme, host and effective port.
     static func sameOrigin(_ a: URL, _ b: URL) -> Bool {
         guard let sa = a.scheme?.lowercased(), let sb = b.scheme?.lowercased(), sa == sb,

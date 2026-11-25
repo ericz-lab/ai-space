@@ -600,8 +600,8 @@ final class AppModel: ObservableObject {
 
     func openInBrowser() {
         guard let c = selected else { return }
-        if case .app(let id) = destination, let url = tab(id, connection: c.id)?.session.webView.url {
-            NSWorkspace.shared.open(url)
+        if case .app(let id) = destination, let tab = tab(id, connection: c.id) {
+            NSWorkspace.shared.open(tab.session.appBrowserURL)
         } else {
             NSWorkspace.shared.open(session(for: c).browserURL)
         }
