@@ -386,15 +386,15 @@ describe("the Speech group's routes", () => {
     expect(v.seen.at(-1)).toMatchObject({ path: "/v1/audio/speech", json: { model: "tts-1", voice: "nova", input: "hi" } });
   });
 
-  test("a hand-written direct voice-studio: shown where its address is, and a save keeps its entry as written", async () => {
+  test("a hand-written speech server: shown where its address is, and a save keeps its entry as written", async () => {
     const v = vendor();
     const { call, env } = await setup(gwYaml(v.url));
     env.STUDIO_TOKEN = "tok";
-    const entry = "    gpu:   # the GPU box, home and away\n      kind: voice-studio\n      urls:\n        - http://192.168.3.48:8920          # LAN\n        - { url: https://voice.example.com, headersEnv: VOICE_ACCESS }\n      apiKeyEnv: STUDIO_TOKEN\n";
+    const entry = "    gpu:   # the GPU box, home and away\n      kind: speech-server\n      urls:\n        - http://192.168.3.48:8920          # LAN\n        - { url: https://voice.example.com, headersEnv: VOICE_ACCESS }\n      apiKeyEnv: STUDIO_TOKEN\n";
     await writeFile(join(home, "providers.yaml"), `speech:\n  default: { asr: gpu, tts: gpu }\n  providers:\n${entry}`);
     // The running service has not loaded the file in this setup: the view falls back to the first address.
     const view = (await call("GET", "/api/model/gateway/speech")).json;
-    expect(view.custom).toEqual([{ name: "gpu", kind: "voice-studio", serves: { asr: true, tts: true, live: true }, machine: "192.168.3.48:8920", testable: false }]);
+    expect(view.custom).toEqual([{ name: "gpu", kind: "speech-server", serves: { asr: true, tts: true, live: true }, machine: "192.168.3.48:8920", testable: false }]);
     expect(view.order).toEqual({ asr: [{ provider: "gpu" }], tts: [{ provider: "gpu" }] });
     const saved = await call("PUT", "/api/model/gateway/speech", { asr: [{ provider: "gpu" }, { gateway: "oa", model: "whisper-1" }], tts: [{ provider: "gpu" }] });
     expect(saved.json).toMatchObject({ ok: true, applied: true });

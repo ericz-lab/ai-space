@@ -4,8 +4,8 @@ import { ProviderError, type LiveTarget, type ProviderState, type SpeakInput, ty
 
 /**
  * The self-hosted provider (docs/speech.md#kinds): the `voice-studio` app, on this space or on a peer,
- * reached the way the panel reached it before this layer. (A server reached at its own addresses, direct
- * mode, is `voice-studio-direct.ts`.) Files and text go through the bus as a
+ * reached the way the panel reached it before this layer. (A speech server reached at its own addresses,
+ * voice-studio among them, is the `speech-server` kind: `speech-server.ts`.) Files and text go through the bus as a
  * capability call (`transcribe`, `speak`; `bus_calls` records them as before), a live session opens the
  * app's own socket (`/api/asr/realtime`, here on loopback or through the peer's WebSocket bridge), and the
  * voices come from the app's `/api/voices`. Its live protocol is the Space's, so nothing is translated.

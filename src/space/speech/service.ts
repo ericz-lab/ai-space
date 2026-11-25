@@ -27,7 +27,7 @@ import {
   type TryTrace,
 } from "./types.ts";
 import { VoiceStudioAdapter, type VoiceStudioDeps } from "./voice-studio.ts";
-import { VoiceStudioDirectAdapter, type DirectDeps } from "./voice-studio-direct.ts";
+import { SpeechServerAdapter, type SpeechServerDeps } from "./speech-server.ts";
 import { wavSeconds } from "./wav.ts";
 
 /**
@@ -461,7 +461,7 @@ export class SpeechService {
 export type LiveSession = {
   first: string;
   candidates: SpeechAdapter[];
-  /** Where the adapter's socket is; a direct voice-studio first chooses its address, so it may take a moment. */
+  /** Where the adapter's socket is; a speech server first chooses its address, so it may take a moment. */
   target(adapter: SpeechAdapter): LiveTarget | Promise<LiveTarget>;
   /** A socket that could not be opened; true when the next candidate may be tried. */
   failed(adapter: SpeechAdapter, message: string, kind?: Failure["kind"]): boolean;
@@ -471,8 +471,8 @@ export type LiveSession = {
 
 /** One adapter per configured provider; a provider that is off still has one, for its cell and its refusals. */
 /** `gateway`: the built-in model gateway, for an openai-compatible or minimax provider with `gateway: space`. */
-/** `direct`: what a voice-studio reached at its own addresses uses (its `fetch` defaults to `fetch`'s). */
-export type AdapterDeps = { voiceStudio: VoiceStudioDeps; fetch?: typeof fetch; gateway?: GatewayLink; direct?: DirectDeps };
+/** `speechServer`: what a speech-server provider uses (its `fetch` defaults to `fetch`'s). */
+export type AdapterDeps = { voiceStudio: VoiceStudioDeps; fetch?: typeof fetch; gateway?: GatewayLink; speechServer?: SpeechServerDeps };
 
 export function buildAdapters(config: SpeechConfig, deps: AdapterDeps): SpeechAdapter[] {
   return config.providers.map((spec) => adapterFor(spec, deps));
@@ -481,8 +481,9 @@ export function buildAdapters(config: SpeechConfig, deps: AdapterDeps): SpeechAd
 function adapterFor(spec: ProviderSpec, deps: AdapterDeps): SpeechAdapter {
   switch (spec.kind) {
     case "voice-studio":
-      if (spec.direct) return new VoiceStudioDirectAdapter(spec, { ...(deps.fetch ? { fetch: deps.fetch } : {}), ...deps.direct });
       return new VoiceStudioAdapter(spec, deps.voiceStudio);
+    case "speech-server":
+      return new SpeechServerAdapter(spec, { ...(deps.fetch ? { fetch: deps.fetch } : {}), ...deps.speechServer });
     case "openai-compatible":
       return new OpenAiAdapter(spec, { ...(deps.fetch ? { fetch: deps.fetch } : {}), ...(deps.gateway ? { gateway: deps.gateway } : {}) });
     case "minimax":

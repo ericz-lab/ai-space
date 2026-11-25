@@ -1,12 +1,13 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { FailureKind } from "../model/failure.ts";
-import { ProviderError, type LiveTarget, type ProviderState, type SpeakInput, type SpeakResult, type SpeechAdapter, type SpeechCapability, type TranscribeInput, type TranscribeResult, type VoiceStudioAddress, type VoiceStudioDirect, type VoiceStudioSpec } from "./types.ts";
+import { ProviderError, type LiveTarget, type ProviderState, type SpeakInput, type SpeakResult, type SpeechAdapter, type SpeechCapability, type SpeechServerAddress, type SpeechServerSpec, type TranscribeInput, type TranscribeResult } from "./types.ts";
 import { httpError, transcriptOf } from "./voice-studio.ts";
 
 /**
- * A voice-studio server reached at its own addresses (docs/speech.md#direct), not through this space's
- * bus or a peer: `POST /api/asr`, `POST /api/tts`, `GET /api/voices` and `WS /api/asr/realtime` under a
- * base URL, each with the server's token as a bearer.
+ * The `speech-server` kind (docs/speech.md#speech-server): a server that speaks the speech-server
+ * interface, reached at its own addresses rather than through this space's bus or a peer. The voice-studio
+ * app is the implementation that exists. `POST /api/asr`, `POST /api/tts`, `GET /api/voices` and
+ * `WS /api/asr/realtime` under a base URL, each with the server's token as a bearer.
  *
  * Several addresses name one server (a LAN address at home, a tunnel hostname elsewhere). Before any
  * of them gets the token or a byte of audio it must pass the identity probe: `GET /api/identity?nonce=`
@@ -31,43 +32,40 @@ const VOICES_TTL_MS = 60_000;
 const VOICES_TIMEOUT_MS = 8_000;
 /** The Space's own per-file limit; no bus in between to hold it to 4 MB. */
 export const DIRECT_TRANSCRIBE_BYTES = 25 * 1024 * 1024;
-/** `voice-studio` reads at most this many speakers in one script. */
+/** The interface reads at most this many speakers in one script (voice-studio's limit). */
 const MAX_SPEAKERS = 4;
 /** An identity answer is a few hundred bytes; anything longer is not one. */
 const MAX_IDENTITY_BYTES = 16 * 1024;
 const NONCE_BYTES = 32;
 
-/** The proof a voice-studio server answers the probe with: lowercase hex HMAC-SHA256 keyed by the token. */
+/** The proof a speech server answers the probe with: lowercase hex HMAC-SHA256 keyed by the token. The prefix is the interface's, whatever the server is called. */
 export function identityProof(token: string, nonce: string): string {
   return createHmac("sha256", token).update(`voice-studio-identity:${nonce}`).digest("hex");
 }
 
-export type DirectDeps = {
+export type SpeechServerDeps = {
   fetch?: typeof fetch;
   now?: () => number;
   /** For tests: shorter probe timeouts. */
   probeTimeoutMs?: { local: number; remote: number };
 };
 
-export class VoiceStudioDirectAdapter implements SpeechAdapter {
-  readonly kind = "voice-studio" as const;
+export class SpeechServerAdapter implements SpeechAdapter {
+  readonly kind = "speech-server" as const;
   readonly capabilities: ReadonlySet<SpeechCapability> = new Set<SpeechCapability>(["transcribe", "live", "speak"]);
   readonly selfHosted = true;
   readonly limits = { transcribeBytes: DIRECT_TRANSCRIBE_BYTES, speakVoices: MAX_SPEAKERS };
-  private readonly direct: VoiceStudioDirect;
   private readonly fetch: typeof fetch;
   private readonly now: () => number;
   /** The address in use and when it was chosen or last confirmed by a probe. */
-  private chosen: { address: VoiceStudioAddress; at: number } | undefined;
+  private chosen: { address: SpeechServerAddress; at: number } | undefined;
   /** The last choice that found none, and why. */
   private failed: { at: number; detail: string } | undefined;
-  private choosing: Promise<VoiceStudioAddress | undefined> | undefined;
+  private choosing: Promise<SpeechServerAddress | undefined> | undefined;
   private rechecking: Promise<void> | undefined;
   private cachedVoices: { at: number; url: string; voices: string[] } | undefined;
 
-  constructor(readonly spec: VoiceStudioSpec, private readonly deps: DirectDeps = {}) {
-    if (!spec.direct) throw new Error(`${spec.name}: not a direct voice-studio provider`);
-    this.direct = spec.direct;
+  constructor(readonly spec: SpeechServerSpec, private readonly deps: SpeechServerDeps = {}) {
     this.fetch = deps.fetch ?? fetch;
     this.now = deps.now ?? Date.now;
   }
@@ -77,13 +75,13 @@ export class VoiceStudioDirectAdapter implements SpeechAdapter {
   }
 
   /** The addresses that may be tried, in order of preference. */
-  private get usable(): VoiceStudioAddress[] {
-    return this.direct.addresses.filter((a) => !a.off);
+  private get usable(): SpeechServerAddress[] {
+    return this.spec.addresses.filter((a) => !a.off);
   }
 
   /** From what calls and earlier probes learned; never probes (docs/speech.md#status). */
   state(): ProviderState {
-    const at = this.chosen?.address ?? this.usable[0] ?? this.direct.addresses[0]!;
+    const at = this.chosen?.address ?? this.usable[0] ?? this.spec.addresses[0]!;
     const base = { where: at.host, machine: at.host, located: true };
     if (this.chosen) return { ...base, reachable: true };
     if (this.failed) return { ...base, reachable: false, detail: this.failed.detail };
@@ -102,8 +100,8 @@ export class VoiceStudioDirectAdapter implements SpeechAdapter {
    * One identity probe; undefined when the address proved it is the server, else why not. No token
    * goes with it; an access layer's headers do, to an https address only. A redirect is not followed.
    */
-  private async probe(a: VoiceStudioAddress, signal: AbortSignal): Promise<string | undefined> {
-    const token = this.direct.token;
+  private async probe(a: SpeechServerAddress, signal: AbortSignal): Promise<string | undefined> {
+    const token = this.spec.token;
     if (!token) return "no token";
     const nonce = Buffer.from(crypto.getRandomValues(new Uint8Array(NONCE_BYTES))).toString("hex");
     const limits = this.deps.probeTimeoutMs ?? PROBE_TIMEOUT_MS;
@@ -127,7 +125,8 @@ export class VoiceStudioDirectAdapter implements SpeechAdapter {
       } catch {
         return "the answer is not JSON";
       }
-      if (body?.ok !== true || body.app !== "voice-studio") return "it does not say it is voice-studio";
+      // `app` names the implementation (voice-studio says "voice-studio"); only the proof authenticates.
+      if (body?.ok !== true) return "it does not answer as a speech server";
       if (typeof body.proof !== "string" || !/^[0-9a-f]{64}$/.test(body.proof)) return "no proof in the answer";
       const ok = timingSafeEqual(Buffer.from(body.proof, "hex"), Buffer.from(identityProof(token, nonce), "hex"));
       return ok ? undefined : "the proof is wrong (another server, or another token)";
@@ -142,7 +141,7 @@ export class VoiceStudioDirectAdapter implements SpeechAdapter {
    * Probe the addresses at once and take the earliest in list order that passes, without waiting for a
    * later one once an earlier one has passed (the rest are aborted). Concurrent callers share one choice.
    */
-  private choose(): Promise<VoiceStudioAddress | undefined> {
+  private choose(): Promise<SpeechServerAddress | undefined> {
     this.choosing ??= this.pick(this.usable)
       .then(({ found, why }) => {
         if (found) {
@@ -150,9 +149,9 @@ export class VoiceStudioDirectAdapter implements SpeechAdapter {
           this.failed = undefined;
           return found;
         }
-        const off = this.direct.addresses.filter((a) => a.off).map((a) => `${a.host}: ${a.off}`);
+        const off = this.spec.addresses.filter((a) => a.off).map((a) => `${a.host}: ${a.off}`);
         this.chosen = undefined;
-        this.failed = { at: this.now(), detail: `no address answered as voice-studio (${[...why, ...off].join("; ") || "none to try"})` };
+        this.failed = { at: this.now(), detail: `no address answered as the speech server (${[...why, ...off].join("; ") || "none to try"})` };
         return undefined;
       })
       .finally(() => {
@@ -162,7 +161,7 @@ export class VoiceStudioDirectAdapter implements SpeechAdapter {
   }
 
   /** The earliest of `list` that passes the probe, or why each one did not. */
-  private async pick(list: VoiceStudioAddress[]): Promise<{ found?: VoiceStudioAddress; why: string[] }> {
+  private async pick(list: SpeechServerAddress[]): Promise<{ found?: SpeechServerAddress; why: string[] }> {
     const stop = new AbortController();
     const probes = list.map((a) => this.probe(a, stop.signal));
     const why: string[] = [];
@@ -199,30 +198,30 @@ export class VoiceStudioDirectAdapter implements SpeechAdapter {
   }
 
   /** The address to use now: the remembered one, else a fresh choice; none is a link failure. */
-  private async address(): Promise<VoiceStudioAddress> {
+  private async address(): Promise<SpeechServerAddress> {
     if (this.chosen) {
       this.recheck();
       return this.chosen.address;
     }
     const a = await this.choose();
-    if (!a) throw failure(`${this.name}: unreachable: ${this.failed?.detail ?? "no address answered as voice-studio"}`, 503, "transport");
+    if (!a) throw failure(`${this.name}: unreachable: ${this.failed?.detail ?? "no address answered as the speech server"}`, 503, "transport");
     return a;
   }
 
-  private forget(a: VoiceStudioAddress): void {
+  private forget(a: SpeechServerAddress): void {
     if (this.chosen?.address.url === a.url) this.chosen = undefined;
   }
 
   /** The token and, to an https address, the access layer's headers: only ever for an address that passed the probe. */
-  private headersFor(a: VoiceStudioAddress): Record<string, string> {
-    return { ...accessHeaders(a), authorization: `Bearer ${this.direct.token}` };
+  private headersFor(a: SpeechServerAddress): Record<string, string> {
+    return { ...accessHeaders(a), authorization: `Bearer ${this.spec.token}` };
   }
 
   /**
    * One HTTP call to the server. A call that does not reach it (refused, reset, unresolved, a redirect:
    * not the server) forgets the address, chooses again and is sent once more when another one passed.
    */
-  private async request(path: string, init: { method: string; body?: BodyInit; headers?: Record<string, string> }, opts: { signal?: AbortSignal; timeoutMs: number }): Promise<{ res: Response; address: VoiceStudioAddress }> {
+  private async request(path: string, init: { method: string; body?: BodyInit; headers?: Record<string, string> }, opts: { signal?: AbortSignal; timeoutMs: number }): Promise<{ res: Response; address: SpeechServerAddress }> {
     let a = await this.address();
     for (let attempt = 0; ; attempt++) {
       const timeout = AbortSignal.timeout(opts.timeoutMs);
@@ -299,7 +298,7 @@ export class VoiceStudioDirectAdapter implements SpeechAdapter {
     };
   }
 
-  private socketAt(a: VoiceStudioAddress): LiveTarget {
+  private socketAt(a: SpeechServerAddress): LiveTarget {
     return { url: `${a.url.replace(/^http/, "ws")}/api/asr/realtime`, headers: this.headersFor(a), machine: a.host };
   }
 
@@ -310,7 +309,7 @@ export class VoiceStudioDirectAdapter implements SpeechAdapter {
 }
 
 /** An access layer's headers go to an https address only, whatever the file said. */
-function accessHeaders(a: VoiceStudioAddress): Record<string, string> {
+function accessHeaders(a: SpeechServerAddress): Record<string, string> {
   return a.headers && a.url.startsWith("https://") ? { ...a.headers } : {};
 }
 

@@ -95,7 +95,7 @@ export function liveAttachment(opts: { service: SpeechService; caller: SpeechCal
     } catch (e) {
       return unreached(e);
     }
-    // A direct voice-studio first proves which of its addresses is the server; the client's frames are held meanwhile.
+    // A speech server first proves which of its addresses is the server; the client's frames are held meanwhile.
     if (pending instanceof Promise) return void pending.then((t) => open(candidate, t, notOpened), unreached);
     open(candidate, pending, notOpened);
   };

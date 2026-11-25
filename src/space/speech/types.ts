@@ -15,12 +15,13 @@ export const SPEECH_ROLES = ["asr", "tts", "live"] as const;
 export type SpeechRole = (typeof SPEECH_ROLES)[number];
 export const ROLE_CAPABILITY: Record<SpeechRole, SpeechCapability> = { asr: "transcribe", tts: "speak", live: "live" };
 
-export const SPEECH_KINDS = ["voice-studio", "openai-compatible", "minimax", "dashscope"] as const;
+export const SPEECH_KINDS = ["voice-studio", "speech-server", "openai-compatible", "minimax", "dashscope"] as const;
 export type SpeechKind = (typeof SPEECH_KINDS)[number];
 
 /** The capabilities of each kind, known without calling it, so the file can be checked when it loads. */
 export const KIND_CAPABILITIES: Record<SpeechKind, readonly SpeechCapability[]> = {
   "voice-studio": ["transcribe", "live", "speak"],
+  "speech-server": ["transcribe", "live", "speak"],
   "openai-compatible": ["transcribe", "speak"],
   minimax: ["transcribe", "speak"],
   // Reserved: a file naming it loads, the provider is off (docs/speech.md#later).
@@ -37,27 +38,28 @@ export type Price = { transcribePerMinute?: number; speakPerMillionChars?: numbe
 export type VoiceStudioSpec = {
   name: string;
   kind: "voice-studio";
-  /** The app that provides `transcribe` and `speak`; default `voice-studio`. Unused in direct mode. */
+  /** The app that provides `transcribe` and `speak`; default `voice-studio`. */
   app: string;
   /** The peer it runs on; absent: this space when the app is here, else the one peer that provides it. */
   machine?: string;
-  /**
-   * Direct mode (docs/speech.md#direct): a voice-studio server reached at its own addresses, not through
-   * this space's bus or a peer. Exclusive with `machine`.
-   */
-  direct?: VoiceStudioDirect;
 };
 
-export type VoiceStudioDirect = {
+/**
+ * A speech server reached at its own addresses (docs/speech.md#speech-server): any server that speaks
+ * the speech-server interface, the voice-studio app being the one that exists.
+ */
+export type SpeechServerSpec = {
+  name: string;
+  kind: "speech-server";
   /** In order of preference: the first that proves it is the server is used. */
-  addresses: VoiceStudioAddress[];
+  addresses: SpeechServerAddress[];
   /** The variable that holds the server's token. */
   apiKeyEnv: string;
   /** The token read from `apiKeyEnv` at load; never written anywhere. */
   token?: string;
 };
 
-export type VoiceStudioAddress = {
+export type SpeechServerAddress = {
   /** The base URL without a trailing slash: `http://192.168.3.48:8920`, `https://voice.example.com/studio`. */
   url: string;
   /** `host[:port]`, what status and the ledger show. */
@@ -118,7 +120,7 @@ export type MinimaxSpec = {
 
 export type DashscopeSpec = { name: string; kind: "dashscope"; apiKeyEnv?: string };
 
-export type ProviderSpec = VoiceStudioSpec | OpenAiSpec | MinimaxSpec | DashscopeSpec;
+export type ProviderSpec = VoiceStudioSpec | SpeechServerSpec | OpenAiSpec | MinimaxSpec | DashscopeSpec;
 
 export type SpeechConfig = {
   providers: ProviderSpec[];
@@ -176,7 +178,7 @@ export type LiveTarget = {
   open?: () => WebSocket;
   /**
    * Called once when this target's socket never opened: the provider may know another address for the
-   * same server (a direct voice-studio, docs/speech.md#direct) and answers it, or undefined when it has none.
+   * same server (a speech server, docs/speech.md#speech-server) and answers it, or undefined when it has none.
    */
   reroute?: () => Promise<LiveTarget | undefined>;
 };
