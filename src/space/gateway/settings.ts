@@ -208,8 +208,8 @@ export function createGatewaySettingsRoutes(o: GatewaySettingsOptions) {
     await o.gateway.prices?.reload().catch(() => {});
     /** Each listed model's effective price and where it came from (null: none, its calls go unpriced), then the price file's other models of it. */
     const pricesOf = (p: GatewayProvider) => Object.fromEntries([...new Set([...p.models, ...(o.gateway.prices?.fileModels(p.name) ?? [])])].map((m) => {
-      const found = o.gateway.prices?.lookupSync(p, m);
-      return [m, found ? { ...found.price, source: found.source } : null];
+      const found = o.gateway.prices?.describe(p, m);
+      return [m, found ? { ...found.price, source: found.source, ...(found.checkedAt ? { checkedAt: found.checkedAt } : {}), ...(found.printed ? { currency: found.currency, printed: found.printed } : {}), ...(found.needsRate ? { needsRate: true } : {}) } : null];
     }));
     const providers = await Promise.all(
       (config?.providers ?? []).map(async (p) => {

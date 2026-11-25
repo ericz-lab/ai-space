@@ -67,7 +67,17 @@ export type GatewayProviderInfo = {
   /** What names it: groups with its members (`emptied`: those left with none), tiers on it. */
   usedBy: { groups: string[]; tiers: string[]; emptied: string[] };
 };
-export type GatewayPrice = { input?: number; output?: number; cacheRead?: number; cacheWrite?: number; tiers?: { over: number }[]; perImage?: number; perMinute?: number; perMillionChars?: number; source: string };
+export type GatewayPrice = { input?: number; output?: number; cacheRead?: number; cacheWrite?: number; tiers?: { over: number }[]; perImage?: number; perMinute?: number; perMillionChars?: number; source: string; checkedAt?: string; currency?: string; printed?: Omit<GatewayPrice, "source" | "checkedAt" | "currency" | "printed" | "needsRate">; needsRate?: boolean };
+/** Model Watch's prices as Settings shows them (docs/model-gateway.md#prices). */
+export type GatewayWatchStatus = {
+  fetchedAt?: string;
+  from?: string;
+  error?: string;
+  rate?: { usdPerCny: number; from: string };
+  rateError?: string;
+  needsRate: boolean;
+  sources: { id: string; name: string; site: string; label?: string; checkedAt?: string; currency: string; skipped: Record<string, number> }[];
+};
 export type GatewaySite = "intl" | "cn";
 /** `sites`: a vendor with a China and an international site, the bases of each (one account works on one only). */
 export type GatewayPreset = { name: string; label: string; messages?: string; openai?: string; auth: "x-api-key" | "bearer"; hasList: boolean; defaults: string[]; sites?: Record<GatewaySite, { messages?: string; openai?: string }>; openaiOffer?: { intl?: string; cn?: string; note: string; source: string } };
@@ -92,7 +102,7 @@ export type GatewayInfo = {
   ttsModels: string[];
   presets: GatewayPreset[];
   /** Where prices come from: the owner's file, and when models.dev's catalogue was last fetched. */
-  pricing?: { file: string; catalogFetchedAt?: string; fileError?: string };
+  pricing?: { file: string; catalogFetchedAt?: string; fileError?: string; modelWatch?: GatewayWatchStatus };
   runtimes: MagpiePins[];
   offer: { claude: boolean };
 };

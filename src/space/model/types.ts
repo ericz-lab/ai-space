@@ -154,6 +154,8 @@ export type UsageTotals = {
   /** All four token kinds added up. */
   tokens: number;
   costUsd: number;
+  /** Calls through the built-in gateway with no price (docs/model-gateway.md#prices): left out of `costUsd`, not free. */
+  unpriced?: number;
   durationMs: number;
 };
 

@@ -226,4 +226,5 @@ export type SpeechCallInput = {
 
 export type SpeechCall = SpeechCallInput & { id: number };
 
-export type SpeechTotals = { calls: number; errors: number; audioSeconds: number; chars: number; costUsd: number; durationMs: number };
+/** `unpriced`: calls through the built-in gateway with no price, left out of `costUsd` (not free). */
+export type SpeechTotals = { calls: number; errors: number; audioSeconds: number; chars: number; costUsd: number; unpriced?: number; durationMs: number };

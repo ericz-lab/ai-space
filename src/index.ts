@@ -8,7 +8,7 @@ import { ConnectionPeers, PeerHub, PeerLedgers, PeerStore, createAdoptHandler, c
 import { ModelService, ModelStore, RuntimeHealth, createModelRoutes, createPeerModelRoutes, createPeerUsageRoutes, recordAgentRun } from "./space/model/index.ts";
 import { probeTargets, statusTable } from "./space/model/machines.ts";
 import { availabilityOf, probeRuntime } from "./space/model/health.ts";
-import { ModelGateway, PriceBook, createGatewayRoutes, gatewayBase, loadGateway } from "./space/gateway/index.ts";
+import { MODEL_WATCH_APP, MODEL_WATCH_CAPABILITY, ModelGateway, ModelWatchPrices, PriceBook, createGatewayRoutes, gatewayBase, loadGateway } from "./space/gateway/index.ts";
 import { createInventoryRoutes, machineRow, peerRow } from "./space/model/inventory.ts";
 import { createGatewaySettingsRoutes } from "./space/gateway/settings.ts";
 import { ModelPreferences, createModelPreferenceRoutes } from "./space/model/preferences.ts";
@@ -17,7 +17,7 @@ import { ChatService, ChatStore, createChatRoutes } from "./space/chat/index.ts"
 import { buildWidget } from "./web/chat-widget/build.ts";
 import { RuntimeRegistry, loadRuntimes } from "./space/runtimes/index.ts";
 import { refreshCodexTiers } from "./space/runtimes/codex-upgrade.ts";
-import { Bus, BusStore, Consumers, capabilityCaller, createBusRoutes, isConsumerKey } from "./space/bus/index.ts";
+import { Bus, BusStore, Consumers, OPERATOR as BUS_OPERATOR, capabilityCaller, createBusRoutes, isConsumerKey } from "./space/bus/index.ts";
 import { SpeechService, SpeechStore, buildAdapters, checkGatewayProviders, createSpeechRoutes, loadSpeech } from "./space/speech/index.ts";
 import { type Manifest, Scheduler, Store, createPeerTaskRoutes, createRoutes, effectiveEnabled, loadManifest, runTarget } from "./space/scheduler/index.ts";
 import { createStorageRoutes, parseStorageSpec } from "./space/storage/index.ts";
@@ -186,8 +186,10 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   const gatewayLoaded = await loadGateway(ws.home, env, { runtimes: [...loaded.config.runtimes.map((r) => r.name)] }).then((l) => ({ loaded: l, error: undefined }), (e: Error) => ({ loaded: undefined, error: e.message }));
   if (gatewayLoaded.error) console.error(`[model-gateway] ${gatewayLoaded.error}; the built-in model gateway answers 503 until it is fixed`);
   for (const w of gatewayLoaded.loaded?.warnings ?? []) console.warn(`[model-gateway] ${w}`);
-  // What its calls cost: gateway-prices.yaml, then models.dev's catalogue, cached in run/ and refreshed daily.
-  const gatewayPrices = new PriceBook({ home: ws.home });
+  // What its calls cost: gateway-prices.yaml, then Model Watch's copy of the vendors' pages (started
+  // below, once the bus and the peers are up), then models.dev's catalogue; both kept in run/.
+  const modelWatchPrices = new ModelWatchPrices({ home: ws.home, env });
+  const gatewayPrices = new PriceBook({ home: ws.home, modelWatch: modelWatchPrices });
   await gatewayPrices.load();
   const modelGateway = new ModelGateway({ ...(gatewayLoaded.loaded ? { config: gatewayLoaded.loaded.config } : {}), ...(gatewayLoaded.error ? { error: gatewayLoaded.error } : {}), prices: gatewayPrices });
   for (const w of loaded.warnings) console.warn(`[runtimes] ${w}`);
@@ -399,6 +401,15 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     };
   };
   const speechCalls = capabilityCaller({ bus, store: busStore, remote });
+  // Model Watch's prices: its capability on this space, else on the one peer that lists it.
+  modelWatchPrices.start(async () => {
+    const req = () => new Request(`http://space/${MODEL_WATCH_APP}/${MODEL_WATCH_CAPABILITY}`, { method: "GET", headers: { accept: "application/json" } });
+    if (bus.capability(MODEL_WATCH_APP, MODEL_WATCH_CAPABILITY)) return { from: "", res: await speechCalls.callLocal(req(), BUS_OPERATOR, MODEL_WATCH_APP, MODEL_WATCH_CAPABILITY) };
+    const at = peers.providerOf(MODEL_WATCH_APP, MODEL_WATCH_CAPABILITY);
+    if (!at) throw new Error(`no ${MODEL_WATCH_APP}/${MODEL_WATCH_CAPABILITY} on this space or its peers`);
+    if ("ambiguous" in at) throw new Error(`${MODEL_WATCH_APP}/${MODEL_WATCH_CAPABILITY} is on several peers (${at.ambiguous.join(", ")})`);
+    return { from: at.peer.name, res: await speechCalls.callRemote(req(), BUS_OPERATOR, at.peer, MODEL_WATCH_APP, MODEL_WATCH_CAPABILITY) };
+  });
   const speechState = await loadSpeechState();
   for (const w of speechState.warnings) console.warn(`[speech] ${w}`);
   const speech = new SpeechService({

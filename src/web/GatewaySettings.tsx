@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getJson, sendJson, untilTime, type GatewayInfo, type GatewayKind, type GatewayModelList, type GatewayPreset, type GatewayPrice, type GatewayProviderInfo, type GatewaySite, type GatewayTest, type GatewayTiers, type MagpieInfo, type MagpieTiers } from "./api.ts";
+import { getJson, sendJson, untilTime, type GatewayInfo, type GatewayKind, type GatewayModelList, type GatewayPreset, type GatewayPrice, type GatewayProviderInfo, type GatewaySite, type GatewayTest, type GatewayTiers, type GatewayWatchStatus, type MagpieInfo, type MagpieTiers } from "./api.ts";
 import { ImageCard, SpeechCard } from "./GatewayMedia.tsx";
 import { useLang } from "./i18n.ts";
 import { MagpieRow, TierPickers, type T } from "./MachineClis.tsx";
@@ -93,6 +93,7 @@ export default function GatewaySettings() {
           <p className="sethead">{t("gateway.providers")}</p>
           {g.providers.length === 0 && <p className="setnote">{t("gateway.noProviders")}</p>}
           {g.providers.map((p) => <ProviderRow key={p.name} p={p} preset={g.presets.find((x) => x.name === p.preset)} editable={editable} busy={busy} run={runIn("providers")} lang={lang} t={t} />)}
+          {g.pricing?.modelWatch && <WatchNote w={g.pricing.modelWatch} t={t} />}
           {editable && (adding ? (
             <AddProvider presets={g.presets} taken={g.providers.map((p) => p.name)} busy={busy} run={runIn("providers")} onDone={() => setAdding(false)} t={t} />
           ) : (
@@ -250,27 +251,57 @@ export function Serves({ serves, t }: { serves: Record<GatewayKind, true | strin
 }
 
 const usd = (n: number) => `$${n < 0.01 && n > 0 ? n.toPrecision(2) : Number(n.toFixed(4))}`;
+const cny = (n: number) => `¥${n < 0.01 && n > 0 ? n.toPrecision(2) : Number(n.toFixed(4))}`;
+/** A stored time as the page shows it: minutes, UTC. */
+const utc = (iso: string) => `${iso.slice(0, 16).replace("T", " ")} UTC`;
 
 /** Each model's price (input / output, USD per million tokens), its source on hover; unpriced ones said so. */
 export function PriceList({ p, t }: { p: GatewayProviderInfo; t: T }) {
   const rows = Object.entries(p.prices ?? Object.fromEntries(p.models.map((m) => [m, null])));
   const unpriced = rows.filter(([, v]) => !v).map(([m]) => m);
-  const figures = (v: GatewayPrice) => [
-    v.input !== undefined && v.output !== undefined && `${usd(v.input)} / ${usd(v.output)}`,
-    v.perImage !== undefined && t("gateway.perImage", { usd: usd(v.perImage) }),
-    v.perMinute !== undefined && t("gateway.perMinute", { usd: usd(v.perMinute) }),
-    v.perMillionChars !== undefined && t("gateway.perMillionChars", { usd: usd(v.perMillionChars) }),
+  const figures = (v: Omit<GatewayPrice, "source">, money: (n: number) => string) => [
+    v.input !== undefined && v.output !== undefined && `${money(v.input)} / ${money(v.output)}`,
+    v.perImage !== undefined && t("gateway.perImage", { usd: money(v.perImage) }),
+    v.perMinute !== undefined && t("gateway.perMinute", { usd: money(v.perMinute) }),
+    v.perMillionChars !== undefined && t("gateway.perMillionChars", { usd: money(v.perMillionChars) }),
   ].filter(Boolean).join(", ");
+  const money = (v: GatewayPrice) => (v.needsRate && v.currency === "CNY" ? cny : usd);
+  const hover = (v: GatewayPrice) => [
+    v.cacheRead !== undefined && t("gateway.priceCache", { read: money(v)(v.cacheRead), write: money(v)(v.cacheWrite ?? v.input ?? 0) }),
+    v.tiers?.length && t("gateway.priceTiers"),
+    t("gateway.priceSource", { source: v.source }),
+    v.checkedAt && t("gateway.priceChecked", { at: utc(v.checkedAt) }),
+    v.printed && !v.needsRate && t("gateway.pricePrinted", { printed: figures(v.printed, cny) }),
+  ].filter(Boolean).join(" · ");
   return (
     <small className="gw-prices">
       {rows.filter(([, v]) => v).map(([m, v]) => (
-        <span key={m} title={[v!.cacheRead !== undefined && t("gateway.priceCache", { read: usd(v!.cacheRead), write: usd(v!.cacheWrite ?? v!.input ?? 0) }), v!.tiers?.length && t("gateway.priceTiers"), t("gateway.priceSource", { source: v!.source })].filter(Boolean).join(" · ")}>
-          {m} {figures(v!)}
+        <span key={m} className={v!.needsRate ? "gw-unpriced" : undefined} title={hover(v!)}>
+          {m} {v!.needsRate ? t("gateway.priceNeedsRate", { printed: figures(v!, cny) }) : figures(v!, usd)}
         </span>
       ))}
       {unpriced.length > 0 && <span className="gw-unpriced">{t("gateway.unpriced", { list: unpriced.join(", ") })}</span>}
       <span className="cli-dim">{t("gateway.priceUnit")}</span>
     </small>
+  );
+}
+
+/** Where Model Watch's prices came from, the CNY rate and where it was set, and the rows not used. */
+export function WatchNote({ w, t }: { w: GatewayWatchStatus; t: T }) {
+  const skipped = [...new Set(w.sources.flatMap((s) => Object.keys(s.skipped)))];
+  return (
+    <p className="setnote gw-watch">
+      <small>
+        {w.fetchedAt
+          ? t("gateway.watchFrom", { machine: w.from ? t("gateway.watchMachine", { machine: w.from }) : "", at: utc(w.fetchedAt), pages: w.sources.map((s) => `${s.label ?? s.name} (${s.currency}${s.checkedAt ? `, ${t("gateway.priceChecked", { at: utc(s.checkedAt) })}` : ""})`).join("; ") })
+          : t("gateway.watchNone", { error: w.error ? `: ${w.error}` : "" })}
+        {w.fetchedAt && w.error && <> {t("gateway.watchError", { error: w.error })}</>}
+        {w.rate && <> {t("gateway.rateSet", { rate: String(w.rate.usdPerCny), from: w.rate.from })}</>}
+        {w.rateError && <> <span className="gw-unpriced">{w.rateError}</span></>}
+        {w.needsRate && <> <span className="gw-unpriced">{t("gateway.rateMissing", { variable: "SPACE_GATEWAY_USD_PER_CNY" })}</span></>}
+        {skipped.length > 0 && <> {t("gateway.watchSkipped", { units: skipped.join(", ") })}</>}
+      </small>
+    </p>
   );
 }
 
