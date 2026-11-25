@@ -7,9 +7,14 @@ struct GeneralSettings: View {
     var body: some View {
         Form {
             Picker("Quick Chat shortcut", selection: $prefs.quickChat) {
-                ForEach(Preferences.Shortcut.allCases) { Text($0.label).tag($0) }
+                ForEach(shortcuts(besides: prefs.voiceInput)) { Text($0.label).tag($0) }
             }
             Text("Opens a chat with an agent over any app. Services > Ask ai-space sends selected text to it, and Shortcuts can open aispace://chat?agent=<app>/<agent>&text=… — a message is never sent without you.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Picker("Voice input shortcut", selection: $prefs.voiceInput) {
+                ForEach(shortcuts(besides: prefs.quickChat)) { Text($0.label).tag($0) }
+            }
+            Text("Press it in any app to talk and again to stop: the Space transcribes the clip and the text goes into the field you are typing in. Putting it into other apps needs AI Space allowed in System Settings → Privacy & Security → Accessibility; without that the text is left on the clipboard for ⌘V.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Toggle("Show the floating ball", isOn: $prefs.floatingBall)
             Text("A small ball over every app. Drop a picture on it to keep the picture in an app of the Space; drag the ball to move it, click it for Pending Shares. Space → Floating Ball shows or hides it too.")
@@ -35,5 +40,10 @@ struct GeneralSettings: View {
         }
         .formStyle(.grouped)
         .frame(width: 520)
+    }
+
+    /// The two shortcuts never share a combination: each picker leaves out the other's.
+    private func shortcuts(besides other: Preferences.Shortcut) -> [Preferences.Shortcut] {
+        Preferences.Shortcut.allCases.filter { $0 == .off || $0 != other }
     }
 }

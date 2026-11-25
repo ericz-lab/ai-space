@@ -410,6 +410,16 @@
 "Could not record: %@" = "无法录音：%@";
 "AI Space may not use the microphone. Allow it in System Settings → Privacy & Security → Microphone." = "AI Space 没有麦克风权限。请在“系统设置 → 隐私与安全性 → 麦克风”中允许。";
 
+/* Voice input in any app (Dictation.swift) */
+"Voice input shortcut" = "语音输入快捷键";
+"Press it in any app to talk and again to stop: the Space transcribes the clip and the text goes into the field you are typing in. Putting it into other apps needs AI Space allowed in System Settings → Privacy & Security → Accessibility; without that the text is left on the clipboard for ⌘V." = "在任何应用里按一下开始说话，再按一下结束：Space 把录音转成文字，填进你正在输入的地方。要填进其他应用，需要在“系统设置 → 隐私与安全性 → 辅助功能”中允许 AI Space；未允许时文字会留在剪贴板里，按 ⌘V 粘贴。";
+"Listening… %@ to stop" = "正在听… 按 %@ 结束";
+"Add a Space first to use voice input." = "先添加一个 Space 才能使用语音输入。";
+"%@ is not connected. Voice input needs the Space." = "%@ 未连接。语音输入需要连上 Space。";
+"This Space cannot transcribe speech." = "这个 Space 无法把语音转成文字。";
+"The text is on the clipboard. Press ⌘V to paste it." = "文字已在剪贴板里，按 ⌘V 粘贴。";
+"The text is on the clipboard. Press ⌘V to paste it. To have it go in by itself, allow AI Space in System Settings → Privacy & Security → Accessibility." = "文字已在剪贴板里，按 ⌘V 粘贴。想让它自动填入，请在“系统设置 → 隐私与安全性 → 辅助功能”中允许 AI Space。";
+
 // Device usage
 "Device usage" = "设备使用";
 "Device usage is unavailable on this Space." = "此 Space 的设备统计暂不可用。";

@@ -38,6 +38,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var window: NSWindow?
     private lazy var quickChat = QuickChat(model: model)
     private lazy var hotKey = HotKey { [weak self] in self?.quickChat.toggle() }
+    private lazy var dictation = Dictation(model: model)
+    private lazy var voiceHotKey = HotKey(id: 2) { [weak self] in self?.dictation.toggle() }
     private lazy var floatingBall = FloatingBall(model: model) { [weak self] agent, text, near in self?.quickChat.show(agent: agent, text: text, near: near) }
     private lazy var deskPet = DeskPet(model: model)
     private var watchers: Set<AnyCancellable> = []
@@ -74,6 +76,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             guard let self else { return }
             if !hotKey.register(shortcut) {
                 NSLog("ai-space: the Quick Chat shortcut \(shortcut.label) is taken by another app")
+            }
+        }.store(in: &watchers)
+        Preferences.shared.$voiceInput.sink { [weak self] shortcut in
+            guard let self else { return }
+            if !voiceHotKey.register(shortcut) {
+                NSLog("ai-space: the voice input shortcut \(shortcut.label) is taken by another app")
             }
         }.store(in: &watchers)
         Preferences.shared.$floatingBall.sink { [weak self] on in self?.floatingBall.set(visible: on) }.store(in: &watchers)
