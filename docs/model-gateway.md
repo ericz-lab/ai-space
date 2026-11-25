@@ -7,8 +7,15 @@ Status: implemented in `src/space/gateway/` (the built-in model gateway: Anthrop
 | term | what it is | here |
 | --- | --- | --- |
 | **AI runtime** | an agent CLI with its own loop and tools | Claude Code, Codex CLI, Gemini CLI, DeepSeek Harness ([runtimes.md](runtimes.md)) |
-| **model gateway** | sits between a runtime (or a direct call) and the model vendors: holds the keys, picks the vendor, fails over, records what answered | the built-in one (this page), or [magpie](#magpie) |
+| **model gateway** | sits between the model vendors and what calls them: holds the keys, picks the vendor, fails over, records what answered. Not a runtime: an app's call that names one of its models needs no runtime, and a runtime may use its Messages API | the built-in one (this page), or [magpie](#magpie) |
 | **model provider** | the vendor behind a gateway | DeepSeek, Zhipu, Kimi, MiniMax, OpenAI, … |
+
+Two ways reach the built-in model gateway:
+
+- **An app names a gateway model** (`ds/deepseek-chat`, a picture model `oa/gpt-image-1`, a group `fast`) in `/api/model/run` or `/api/model/image`, and the model service calls the gateway directly, with no runtime ([model.md](model.md#models)). Speech already worked this way: the speech service calls the gateway's providers with no runtime ([Speech](#speech)). A call to the gateway always names its model.
+- **A runtime uses the gateway's Messages API**: Claude Code with `gateway: space` ([Claude Code](#claude-code-gateway)), for chat, agent tasks and answers with tools.
+
+Which one a text call takes is the app's choice, per call, by the model it names.
 
 Three different things have "gateway" in their name, so this page always writes "model gateway". The package gateway (`src/space/packages/gateway.ts`, [app-packages.md](app-packages.md)) opens app origins. The Space Router (`src/space/router/`, [router.md](router.md)) gives apps hostnames. Neither of them has anything to do with models.
 
@@ -50,10 +57,9 @@ providers:
     apiKeyEnv: OPENAI_API_KEY
 groups:
   fast: [deepseek/deepseek-chat, mine/mine-small]   # tried in order
-tiers:                            # optional: what answers each ai-space tier ([below](#tiers))
+tiers:                            # optional: what answers each tier for Claude Code ([below](#tiers))
   basic: fast
   advanced: mine/mine-large
-  image: openai/gpt-image-1
 ```
 
 - A provider declares which bases it has. `messages` is the base Claude Code's `ANTHROPIC_BASE_URL` would be: `/v1/messages` is appended. `openai` is an OpenAI-style base: `/audio/speech`, `/audio/transcriptions`, `/images/generations` and `/images/edits` are appended. The bases decide what the gateway can forward to that provider.
@@ -61,7 +67,7 @@ tiers:                            # optional: what answers each ai-space tier ([
 - `apiKeyEnv` names a variable from the environment or the workspace `.env`. A provider whose variable is empty stays listed but is off, with a warning at boot, as a speech provider is. A provider without `apiKeyEnv` gets no auth header, for a local server.
 - `disabled: true` turns a provider off and keeps it in the file (Settings → Gateway's **Turn off**). It is listed, off, with the reason "turned off".
 - `providers:` may be empty or absent: the file loads, and the gateway answers that it has no provider yet.
-- Model ids are `provider/model` or a group's name, the same convention as magpie. A group's members are `provider/model` each. A group may not be named like a provider.
+- Model ids are `provider/model` or a group's name, the same convention as magpie. A group's members are `provider/model` each. A group may not be named like a provider, and a provider may not be named like a runtime of `runtimes.yaml`: an app's `name/model` goes to that runtime ([model.md](model.md#models)), so the provider could never be named. Such a file does not load (the reason names both), and Settings → Gateway refuses to add such a provider.
 - Validation is strict. An unknown key, a URL with a query or credentials, a group member naming a provider the file lacks, or a key written in place of a variable name stops the file from loading. The gateway then answers 503 with the reason, and the space keeps running. A tier is the exception ([below](#tiers)).
 
 ### Kinds
@@ -91,10 +97,11 @@ A kind is never guessed from how a name looks: `whisper-1` on a provider without
 
 ### Tiers
 
-`tiers:` says which model or group answers each ai-space tier through this gateway, for every runtime with `gateway: space`. Each of the four tiers (`basic`, `junior`, `intermediate`, `advanced`) is any provider's model or a group, so one gateway can serve advanced from GLM and intermediate from DeepSeek. `image` is the model or group that makes pictures ([Images](#images)). It is a tier of its own because a text model cannot draw.
+`tiers:` says which model or group answers each ai-space tier through this gateway, for a runtime with `gateway: space` (Claude Code; a deprecated `anthropic-api` one too). Each of the four tiers (`basic`, `junior`, `intermediate`, `advanced`) is any provider's model or a group, so one gateway can serve advanced from GLM and intermediate from DeepSeek. An app that names a gateway model uses no tier: it names the model.
 
-- **Resolution order**, for a runtime with `gateway: space`: the runtime's own `models:` pin in `runtimes.yaml`, else the gateway's tier, else (Claude Code only) the nearest of those, a lower one first ([Claude Code](#claude-code-gateway)). An `anthropic-api` runtime with neither answers "no model for tier" as before. A request for pictures on such a runtime (`POST /api/model/image` naming any tier) goes to `image` when it is set, whatever the runtime pins for text; an explicit `provider/model` is sent as named.
-- **Checks**: a text tier needs a provider with a `messages` base, `image` one with an `openai` base (a group: at least one member that has it), and a `provider/model` must name a provider of the file. A tier that fails this, for example after its provider was removed, does not stop the file from loading. It stays, with a warning at boot, and its calls fail with the gateway's reason. A tier that is not a string, or an unknown tier name, does stop the file from loading.
+- **No picture tier.** A picture call names its picture model ([model.md](model.md#models)). An older file's `tiers.image` still loads, stays in the file (saving the text tiers keeps it), is read by nothing, and is shown with a warning at boot and on the Pictures group; Settings refuses to set one.
+- **Resolution order**, for a runtime with `gateway: space`: the runtime's own `models:` pin in `runtimes.yaml`, else the gateway's tier, else (Claude Code only) the nearest of those, a lower one first ([Claude Code](#claude-code-gateway)). An `anthropic-api` runtime with neither answers "no model for tier" as before; for pictures its tier is its own pin, never a picture tier.
+- **Checks**: a text tier needs a provider with a `messages` base (a group: at least one member that has it), and a `provider/model` must name a provider of the file. A tier that fails this, for example after its provider was removed, does not stop the file from loading. It stays, with a warning at boot, and its calls fail with the gateway's reason. A tier that is not a string, or an unknown tier name, does stop the file from loading.
 - **Read per call**: runtimes read the gateway's tiers on each call (Claude Code: each process), so a tier saved in Settings applies from the next call without a restart. The same holds for every change Settings → Gateway makes: the running gateway reads the file again after each save. An open live chat keeps its process, and its tiers, until it ends.
 
 magpie keeps its tiers where they were: each magpie runtime's `models:` in `runtimes.yaml`. magpie has no file of ai-space's to hold them; its block in Settings → Gateway uses the same pickers ([Settings](#settings)).
@@ -121,7 +128,7 @@ A preset fills in the bases only. The key always comes from `apiKeyEnv`, and a b
 
 The four rows from `ark` down were checked on 2026-11-24.
 
-**Volcengine Ark** has one base per way of paying, and its docs warn that a plan's quota is not used on another base (calls there are billed). Pick the preset that matches the key. Pay-as-you-go takes the dated Model IDs of Ark's model list (`doubao-seed-2-1-pro-260915`); the two plans take the plan's own names (`doubao-seed-2.1-pro`, `ark-code-latest`). Ark's plan pages describe the plans as for AI tools such as Claude Code, and the Agent Plan overview says its text models are not for API calls, so use a plan preset with a Claude Code runtime, not an API runtime. Ark's Claude Code pages set the key as `ANTHROPIC_AUTH_TOKEN` (bearer); its Messages API page shows `x-api-key`. The presets have no `openai` base. Ark's pictures are at `https://ark.cn-beijing.volces.com/api/v3/images/generations` (pay-as-you-go; the Agent Plan's at `…/api/plan/v3`), offered in Settings as a base to add ([below](#speech-and-pictures)); there is no `/images/edits`, and Doubao speech is on another host with its own protocol. BytePlus ModelArk, the international site, is not a preset.
+**Volcengine Ark** has one base per way of paying, and its docs warn that a plan's quota is not used on another base (calls there are billed). Pick the preset that matches the key. Pay-as-you-go takes the dated Model IDs of Ark's model list (`doubao-seed-2-1-pro-260915`); the two plans take the plan's own names (`doubao-seed-2.1-pro`, `ark-code-latest`). Ark's plan pages describe the plans as for AI tools such as Claude Code, and the Agent Plan overview says its text models are not for API calls, so use a plan preset with a Claude Code runtime, not a direct call from an app. Ark's Claude Code pages set the key as `ANTHROPIC_AUTH_TOKEN` (bearer); its Messages API page shows `x-api-key`. The presets have no `openai` base. Ark's pictures are at `https://ark.cn-beijing.volces.com/api/v3/images/generations` (pay-as-you-go; the Agent Plan's at `…/api/plan/v3`), offered in Settings as a base to add ([below](#speech-and-pictures)); there is no `/images/edits`, and Doubao speech is on another host with its own protocol. BytePlus ModelArk, the international site, is not a preset.
 
 **OpenRouter** serves every model as `author/model` (`anthropic/claude-sonnet-4.5`) on one key. Its docs say Claude Code is made for Anthropic models and that other vendors' models "may not work correctly" through the Messages endpoint; the gateway forwards whatever is asked. Its `openai` base has `audio/speech` and `audio/transcriptions`. Pictures are `POST /api/v1/images`, not `/images/generations`, so the picture operation does not work through it. Its speech answers mp3 or pcm only, and ai-space's speech asks for wav, so OpenRouter is offered for transcription only.
 
@@ -164,7 +171,7 @@ Each base answered an unauthenticated Messages call with 401 or 403 on 2026-11-2
 
 ## Prices
 
-What a call through the built-in gateway costs is worked out by the gateway itself, per answer: the tokens the vendor's `usage` reported, and for pictures their number, at the price of the model that answered, at that provider. A run's answers are summed in its [trace](#trace-not-a-second-ledger) (`costUsd`), and the `claude-code` and `anthropic-api` runtimes put that figure on the ledger row, for text and for [pictures](#images). An answer from a model without a price makes the whole run unpriced (the trace lists it under `unpriced`), so the row has no cost rather than a low one. A price is one provider's tariff for one model, and is looked for in this order:
+What a call through the built-in gateway costs is worked out by the gateway itself, per answer: the tokens the vendor's `usage` reported, and for pictures their number, at the price of the model that answered, at that provider. A run's answers are summed in its [trace](#trace-not-a-second-ledger) (`costUsd`), and the model service (a call that names a gateway model) and the `claude-code` runtime put that figure on the ledger row, for text and for [pictures](#images). An answer from a model without a price makes the whole run unpriced (the trace lists it under `unpriced`), so the row has no cost rather than a low one. A price is one provider's tariff for one model, and is looked for in this order:
 
 1. `<workspace>/gateway-prices.yaml`, the owner's price for `provider/model`;
 2. the same file's `provider/*`, for every model of that provider (a relay's discount, a plan);
@@ -209,11 +216,11 @@ The gateway's own errors use the caller's protocol: `{ type: "error", error: { t
 
 ## Who may call it
 
-Apps do not call the model gateway. They keep using `/api/model/*` and `/api/speech/*`, which choose the model, keep the ledgers and enforce the app's settings. This is the app spec's rule: declare, do not integrate.
+Apps do not call the model gateway's routes. They use `/api/model/*` and `/api/speech/*`, naming a gateway model where they want one, and those services call the gateway, keep the ledgers and enforce the app's settings. This is the app spec's rule: declare, do not integrate.
 
 The routes have the policy `self` ([auth.md](auth.md#access-policy)): they check their own credential, whatever `SPACE_AUTH` is.
 
-- **A token ai-space issued.** The form is `sgw-<run>.<mac>`. The run id is random per process or call. The mac is an HMAC of the run id under a secret made at each boot, so no token is stored and every token dies with the process that issued it. Tokens are issued only to the Claude Code processes ai-space starts for a `gateway: space` runtime and to its own callers: the `anthropic-api` runtime and the speech adapter, one per call. The token is accepted as `Authorization: Bearer` or `x-api-key`. The operator token, a session, an app's `SPACE_APP_TOKEN` and a consumer key are all refused with a 401.
+- **A token ai-space issued.** The form is `sgw-<run>.<mac>`. The run id is random per process or call. The mac is an HMAC of the run id under a secret made at each boot, so no token is stored and every token dies with the process that issued it. Tokens are issued only to the Claude Code processes ai-space starts for a `gateway: space` runtime and to its own callers, one per call: the model service's call to a gateway model, the speech adapter, the Settings tests and a deprecated `anthropic-api` runtime. The token is accepted as `Authorization: Bearer` or `x-api-key`. The operator token, a session, an app's `SPACE_APP_TOKEN` and a consumer key are all refused with a 401.
 - **From loopback, directly.** The peer address must be a loopback address, and a request that carries `X-Forwarded-For`, `Forwarded`, `CF-Connecting-IP` or `X-Real-IP` is refused with a 403. Such a request came through the router or a tunnel, whose requests also arrive from loopback. A space bound by `SPACE_HOST` to one non-loopback address has no built-in gateway; the boot log says so.
 
 A Claude Code process holds its token in its environment, so commands that process runs (its Bash tool) can read it, as they can read any variable ai-space gives an agent run. What they send is traced under that run.
@@ -232,7 +239,7 @@ A Claude Code process holds its token in its environment, so commands that proce
 The gateway stores no prompt or reply content. Per run token it keeps how many requests it forwarded, every `provider/model` it tried, the last one that answered (`served`), the token counts the answers reported (summed), and the last error. The trace is held in memory, at most 2,000 runs (oldest dropped first) and none older than a day. The model service and the speech service stay the owners of the ledgers.
 
 - A `claude-code` runtime with `gateway: space` reads its run's trace after an answer and sets the outcome's `served`. The call's [trace](model.md#trace) then names what answered, which a call through Claude Code could not do before. The CLI's own cost figure is dropped: it prices another vendor's model at Claude's list prices. Its token counts are kept, and the cost is the gateway's own, at the price of each model that answered ([Prices](#prices)).
-- An `anthropic-api` runtime with `gateway: space` does the same per call. For pictures, what served is named in the call's `text`.
+- A call that names a gateway model does the same per call: its row (`backend: gateway`, no `runtime`) keeps the model asked for, `served` in its trace and the gateway's cost. For pictures, what served is also named in the call's `text`. A deprecated `anthropic-api` runtime with `gateway: space` does the same.
 
 ## Runtimes
 
@@ -253,7 +260,9 @@ runtimes:
 - `magpie:` and `gateway:` together are refused. So is `ssh:`, and a `machines:` fallback entry on such a runtime: the gateway is on this machine's loopback.
 - Status: a `gateway: space` runtime counts as signed in while the built-in gateway can answer: a `gateway.yaml` that loaded, at least one provider on, ai-space listening on loopback.
 
-### The Messages API: `anthropic-api` with `gateway: space`
+### The Messages API: `anthropic-api` with `gateway: space` (deprecated)
+
+Deprecated: an app names a gateway model instead, and the call goes to the gateway with no runtime ([model.md](model.md#models)). Such a runtime in `runtimes.yaml` still loads and answers as described here, but Settings no longer adds one or lists it under the runtimes through the gateway. Nothing in ai-space depends on one (Seoul's `gateway-api` can go).
 
 ```yaml
 runtimes:
@@ -268,11 +277,11 @@ Answers go to the built-in gateway's `/v1/messages` with a token issued for the 
 
 ### Images
 
-An `anthropic-api` runtime with `gateway: space` has the `image` operation when one of the gateway's providers is on and has an `openai` base. `POST /api/model/image` can then resolve to it as it resolves to `codex-cli` ([model.md](model.md#images)): the route's contract, its model resolution and `model.tags.image` do not change. Which model draws: the gateway's `image` [tier](#tiers) when the request names a tier, else the `provider/model` it names. Without input images it calls `images/generations`. With them it calls `images/edits`, multipart, with one `image[]` per input image. The system text goes before the prompt. Up to four pictures are taken from the answer. `response_format: b64_json` is sent to every model except OpenAI's GPT image models, which always answer base64 and refuse the parameter (OpenAI's [Images reference](https://developers.openai.com/api/reference/resources/images)).
+A picture call to `POST /api/model/image` that names a picture model of the gateway (`oa/gpt-image-1`, or a group with one) goes to the gateway directly, with no runtime ([model.md](model.md#models)); the route's contract, its model resolution and `model.tags.image` do not change. (A deprecated `anthropic-api` runtime with `gateway: space` also has the `image` operation when a provider is on and has an `openai` base, and sends the `provider/model` it is given.) Without input images it calls `images/generations`. With them it calls `images/edits`, multipart, with one `image[]` per input image. The system text goes before the prompt. Up to four pictures are taken from the answer. `response_format: b64_json` is sent to every model except OpenAI's GPT image models, which always answer base64 and refuse the parameter (OpenAI's [Images reference](https://developers.openai.com/api/reference/resources/images)).
 
 **A picture answered as a URL.** Some vendors answer only with a link (Zhipu's and Z.ai's CogView and GLM-Image). ai-space then fetches it, and only under these rules, each enforced in `src/space/model/vendor-image.ts` and tested in `vendor-image.test.ts`:
 
-- The URL comes from the vendor's answer to a picture request ai-space made through the built-in gateway (`gatewayImage` in `src/space/runtimes/anthropic-api.ts`). No route takes an image URL from a caller; `/api/model/image` still carries its input images as base64 only.
+- The URL comes from the vendor's answer to a picture request ai-space made through the built-in gateway (`gatewayImage` in `src/space/runtimes/anthropic-api.ts`, used by the direct gateway call, the deprecated runtime and the Settings test). No route takes an image URL from a caller; `/api/model/image` still carries its input images as base64 only.
 - `https` on port 443, with no credentials in the URL.
 - Every address the host resolves to is public. One loopback, private, link-local (the cloud metadata address `169.254.169.254` and `fd00:ec2::254` among them), carrier-grade NAT, test-net, multicast or reserved address anywhere in the answer refuses the URL, and an IPv4 address inside IPv6 (mapped, NAT64, 6to4) is checked as IPv4 (`isPublicAddress`).
 - The connection goes to the address that was checked, with the host name kept for TLS (SNI and the certificate check) and `Host`, so a second DNS answer cannot move it elsewhere.
@@ -313,9 +322,9 @@ Settings → Gateway is a section of its own, apart from Models. Settings → Mo
 - **Providers**: each one with its name and vendor, on, off or resting and why, its bases, its key (set, by the page or by hand in `.env`, or set by the environment, with at most its last four characters; [Keys](#keys)), its models with the kind of those that are not text, what it serves (text, speech to text, text to speech, pictures, each with the reason when it cannot; [Kinds](#kinds)), and **Test**, **Edit**, **Replace key**, **Turn off**/**Turn on** and **Remove**.
 - **Add provider**: a vendor of the [presets](#presets) needs only its key; **Use another address** overrides a base. **Custom** asks for a name, a messages and/or OpenAI-style base, the key header and an optional key (a local server needs none). Then the models: **Load the vendor's list** reads the vendor's model list where it documents one ([Model lists](#model-lists)) and each model gets a tick box, and each ticked one a chip with its [kind](#kinds) that one click changes; ids can be typed by hand; **Refresh** reads the list again. A preset without a list shows the ids its docs name, ticked, and the same field for others. **Add** writes the provider, and the gateway uses it at once: the first provider creates `gateway.yaml`. For a vendor whose speech or picture base is [offered, not added](#speech-and-pictures), the form and **Edit** show it with **Use …**, which fills the OpenAI-style base.
 - **Groups**: each group with its members in order, **↑ ↓** to reorder, **✕** to drop a member, a picker to add one, a field for a new group, and **Save**. A group a tier names cannot be removed here.
-- **Tiers**: the four text tier pickers, filled from the gateway's text models and the groups of them. A value can be typed by hand (**Type an id…**), and a saved value the gateway does not list now stays selected with a warning.
+- **Tiers**: the four text tier pickers, for Claude Code through the gateway, filled from the gateway's text models and the groups of them. A value can be typed by hand (**Type an id…**), and a saved value the gateway does not list now stays selected with a warning.
 - **Speech** ([below](#speech-group)) and **Pictures** ([below](#image-group)).
-- **Runtimes through it**: the runtimes with `gateway: space`, **Add a Claude Code runtime** (when `claude` is installed here) and **Add an API runtime**. Either is written to `runtimes.yaml` the same comment-keeping way, named `gateway` or `gateway-api` (then `-2`, …), and answers at once: no restart.
+- **Runtimes through it**: the Claude Code runtimes with `gateway: space`, and **Add a Claude Code runtime** when `claude` is installed here and none is there yet. It is written to `runtimes.yaml` the same comment-keeping way, named `gateway` (then `-2`, …), and answers at once: no restart. The help says what a runtime is (an agent CLI) and that apps need none to call the gateway's models. No API runtime is offered or listed (a deprecated one still loads; [above](#the-messages-api-anthropic-api-with-gateway-space-deprecated)).
 - **magpie**: magpie's row, as it was under Models ([below](#magpie)).
 
 **Test** sends one minimal request per base and shows each one's result, the vendor's error text when it failed, and the time it took. On `messages` it is `POST /v1/messages` with `max_tokens: 1` and a one-word prompt, to the first model the provider lists (a few tokens are billed). On `openai` it reads the model list, which is free; it never makes a picture or speech. It runs only when clicked.
@@ -343,7 +352,7 @@ magpie's speech is not part of this group: a `gateway: magpie` provider is still
 
 ### Image group
 
-The `image` [tier](#tiers), which `POST /api/model/image` uses through an `anthropic-api` runtime with `gateway: space` ([Images](#images)). It lists each provider with whether it can draw and why not, a picker of the picture models (models of kind `image` on providers that can draw, and groups of them), **Save**, and **Make a test picture**: one small picture through the gateway (a red circle on white), shown in the page, on click only and saying it costs. It states the URL rule above.
+The picture models an app can name in `POST /api/model/image` ([Images](#images)). It lists each provider with whether it can draw and why not, and its picture models, with **AddImageModel** (the vendor's documented ids, one click each, or one typed) on a provider that can draw. **Make a test picture** draws one small picture through the gateway (a red circle on white) with the picture model picked next to it (models of kind `image` on providers that can draw, and groups of them), shown in the page, on click only and saying it costs. There is no picture tier and no Save: an older `tiers.image` is shown with a warning that it is ignored. It states the URL rule above.
 
 ### Keys
 
@@ -387,12 +396,12 @@ Every route is the operator's: the owner's session, a device credential or the o
 | `POST /api/model/gateway/providers/:name/test` | `{model?}`: the test above; `{results: [{base, ok, ms, status?, error?, detail?}]}` |
 | `POST /api/model/gateway/models` | `{provider}` or `{preset\|messages\|openai, auth?, key?}`: `{source: "vendor"\|"defaults", models, defaults, kinds?, error?}` |
 | `PUT /api/model/gateway/groups` | `{groups: {name: [provider/model, …]}}`: the whole set |
-| `PUT /api/model/gateway/tiers` | `{tiers: {basic, …, image}}`; `""` clears a tier |
+| `PUT /api/model/gateway/tiers` | `{tiers: {basic, junior, intermediate, advanced}}`; `""` clears a tier; a new `image` is refused, an old one is kept as it is |
 | `GET /api/model/gateway/speech` | the Speech group: the file, the custom providers (`custom`: name, kind, serves, machine, located), the orders, live when a provider can do it, the gateway's providers with their speech models and voices |
 | `PUT /api/model/gateway/speech` | `{asr: [item…], tts: [item…], dryRun?}`, each item `{provider}` (one of `providers.yaml`) or `{gateway, model, voice?}`: save (or preview) `providers.yaml`; `{after, applied, created, unchanged?}` |
 | `POST /api/model/gateway/speech/test` | `{role: "tts", provider, model, voice?, text?}` → base64 wav; `{role: "asr", provider, model, audio}` → text; with `speech: <name>` instead of `provider`/`model`, a provider of the running speech configuration |
-| `POST /api/model/gateway/image/test` | `{model?}` (default the `image` tier): one small picture, base64 |
-| `POST /api/model/gateway/runtimes` | `{kind: "claude-code"\|"anthropic-api"}`: a runtime through it, in `runtimes.yaml`, loaded at once |
+| `POST /api/model/gateway/image/test` | `{model}`, a picture model of the gateway (required): one small picture, base64 |
+| `POST /api/model/gateway/runtimes` | `{kind: "claude-code"}`: Claude Code through it, in `runtimes.yaml`, loaded at once; `anthropic-api` is refused (no longer offered) |
 
 ## magpie
 
@@ -443,7 +452,7 @@ fallback:
 
 ## Code
 
-`src/space/gateway/`: `types.ts` (providers, groups, the trace, `GatewayLink`, what runtimes and speech hold of it), `config.ts` (`gateway.yaml`, the presets, `tiers:` and its text edit), `tokens.ts` (issued tokens), `trace.ts` (the per-run trace and the group member a run keeps), `forward.ts` (headers each way, usage read on the side of an SSE stream), `service.ts` (`ModelGateway`: the order of candidates, failover, rests, the answer), `api.ts` (the routes, the token and loopback check, the base a child process gets). Settings → Gateway is `src/web/GatewaySettings.tsx` (the tier pickers and magpie's row come from `src/web/MachineClis.tsx`) with its routes in `gateway/settings.ts`, the text edits of `gateway.yaml` and `.env` in `gateway/edit.ts`, and the vendors' model lists and the test in `gateway/vendors.ts`. Kinds, the documented ids and voices, what a preset lacks and the offered bases are `gateway/kinds.ts`; the Speech and Image groups are `src/web/GatewayMedia.tsx` with their routes in `gateway/settings-media.ts` and the `providers.yaml` edit in `gateway/speech-edit.ts`; a picture answered as a URL is fetched by `model/vendor-image.ts`. The runtimes' side is in `runtimes/claude-code.ts`, `runtimes/anthropic-api.ts` and `runtimes/magpie.ts` (`gatewayClaudeEnv`); the speech side in `speech/config.ts` and `speech/openai.ts`. Boot wiring is in `src/index.ts`.
+`src/space/gateway/`: `types.ts` (providers, groups, the trace, `GatewayLink`, what runtimes and speech hold of it), `config.ts` (`gateway.yaml`, the presets, `tiers:` and its text edit), `tokens.ts` (issued tokens), `trace.ts` (the per-run trace and the group member a run keeps), `forward.ts` (headers each way, usage read on the side of an SSE stream), `service.ts` (`ModelGateway`: the order of candidates, failover, rests, the answer), `api.ts` (the routes, the token and loopback check, the base a child process gets). Settings → Gateway is `src/web/GatewaySettings.tsx` (the tier pickers and magpie's row come from `src/web/MachineClis.tsx`) with its routes in `gateway/settings.ts`, the text edits of `gateway.yaml` and `.env` in `gateway/edit.ts`, and the vendors' model lists and the test in `gateway/vendors.ts`. Kinds, the documented ids and voices, what a preset lacks and the offered bases are `gateway/kinds.ts`; the Speech and Image groups are `src/web/GatewayMedia.tsx` with their routes in `gateway/settings-media.ts` and the `providers.yaml` edit in `gateway/speech-edit.ts`; a picture answered as a URL is fetched by `model/vendor-image.ts`. A call that names a gateway model is placed in `model/service.ts` (`gatewayModel`) and made by `createGatewayModels` in `runtimes/anthropic-api.ts`. The runtimes' side is in `runtimes/claude-code.ts`, `runtimes/anthropic-api.ts` and `runtimes/magpie.ts` (`gatewayClaudeEnv`); the speech side in `speech/config.ts` and `speech/openai.ts`. Boot wiring is in `src/index.ts`.
 
 ## Not done
 

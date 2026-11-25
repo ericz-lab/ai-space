@@ -32,9 +32,36 @@ Non-goals, for now:
 - Switches and budgets (turning an app's calls off from the panel, refusing calls past a daily budget). The ledger is the prerequisite; the controls come after there is data to set them from.
 - Copying peers' rows into the hub's ledger. A hub reads its peers' ledgers when its usage page asks and adds them to the answer ([model-machines.md](model-machines.md#ledger)); each row stays on the machine that wrote it.
 
+## Models
+
+An app names one of two kinds of model in a call's `model`, per call, or names none and lets the space choose ([App models](#app-models)):
+
+| kind | written as | examples | goes to |
+| --- | --- | --- | --- |
+| a runtime's model | `runtime/<model or tier>`, `machine:runtime/<model or tier>`, a bare tier, or a bare model on the default runtime | `codex/intermediate`, `claude/haiku`, `david:codex/basic`, `basic`, `sonnet` | that runtime, an agent CLI (Codex CLI, Claude Code, DeepSeek Harness), with its fallback list ([runtimes.md](runtimes.md)) |
+| a model gateway model | `provider/model` with a provider of `gateway.yaml`, or a group of it by its bare name | `ds/deepseek-chat`, `oa/gpt-image-1`, `fast` | the built-in model gateway directly, with no runtime ([model-gateway.md](model-gateway.md)) |
+
+```jsonc
+{ "model": "ds/deepseek-chat", "tag": "summary", "prompt": "…" }          // POST /api/model/run: the gateway answers
+{ "model": "codex/intermediate", "tag": "summary", "prompt": "…" }        // POST /api/model/run: Codex CLI answers
+{ "model": "oa/gpt-image-1", "tag": "cover", "prompt": "a red circle" }   // POST /api/model/image: the gateway draws
+```
+
+How a value is read, in order:
+
+1. `machine:runtime/…` is a runtime on another machine, as before ([model-machines.md](model-machines.md)).
+2. With a `/`: a first segment that is a runtime name goes to that runtime; one that is a provider of `gateway.yaml` goes to the gateway; anything else is `unknown runtime: …`.
+3. Without a `/`: a tier (`basic` … `advanced`) is the default runtime's tier; a group of `gateway.yaml` goes to the gateway; anything else is a model of the default runtime.
+
+A provider may not be named like a runtime, so step 2 is never ambiguous: `gateway.yaml` with such a provider does not load (the gateway answers 503 with the reason, the space keeps running), and Settings → Gateway refuses to add one. A call to the gateway always names its model: the gateway has no default model and no picture tier.
+
+A gateway model of the wrong kind is a `400` that names the route it belongs to: a picture model sent to `/api/model/run`, a text model sent to `/api/model/image`. Speech models (`asr`, `tts`) are the speech service's ([speech.md](speech.md)) and are refused on both. A text call to the gateway goes out as Anthropic Messages on the gateway's loopback route with a token issued for that call; a picture call as OpenAI Images, under the same rules for a vendor's picture link as before ([Images](#images)). A text call to the gateway takes no `tools`, no `mode: "full"` and no `serviceTier` (those are an agent CLI's); `images` travel as image blocks.
+
+Failover is the gateway's own: a group's next member when one fails on credit, quota, rate or transport, and the rests ([model-gateway.md](model-gateway.md#failover)). runtimes.yaml's `fallback:` lists are for runtime models and do not apply. The call shares the concurrency cap, the in-flight list, the drain on restart and the ledger with runtime calls; its row has no `runtime`, `backend: gateway`, the `model` as asked (the group or `provider/model`), what answered (`trace.tries[].served`) and the gateway's cost at that model's price. It is not a runtime, so the runtime status table has no row for it.
+
 ## Backends
 
-A call runs on one of the space's runtimes ([runtimes.md](runtimes.md)): the request's `model` names it as a prefix (`api/claude-haiku-4-5`), a bare model goes to the default runtime. Which runtimes exist is `<workspace>/runtimes.yaml`, or, without the file, the one Claude Code runtime the `.env` variables describe:
+A call to a runtime runs on one of the space's runtimes ([runtimes.md](runtimes.md)): the request's `model` names it as a prefix (`api/claude-haiku-4-5`), a bare model goes to the default runtime. Which runtimes exist is `<workspace>/runtimes.yaml`, or, without the file, the one Claude Code runtime the `.env` variables describe:
 
 | variable | backend | how a call runs |
 | --- | --- | --- |
@@ -73,7 +100,7 @@ What an app sends to `POST /api/model/run`:
 | `prompt` | string | The whole prompt. Required; at most 2 MB. |
 | `mode` | `"slim"` or `"full"`? | Text-only calls default to slim. Full retains the native CLI context and tools; supported by Claude Code and Codex CLI. See [completion modes](runtimes.md#completion-modes). |
 | `system` | string? | The system prompt. Replaces the CLI's native base instructions in either mode. Full without `system` retains native instructions; slim default: "You answer one request from an application. Reply with exactly what it asks for and nothing else." At most 200K characters: an app may put a slowly changing reference list (the catalogue a classification maps onto) here, where the CLI caches it across calls, and keep only the varying material in `prompt`. |
-| `model` | string? | A model alias or id as `claude --model` accepts it, a tier (`basic`), or `runtime/tier` (`codex/intermediate`). Omit it to let the space choose by app and tag ([App models](#app-models)); an app names one only when the call cannot work on another. |
+| `model` | string? | A runtime's model: an alias or id as `claude --model` accepts it, a tier (`basic`), or `runtime/tier` (`codex/intermediate`); or a model gateway model (`ds/deepseek-chat`, a group), [Models](#models). Omit it to let the space choose by app and tag ([App models](#app-models)); an app names one only when the call cannot work on another. |
 | `tag` | string? | The purpose of the call inside the app: `translate`, `story`, `digest`. Default `other`. This is the grain the panel groups by. |
 | `tools` | string[]? | Tools the CLI may use, as `--allowedTools` takes them (`WebSearch`, `Bash(git:*)`). None in slim (nonempty lists are rejected); native tools in full when omitted. Explicit lists are supported by Claude Code, refused by Codex and the API backend. Omitting mode retains the legacy selective-tool behavior. |
 | `permissionMode` | string? | Write tier of a full-mode call: `acceptEdits`, `bypassPermissions` or `plan`, as for a chat turn or an agent task. Only with `mode: "full"`. Absent keeps the headless default: Claude Code refuses tools that need approval, Codex stays in its read-only sandbox. `bypassPermissions` lets the call run any command as the service's user (Claude Code `--permission-mode bypassPermissions`, Codex `--sandbox danger-full-access`): an app asks for it only for work the operator handed over, and never with a prompt someone else can write. |
@@ -103,7 +130,7 @@ A comment line (`: keepalive`) goes out every 15 s while nothing else does, so a
 | --- | --- |
 | `app`, `tag`, `model` | Who, why, what was asked for. |
 | `modelSource` | Which layer chose the model: `choice` (the chat widget's picker), `request`, `override-tag`, `override-app`, `manifest-tag`, `manifest-default` or `default` ([App models](#app-models)). Absent on older rows, imports and agent tasks. |
-| `backend` | `local`, `ssh:<host>`, `api`, `peer:<name>` for a call forwarded to another space ([model-machines.md](model-machines.md)), or `agent:<runtime>` for scheduler tasks. |
+| `backend` | `local`, `ssh:<host>`, `api`, `peer:<name>` for a call forwarded to another space ([model-machines.md](model-machines.md)), `gateway` for a call that named a model gateway model (no runtime; [Models](#models)), or `agent:<runtime>` for scheduler tasks. |
 | `machine` | The machine that ran it when not this one: a peer, a `machines:` login or a runtime's own ssh host; absent for this machine. |
 | `origin` | `run` (an app's request), `task` (an agent task the scheduler ran) or `peer` (a call another space forwarded here, recorded under `<space>/<app>`). |
 | `status`, `error` | `ok` or `error` with the reason. |
@@ -121,7 +148,7 @@ A row says which runtime, machine and model answered and which [layer](#app-mode
 
 - `skippedLayers`: layers above the one that chose, which named a model this space cannot run (`{ source, model }`).
 - `candidates`: the first choice and its fallback list, in the order they were considered. An entry that could not take the call is `skipped` with the reason (full mode on another machine, tools or files the runtime refuses, a runtime this space lacks). An entry put after the others says why (`later`: `resting` with `restKind` and `until`, `signed-out`, `unreachable`, `not-installed`).
-- `tries`: each runtime tried, with `runtime`, `machine`, `model`, `ok`, `ms`, and for a failure the error (cut to 200 characters), its `kind` (`credit`, `quota`, `rate`, `auth`, `transport`, `other`; [model-machines.md](model-machines.md#status)) and `streamed` when output had already reached the caller. `served` is what a model gateway said answered it: magpie's `X-Magpie-Model`, or the built-in model gateway's trace for a runtime with `gateway: space` ([model-gateway.md](model-gateway.md#trace-not-a-second-ledger)).
+- `tries`: each runtime tried, with `runtime` (absent for a call to a model gateway model, which has none), `machine`, `model`, `ok`, `ms`, and for a failure the error (cut to 200 characters), its `kind` (`credit`, `quota`, `rate`, `auth`, `transport`, `other`; [model-machines.md](model-machines.md#status)) and `streamed` when output had already reached the caller. `served` is what a model gateway said answered it: magpie's `X-Magpie-Model`, or the built-in model gateway's trace, for a call to one of its models or a runtime with `gateway: space` ([model-gateway.md](model-gateway.md#trace-not-a-second-ledger)).
 - `stop`: why the chain stopped: `answered`, `not-switched` (a failure a call does not move on for), `streamed`, `no-time` (the request's timeout was spent), `exhausted` (every candidate failed) or `aborted`.
 
 A call with one candidate, one try and nothing skipped stores no trace: its row is the whole story. Settings → Scheduler → Model usage shows `fallback from …` and the number of tries on the call's line, and the trace under it.
@@ -150,9 +177,9 @@ model:
     curate: intermediate
 ```
 
-A bare tier runs on the runtime of the space's default (`codex/basic` makes `intermediate` mean `codex/intermediate`); `runtime/tier` pins the runtime. A layer naming a runtime or tier this space lacks is skipped, so a manifest written for another machine falls through instead of failing the call. Overrides are kept in `space.db` (`model_overrides`) and may only name a configured Claude Code or Codex tier, like the default. Chat turns from the widget resolve the same way under the tag `chat`. The app's agents in the panel's chat start on the app-wide override too, then their own declaration, then `model.default` ([panel.md](panel.md#agent-models)).
+A bare tier runs on the runtime of the space's default (`codex/basic` makes `intermediate` mean `codex/intermediate`); `runtime/tier` pins the runtime. A layer naming a runtime or tier this space lacks is skipped, so a manifest written for another machine falls through instead of failing the call. Overrides are kept in `space.db` (`model_overrides`) and may name a configured runtime tier (on this machine or another) or a model of the built-in model gateway: the page offers the gateway's text models and groups under "Model gateway · text (/api/model/run)" and its picture models under "Model gateway · pictures (/api/model/image)", and no speech models. The space default stays a Claude Code or Codex tier. A layer naming a gateway model counts as runnable when the gateway has it as a text or a picture model; a picture model given to a text call is refused with the route it belongs to. Chat turns from the widget resolve the same way under the tag `chat`. The app's agents in the panel's chat start on the app-wide override too, then their own declaration, then `model.default` ([panel.md](panel.md#agent-models)).
 
-`GET /api/model/apps` lists every app with one row for the app and one per tag (declared, overridden, or seen in the ledger over the last 30 days): the declared value, the override, the model it runs on now and the layer that chose it. `GET /api/apps/:app/model` is one app. `PATCH /api/panel/apps/:app/model` with `{tag?, model}` sets an override and `{tag?, model: null}` clears it; like the task model route it takes only same-origin browser requests.
+`GET /api/model/apps` lists every app with one row for the app and one per tag (declared, overridden, or seen in the ledger over the last 30 days): the declared value, the override, the model it runs on now and the layer that chose it, and `options`, what an override may take: runtime tiers (`{ value, runtime, tier, model }`) and gateway models (`{ value, gateway: "text" | "image", model }`). `GET /api/apps/:app/model` is one app. `PATCH /api/panel/apps/:app/model` with `{tag?, model}` sets an override and `{tag?, model: null}` clears it; like the task model route it takes only same-origin browser requests.
 
 On a hub the page also lists each peer's apps under the peer's name: the hub forwards the list and the change to the peer (`/api/peers/:peer/model/apps`, `/api/peers/:peer/apps/:app/model`), and the choices for those apps are the peer's own ([peers.md](peers.md)).
 
@@ -167,7 +194,7 @@ systemd default the `ssh` children die the moment the restart begins. See `docs/
 
 ### Images
 
-`POST /api/model/image` asks for pictures instead of text: create from the prompt, or edit the images the request carries. It takes `prompt` (at most 32K characters), `images` (as for `run`: base64, up to 8, named `img1.png`… in order), and optional `model`, `tag` (default `image`), `system` and `timeoutMs` (default 10 min, at most 30). The model resolves through the same layers as a run, under the tag, so a manifest's `model.tags.image: codex/intermediate` pins it. Only a runtime whose capabilities say `image` can serve it: `codex-cli` ([runtimes.md](runtimes.md#images)), or an `anthropic-api` runtime through the built-in model gateway when one of its providers has an OpenAI-style base ([model-gateway.md](model-gateway.md#images)). Any other runtime is a `400`. Which gateway model draws is set in Settings → Gateway → Pictures ([model-gateway.md](model-gateway.md#image-group)); a vendor that answers with a link is fetched there under strict rules (https, public addresses only, no redirect, 20 MB, 30 s, image bytes), never a URL a request names.
+`POST /api/model/image` asks for pictures instead of text: create from the prompt, or edit the images the request carries. It takes `prompt` (at most 32K characters), `images` (as for `run`: base64, up to 8, named `img1.png`… in order), and optional `model`, `tag` (default `image`), `system` and `timeoutMs` (default 10 min, at most 30). The model resolves through the same layers as a run, under the tag, so a manifest's `model.tags.image: codex/intermediate` pins it. Two kinds of model draw ([Models](#models)): a picture model of the built-in model gateway, named by the call (`oa/gpt-image-1`, or a group with one), which goes to the gateway with no runtime; or a runtime whose capabilities say `image`, `codex-cli` ([runtimes.md](runtimes.md#images)). Any other runtime is a `400`. A call that names no model resolves as before, to whatever the layers give. Settings → Gateway → Pictures lists the gateway's picture models and draws a test picture with one ([model-gateway.md](model-gateway.md#image-group)); a vendor that answers with a link is fetched under strict rules (https, public addresses only, no redirect, 20 MB, 30 s, image bytes), never a URL a request names.
 
 The answer is `200 { ok: true, text, images: [{ type, data }], call }`: `data` is base64, `text` the runtime's one-line account, `call` the ledger row. A failed call, including one where the model answered without making a picture, is `502 { ok: false, error, call }`. The call shares the concurrency cap with runs, and its ledger row carries the tokens the runtime reported for driving its image tool. What the image tool itself costs is not reported, so the row's cost figure covers the text tokens only.
 
