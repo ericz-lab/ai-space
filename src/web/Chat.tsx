@@ -2,12 +2,12 @@ import { mdHtml, BARE_URL, trimUrl } from "./chat-markdown.ts";
 import { readChatImages, imageURL, type ChatImage } from "./chat-images.ts";
 import { applyJobs, ChatSteps, historySteps, stepGroups, submitsChat, type ChatJob, type ChatQuestion, type ChatStep, type HistoryStep } from "./chat-steps.ts";
 import { Glyph, JobsBadge, NoticeStep, ToolGroup, WorkStep } from "./ChatToolRow.tsx";
-import { ChatCards, type ShownCard } from "./ChatCards.tsx";
+import { cardApp, ChatCards, type ShownCard } from "./ChatCards.tsx";
 import type { Card } from "../space/agents/cards.ts";
 import { browserZone } from "./shortcuts.ts";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { type AgentGroup, conversationTabs, groupAgents, groupKeyOf, groupOf, preferredMachine, rememberMachine } from "./agent-groups.ts";
-import { agentBase, type AgentInfo, type ChatSession, getJson, isImgIcon, relTime, type ChatRun, type MachineInventory } from "./api.ts";
+import { agentBase, type AgentInfo, type AppInfo, type ChatSession, getJson, isImgIcon, relTime, type ChatRun, type MachineInventory } from "./api.ts";
 import { ChoiceOption, SavedChoice } from "./model-choices.tsx";
 import { queuedChatTurn, type QueuedChatTurn } from "./chat-request.ts";
 import { localized, useLang } from "./i18n.ts";
@@ -91,7 +91,7 @@ export type Ask = { id: number; text: string; intentId?: string };
 /** Text from a link into the panel (panel-link.ts); a new `id` adds it to the message field, unsent. */
 export type Draft = { id: number; text: string };
 
-export default function Chat({ open, agent, agents = [], onClose, onSwitch, newTab, session, ask, draft, onTurnSettled }: { open: boolean; agent: AgentInfo; agents?: AgentInfo[]; onClose: () => void; onSwitch?: (a: AgentInfo) => void; /** Shows the button that opens this chat as a page in a new tab. */ newTab?: boolean; /** A session of the agent to resume once shown (a chat page opened from a conversation). */ session?: string; ask?: Ask | null; draft?: Draft | null; onTurnSettled?: () => void }) {
+export default function Chat({ open, agent, agents = [], apps = [], onClose, onSwitch, newTab, session, ask, draft, onTurnSettled }: { open: boolean; agent: AgentInfo; agents?: AgentInfo[]; /** The panel's apps, for the icon and name heading a chat card. */ apps?: AppInfo[]; onClose: () => void; onSwitch?: (a: AgentInfo) => void; /** Shows the button that opens this chat as a page in a new tab. */ newTab?: boolean; /** A session of the agent to resume once shown (a chat page opened from a conversation). */ session?: string; ask?: Ask | null; draft?: Draft | null; onTurnSettled?: () => void }) {
   const { lang, t } = useLang();
   // Status lines are written into the message state while a turn streams, so they read `t` through a
   // ref: a language change mid-turn applies from the next status on.
@@ -879,7 +879,7 @@ export default function Chat({ open, agent, agents = [], onClose, onSwitch, newT
                   {m.tools.length > 0 && <div className="chat-tools">{m.tools.map((tool, index) => <WorkStep key={index} step={{ id: String(index), kind: "tool", name: tool.name, text: tool.hint, output: "", state: "incomplete" }} />)}</div>}
                   <div className={`md ${m.live ? "live" : ""}`} dangerouslySetInnerHTML={{ __html: mdHtml(m.text) }} />
                 </>}
-                {m.cards?.length ? <ChatCards cards={m.cards} apiBase={agent.peer ? `/api/peers/${encodeURIComponent(agent.peer)}` : "/api"} agent={`${agent.app}/${agent.name}`} actionable={!conv.msgs.slice(i + 1).some((x) => x.role === "user")} /> : null}
+                {m.cards?.length ? <ChatCards cards={m.cards} apiBase={agent.peer ? `/api/peers/${encodeURIComponent(agent.peer)}` : "/api"} agent={`${agent.app}/${agent.name}`} app={cardApp(agent, apps, lang)} actionable={!conv.msgs.slice(i + 1).some((x) => x.role === "user")} /> : null}
                 {m.pending?.map((p, j) => <div key={`pending:${j}`} className="chat-steer pending"><b>↳ {t("chat.steerYou")}</b> {linkNodes(p)} <small>· {t("chat.steerPending")}</small></div>)}
                 {m.note && <div className="msg-note" role="status">{m.note}</div>}
               </> : <><div className="chat-images">{m.images?.map((image, i) => <a key={i} href={imageURL(image)} download={image.name}><img src={imageURL(image)} alt={image.name} /></a>)}</div>{linkNodes(m.text)}</>}

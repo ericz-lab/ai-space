@@ -1140,7 +1140,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
       <Shortcuts open={panel === "shortcuts"} onClose={close} onOpenTasks={openTasks} />
       {/* Mounted only while open: it reads the catalog when it mounts. */}
       {panel === "store" && <Store open onClose={close} onChange={storeChanged} openUrl={appUrl} />}
-      <Chat open={panel === "chat"} agent={chatAgent} agents={agents} onClose={close} onSwitch={openChat} newTab={BUILTIN_PAGES && PAGE !== "chat"} session={pageSessionId ?? undefined} ask={ask} draft={draft} onTurnSettled={() => { void reload(); }} />
+      <Chat open={panel === "chat"} agent={chatAgent} agents={agents} apps={apps} onClose={close} onSwitch={openChat} newTab={BUILTIN_PAGES && PAGE !== "chat"} session={pageSessionId ?? undefined} ask={ask} draft={draft} onTurnSettled={() => { void reload(); }} />
     </>
   );
 }
