@@ -92,6 +92,76 @@ window.quick-chat { background: transparent; }
 .qc-round > button, menubutton.qc-round > button { min-width: 20px; min-height: 20px; padding: 0; border-radius: 99px; background: transparent; }
 .qc-stop { min-width: 20px; min-height: 20px; padding: 0; color: @error_color; }
 .qc-field textview { min-height: 20px; }
+/* Chat cards (docs/chat-cards.md, app/chat-cards.ts): the web's chat-card look in the theme's colours. */
+.chat-card { background: @card_bg_color; color: @card_fg_color; border: 1px solid alpha(@window_fg_color, 0.1); border-radius: 12px; }
+.chat-card.live { box-shadow: 0 1px 2px alpha(@shade_color, 0.5), 0 6px 18px @shade_color; }
+.chat-card-sep { background: alpha(@window_fg_color, 0.1); min-height: 1px; }
+.chat-card-head { min-height: 52px; padding: 0 10px 0 14px; font-size: 13px; }
+.chat-card-app-icon { border-radius: 6px; }
+.chat-card-app-icon.solid { background: alpha(@window_fg_color, 0.07); }
+.chat-card-app { font-weight: 600; }
+.chat-card-title { color: alpha(@card_fg_color, 0.6); font-weight: 500; }
+.chat-card-undo { min-height: 30px; padding: 0 12px 0 10px; border-radius: 99px; background: transparent; box-shadow: inset 0 0 0 1px alpha(@window_fg_color, 0.14); font-size: 13px; font-weight: 500; }
+.chat-card-undo:hover { background: alpha(@window_fg_color, 0.06); }
+.chat-card-value { padding: 12px 14px; font-size: 22px; font-weight: 600; }
+.chat-card-row { padding: 10px 14px; }
+.chat-card-row.acts { padding-right: 10px; }
+.chat-card-row.single { padding: 12px 14px; }
+.chat-card-row.removed { background: alpha(@window_fg_color, 0.04); }
+.chat-card-press { padding: 0; margin: 0; border-radius: 0; min-height: 0; font-weight: normal; }
+.chat-card-press:hover { background: alpha(@window_fg_color, 0.04); }
+.chat-card-mark { min-width: 15px; min-height: 15px; border-radius: 99px; border: 1.5px solid alpha(@card_fg_color, 0.35); }
+.chat-card-mark.removed { border-style: dashed; border-color: alpha(@card_fg_color, 0.3); }
+.chat-card-mark.done { border-color: @success_color; background: @success_color; color: @success_fg_color; }
+.chat-card-icon { color: alpha(@card_fg_color, 0.6); }
+.chat-card-name { font-size: 14px; font-weight: 600; }
+.chat-card-name > link { color: @card_fg_color; text-decoration: none; }
+.chat-card-name > link:hover { color: @accent_color; }
+.chat-card-row.done .chat-card-name, .chat-card-row.removed .chat-card-name { font-weight: 500; color: alpha(@card_fg_color, 0.6); }
+.chat-card-row.removed .chat-card-name, .struck { text-decoration-line: line-through; }
+.chat-card-meta { font-size: 12px; color: alpha(@card_fg_color, 0.6); font-feature-settings: "tnum"; }
+.chat-card-meta flowboxchild { padding: 0; min-height: 0; }
+.chat-card-time { color: @card_fg_color; font-weight: 500; }
+.chat-card-tag { min-height: 18px; padding: 0 7px; border-radius: 99px; font-size: 12px; font-weight: 500; color: alpha(@card_fg_color, 0.6); background: alpha(@window_fg_color, 0.07); }
+.chat-card-tag.tone-accent { color: mix(@accent_color, @card_fg_color, 0.4); background: alpha(@accent_bg_color, 0.14); }
+.chat-card-tag.tone-positive { color: mix(@success_color, @card_fg_color, 0.4); background: alpha(@success_color, 0.14); }
+.chat-card-tag.tone-warning { color: mix(@warning_color, @card_fg_color, 0.5); background: alpha(@warning_color, 0.14); }
+.chat-card-tag.tone-negative { color: mix(@error_color, @card_fg_color, 0.4); background: alpha(@error_color, 0.12); }
+.chat-card-pill { font-size: 12px; font-weight: 600; padding: 3px 9px; border-radius: 99px; color: alpha(@card_fg_color, 0.6); background: alpha(@window_fg_color, 0.07); }
+.chat-card-pill.ok { color: mix(@success_color, @card_fg_color, 0.4); background: alpha(@success_color, 0.14); }
+.chat-card-pill.warn { color: mix(@warning_color, @card_fg_color, 0.5); background: alpha(@warning_color, 0.14); }
+.chat-card-gone { background: alpha(@card_bg_color, 0.85); }
+.chat-card-row-undo { min-width: 32px; min-height: 32px; padding: 0; color: alpha(@card_fg_color, 0.6); }
+.chat-card-row-undo:hover { color: @card_fg_color; }
+.chat-card-progress trough { min-height: 3px; border-radius: 99px; background: alpha(@window_fg_color, 0.1); }
+.chat-card-progress progress { min-height: 3px; border-radius: 99px; background: @accent_bg_color; }
+.chat-card-thumb.small { border-radius: 8px; }
+.chat-card-thumb.large { border-radius: 10px; margin-bottom: 4px; }
+.chat-card-thumb-empty { background: alpha(@window_fg_color, 0.1); }
+.chat-card-compact { min-height: 36px; padding: 0 14px; }
+.chat-card-dot { min-width: 6px; min-height: 6px; border-radius: 99px; background: alpha(@card_fg_color, 0.6); }
+.chat-card-dot.done { background: @success_color; }
+.chat-card-dot.removed { background: transparent; box-shadow: inset 0 0 0 1px alpha(@card_fg_color, 0.6); }
+.chat-card-compact-title { font-size: 14px; font-weight: 500; }
+.chat-card-compact.done .chat-card-compact-title, .chat-card-compact.removed .chat-card-compact-title { color: alpha(@card_fg_color, 0.6); }
+.chat-card-compact.removed .chat-card-compact-title { text-decoration-line: line-through; }
+.chat-card-compact-value { font-size: 12px; color: alpha(@card_fg_color, 0.6); }
+.chat-card-gallery { padding: 12px; }
+.chat-card-gallery > flowboxchild { padding: 0; border-radius: 10px; }
+.chat-card-cell-title { font-size: 13px; font-weight: 500; }
+.chat-card-cell-title.struck { color: alpha(@card_fg_color, 0.6); }
+.chat-card-cell-sub { font-size: 12px; color: alpha(@card_fg_color, 0.6); font-feature-settings: "tnum"; }
+.chat-card-thumb-undo { min-width: 28px; min-height: 28px; padding: 0; color: @card_fg_color; background: alpha(@card_bg_color, 0.72); }
+.chat-card-thumb-undo:hover { background: @card_bg_color; }
+.chat-card-day-num { font-size: 18px; font-weight: 700; }
+.chat-card-day-sub { font-size: 11px; color: alpha(@card_fg_color, 0.6); }
+.chat-card-stats { background: alpha(@window_fg_color, 0.1); }
+.chat-card-stats > flowboxchild { padding: 0; background: @card_bg_color; }
+.chat-card-stat { padding: 12px; }
+.chat-card-stat-value { font-size: 22px; font-weight: 700; }
+.chat-card-stat-title { font-size: 12px; color: alpha(@card_fg_color, 0.6); }
+.chat-card-note { padding: 8px 14px; font-size: 12px; color: alpha(@card_fg_color, 0.6); }
+.chat-card-note.error { color: @error_color; }
 `;
 
 /** On the default display, or on another one the app shows windows on (Quick Chat's X11 one). */

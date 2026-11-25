@@ -5,7 +5,7 @@ import GLib from "gi://GLib";
 import Gtk from "gi://Gtk?version=4.0";
 import Pango from "gi://Pango";
 import { machinesOf } from "../core/agents.ts";
-import { type Agent, pickText } from "../core/catalogue.ts";
+import { type Agent, cardApp, pickText } from "../core/catalogue.ts";
 import { type MachineInventory, decodeInventory, usableClis } from "../core/inventory.ts";
 import { type ChatImage, type ChatStep, MAX_IMAGE_BYTES, MAX_IMAGES, MAX_IMAGES_BYTES, PERMISSIONS, type Permission, granting, imageType, questionAnswer, retryable } from "../core/chat.ts";
 import type { ChatMessage, Conversation } from "../core/conversation.ts";
@@ -13,6 +13,7 @@ import { markdownBlocks } from "../core/markdown.ts";
 import { allCommands, stepGroups, toolSummary, toolVariant } from "../../../../src/web/chat-steps.ts";
 import type { Key } from "../core/i18n.ts";
 import { coalesce, lang, prefs, savePrefs, t, tw } from "./env.ts";
+import { chatCards } from "./chat-cards.ts";
 import { iconWidget } from "./icons.ts";
 import { collectSoon } from "./memory.ts";
 import type { AppModel, Space } from "./model.ts";
@@ -284,6 +285,8 @@ export class ChatView {
       for (const r of this.rows) this.list.remove(r.widget);
       this.rows = [];
       this.stick = true;
+      // A card says its items' current state each time it is shown.
+      this.conv?.refreshCards();
     }
     const name = agent ? pickText(agent.title, agent.i18n, "title", lang) : "";
     this.emptyTitle.set_text(name);
@@ -474,12 +477,16 @@ export class ChatView {
       if (this.rows.length) collectSoon();
       this.rows = [];
     }
+    // A reply's cards may act while no message of the person follows it (Conversation.cardsActionable).
+    const lastUser = messages.reduce((at, m, i) => (m.role === "user" ? i : at), -1);
     messages.forEach((m, i) => {
       const last = i === messages.length - 1;
-      const sig = JSON.stringify([m.text, m.steps, m.failure, m.pending, m.activity, m.denied, m.note, m.stopped, m.images.length, last && !conv!.busy]);
+      const actionable = i > lastUser;
+      const cards = m.cards?.map((c) => [c.index, Boolean(c.token), c.states, c.busy, c.readOnly, c.note ?? ""]);
+      const sig = JSON.stringify([m.text, m.steps, m.failure, m.pending, m.activity, m.denied, m.note, m.stopped, m.images.length, last && !conv!.busy, cards, cards && actionable]);
       const row = this.rows[i];
       if (row && row.sig === sig) return;
-      const widget = this.message(m, last);
+      const widget = this.message(m, last, actionable);
       if (row) {
         this.list.insert_child_after(widget, row.widget);
         this.list.remove(row.widget);
@@ -509,7 +516,7 @@ export class ChatView {
     return true;
   };
 
-  private message(m: ChatMessage, last: boolean): any {
+  private message(m: ChatMessage, last: boolean, actionable = false): any {
     if (m.role === "user") {
       const box = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL, spacing: 6, halign: Gtk.Align.END, margin_start: 64 });
       if (m.images.length) {
@@ -550,6 +557,10 @@ export class ChatView {
       const text = a.kind === "starting" ? t("starting") : a.kind === "reconnecting" ? t("reconnecting") : a.kind === "thinking" ? t("thinking") : t("running", { tool: toolTitle(a.tool) });
       row.append(label(text, { classes: ["dim-label", "activity-line"], selectable: false }));
       box.append(row);
+    }
+    // What the agent's tools did this turn, under the reply (docs/chat-cards.md).
+    if (m.cards?.length && this.conv && this.agent) {
+      box.append(chatCards(m.cards, { conv: this.conv, actionable, client: this.space?.client, app: cardApp(this.space?.catalogue, this.agent, lang), onLink: this.o.onLink }));
     }
     if (m.failure) box.append(this.failure(m, last));
     if (last && m.denied.length && !this.conv?.busy) {
