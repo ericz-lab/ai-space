@@ -364,12 +364,12 @@ export class PriceBook {
     const all = this.own[`${p.name}/*`];
     if (all) return { price: all, source: "price file (provider/*)" };
     const watched = this.modelWatch?.lookup(p, model);
-    if (watched) return watched;
+    if (watched && !watched.needsRate) return watched;
+    // A CNY price waiting for its rate does not hide a USD one: models.dev's is used until the rate is set.
     const id = this.catalogProvider(p);
     const models = id ? this.catalog?.providers[id]?.models : undefined;
-    if (!models) return undefined;
-    const exact = models[model] ?? Object.entries(models).find(([k]) => k.toLowerCase() === model.toLowerCase())?.[1];
-    return exact ? { price: exact, source: `models.dev ${id}` } : undefined;
+    const exact = models ? models[model] ?? Object.entries(models).find(([k]) => k.toLowerCase() === model.toLowerCase())?.[1] : undefined;
+    return exact ? { price: exact, source: `models.dev ${id}` } : watched;
   }
 
   /** The models the price file names for this provider (not `provider/*`): pictures and speech are often not in its model list. */

@@ -265,11 +265,15 @@ export class ModelWatchPrices {
     this.tick();
   }
 
-  /** Called on the price book's timer: refetch every six hours, ten minutes after a failure. */
+  /**
+   * Called on the price book's timer (every minute): refetch every six hours, ten minutes after a
+   * failure, and every minute while there is no copy at all (at boot the app or the peer that has
+   * Model Watch is often not there yet).
+   */
   tick(): void {
     if (!this.fetcher) return;
     const age = this.copy ? this.now() - Date.parse(this.copy.fetchedAt) : Infinity;
-    const wait = this.error ? RETRY_MS : REFRESH_MS;
+    const wait = !this.copy ? 0 : this.error ? RETRY_MS : REFRESH_MS;
     if (age >= REFRESH_MS && this.now() - this.lastTry >= (this.lastTry ? wait : 0)) void this.refresh();
   }
 
@@ -296,8 +300,10 @@ export class ModelWatchPrices {
         this.log(`Model Watch prices${from ? ` from ${from}` : ""}: ${next.payload.prices.length} rows of ${next.payload.sources.length} pages`);
         if (changed) for (const l of this.listeners) l();
       } catch (e) {
+        const said = this.error;
         this.error = (e as Error).message;
-        this.log(`Model Watch prices not refreshed (${this.error}); ${this.copy ? `keeping those of ${this.copy.fetchedAt}` : "none yet"}`);
+        // Said once per reason: with no copy it is tried every minute.
+        if (this.error !== said) this.log(`Model Watch prices not refreshed (${this.error}); ${this.copy ? `keeping those of ${this.copy.fetchedAt}` : "none yet"}`);
       } finally {
         this.refreshing = undefined;
       }

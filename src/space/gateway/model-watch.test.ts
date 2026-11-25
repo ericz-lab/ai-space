@@ -150,6 +150,48 @@ test("the price book: the owner's file, then Model Watch, then models.dev; a CNY
   expect(book.lookupSync(minimaxOldCn, "MiniMax-M2")?.source).toBe("models.dev minimax-cn");
   expect(book.status().modelWatch?.rate?.usdPerCny).toBe(0.14);
   const noRate = await run({});
-  expect(noRate.lookupSync(minimaxOldCn, "MiniMax-M3")).toBeUndefined();
-  expect(noRate.describe(minimaxOldCn, "MiniMax-M3")).toMatchObject({ needsRate: true, source: "Model Watch minimax" });
+  // Without a rate a USD price from models.dev is still used; a model only Model Watch prices waits for the rate.
+  expect(noRate.lookupSync(minimaxOldCn, "MiniMax-M3")).toMatchObject({ source: "models.dev minimax-cn", price: { input: 0.3 } });
+  expect(noRate.lookupSync(minimaxOldCn, "MiniMax-M3.1-Flash")).toBeUndefined();
+  expect(noRate.describe(minimaxOldCn, "MiniMax-M3.1-Flash")).toMatchObject({ needsRate: true, source: "Model Watch minimax" });
+});
+
+test("the schedule: every tick until a first copy (Model Watch is often not up at boot), then every six hours; a failure said once", async () => {
+  const home = await mkdtemp(join(tmpdir(), "mw-tick-"));
+  let t = Date.parse("2026-11-25T00:00:00Z");
+  const lines: string[] = [];
+  const w = new ModelWatchPrices({ home, env: {}, now: () => t, log: (l) => lines.push(l) });
+  // A tick starts a fetch without waiting for it: let it finish.
+  const settle = async () => {
+    await (w as unknown as { refreshing?: Promise<void> }).refreshing;
+  };
+  let calls = 0;
+  let up = false;
+  w.start(async () => {
+    calls++;
+    if (!up) throw new Error("no model-watch/prices on this space or its peers");
+    return { from: "mac", res: Response.json(PAYLOAD) };
+  });
+  await w.refresh();
+  for (let i = 0; i < 3; i++) {
+    t += 60_000;
+    w.tick();
+    await settle();
+  }
+  expect(calls).toBe(4);
+  expect(lines.filter((l) => l.includes("not refreshed"))).toHaveLength(1);
+  up = true;
+  t += 60_000;
+  w.tick();
+  await settle();
+  expect(w.status()).toMatchObject({ from: "mac", fetchedAt: expect.any(String) });
+  const after = calls;
+  t += 3600_000;
+  w.tick();
+  await settle();
+  expect(calls).toBe(after);
+  t += 6 * 3600_000;
+  w.tick();
+  await settle();
+  expect(calls).toBe(after + 1);
 });
