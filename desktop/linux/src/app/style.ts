@@ -36,6 +36,7 @@ ${ICON_SHAPES}
 .pager-dot.active { color: @window_fg_color; }
 .home-search { min-height: 44px; font-size: 1.1em; border-radius: 22px; padding: 0 14px; }
 .ask-row { padding: 10px 14px; border-radius: 12px; }
+.voice-recording { color: @error_color; }
 .user-bubble { background: @accent_bg_color; color: @accent_fg_color; border-radius: 18px 18px 6px 18px; padding: 8px 14px; }
 .user-bubble label { color: @accent_fg_color; }
 .agent-message { padding: 2px 2px; }

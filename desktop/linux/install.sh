@@ -70,6 +70,18 @@ if [ -n "$missing" ]; then
   exit 1
 fi
 
+# Optional: voice input records through GStreamer's bindings; the app runs without them.
+gst=""
+for d in /usr/lib/*/girepository-1.0 /usr/lib64/girepository-1.0 /usr/lib/girepository-1.0; do
+  [ -f "$d/Gst-1.0.typelib" ] && gst=1 && break
+done
+if [ -z "$gst" ]; then
+  echo "Voice input needs GStreamer's bindings, which are not installed (the rest of the app works):" >&2
+  echo "  Debian/Ubuntu: sudo apt install gir1.2-gstreamer-1.0 gstreamer1.0-plugins-good gstreamer1.0-pulseaudio" >&2
+  echo "  Fedora:        sudo dnf install gstreamer1 gstreamer1-plugins-good" >&2
+  echo "  Arch:          sudo pacman -S gstreamer gst-plugins-good" >&2
+fi
+
 if [ "$here" != "$DEST" ]; then
   rm -rf "$DEST.new"
   mkdir -p "$(dirname "$DEST")"

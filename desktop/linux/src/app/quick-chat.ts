@@ -132,9 +132,9 @@ export class QuickChat {
     this.placer(xid, surface.get_width() || CHAT_WIDTH, surface.get_height() || 96);
   }
 
-  /** XWayland's display, opened once; none on a desktop without it. */
+  /** XWayland's display, opened once; none on a desktop without it (or on an X11 session, whose display is the default). */
   private static x11: any;
-  private static x11Display(): any {
+  static x11Display(): any {
     if (QuickChat.x11 !== undefined) return QuickChat.x11;
     QuickChat.x11 = null;
     const name = GLib.getenv("DISPLAY");

@@ -6,6 +6,7 @@
  *   ball.js                 the floating ball's process (src/ball/ball.ts, GTK 3 on X11)
  *   pet.js                  the desk pet's process on the desktop (src/pet/pet.ts, GTK 3 on X11)
  *   pet-claude.webp         the desk pet's sprite sheet, the web panel's (src/web/public)
+ *   hud.js                  the capsule of `ai-space --dictate` (src/hud/hud.ts, GTK 3 on X11)
  *   terminal/terminal.js    xterm.js and the session glue, loaded into the terminal's web view
  *   terminal/xterm.css
  *   data/icons/…            the app icon (hicolor), shared with the Mac app's
@@ -48,6 +49,8 @@ export async function buildLinux(opts: { out?: string; local?: boolean; root?: s
   // The desk pet on the desktop, the same way (src/pet/pet.ts), and the web's Claude it draws.
   await bundle(join(HERE, "src", "pet", "pet.ts"), join(dir, "pet.js"), { format: "esm", target: "browser", external: ["gi://*", "system", "cairo"] });
   await cp(join(root, "src", "web", "public", "pet-claude.webp"), join(dir, "pet-claude.webp"));
+  // The capsule voice input in any app shows its words in, the same way (src/hud/hud.ts).
+  await bundle(join(HERE, "src", "hud", "hud.ts"), join(dir, "hud.js"), { format: "esm", target: "browser", external: ["gi://*", "system", "cairo"] });
   await bundle(join(HERE, "terminal", "terminal.ts"), join(dir, "terminal", "terminal.js"), { format: "iife", target: "browser", minify: true });
   await cp(join(root, "node_modules", "@xterm", "xterm", "css", "xterm.css"), join(dir, "terminal", "xterm.css"));
 
