@@ -64,15 +64,29 @@ struct AgentChat: View {
         if let agent = loader.catalogue?.agent(key), let base = ChatRoute.base(ref: agent.ref, peer: agent.peer) {
             let group = loader.catalogue?.agentGroup(agent)
             ChatPage(agent: agent, store: model.chat(for: connection, base: base), icons: icons, backdrop: model.backdrops(for: connection),
-                     machines: group?.machines ?? [agent]) { picked in
+                     machines: group?.machines ?? [agent], pickMachine: { picked in
                 guard picked.key != key, !picked.isOffline else { return }
                 if let group { MachineChoice.remember(group.key, peer: picked.peer, space: connection.id) }
                 key = picked.key
-            }
+            }, cardApp: cardApp(agent), openCardLink: { [model, connection] url in
+                // An item opens as an app page does: in the app with the Space's session, or in Safari.
+                model.openFromHub(url, title: url.host ?? "", in: connection)
+            })
             .id(agent.key)
         } else {
             AgentsPage(model: model, connection: connection, loader: loader, icons: icons)
         }
+    }
+
+    /// The agent's app on the same machine, from the catalogue: its icon and its name (cardApp in
+    /// src/web/ChatCards.tsx). The Space's own agents have no app entry and get no header.
+    private func cardApp(_ agent: CatalogueEntry) -> ChatCardApp {
+        var parts = agent.ref.split(separator: "/").map(String.init)
+        if let peer = agent.peer, parts.first == peer { parts.removeFirst() }
+        guard parts.count == 2 else { return ChatCardApp() }
+        let ref = agent.peer.map { "\($0)/\(parts[0])" } ?? parts[0]
+        guard let app = loader.catalogue?.apps.first(where: { $0.ref == ref }) else { return ChatCardApp() }
+        return ChatCardApp(icon: app.icon, name: app.displayTitle())
     }
 }
 
@@ -89,6 +103,9 @@ struct ChatPage: View {
     /// The agent's variant on each machine, this one among them; a menu in the head when there are several.
     var machines: [CatalogueEntry] = []
     var pickMachine: ((CatalogueEntry) -> Void)? = nil
+    /// The app heading the agent's chat cards, and where an item's link opens.
+    var cardApp = ChatCardApp()
+    var openCardLink: (URL) -> Void = { _ in }
     @State private var picked: [PhotosPickerItem] = []
     @State private var reading = 0
 
@@ -99,7 +116,8 @@ struct ChatPage: View {
                     LazyVStack(alignment: .leading, spacing: 12) {
                         if store.bubbles.isEmpty { intro }
                         ForEach(store.bubbles) { bubble in
-                            ChatBubble(bubble: bubble, answer: bubble.live ? { id, allow, answers in await store.answer(id, allow: allow, answers: answers) } : nil)
+                            ChatBubble(bubble: bubble, answer: bubble.live ? { id, allow, answers in await store.answer(id, allow: allow, answers: answers) } : nil,
+                                       cardsActionable: !bubble.cards.isEmpty && store.cardsActionable(bubble), cardStores: store.cardStores)
                         }
                         Color.clear.frame(height: 1).id("end")
                     }
@@ -168,6 +186,7 @@ struct ChatPage: View {
             picked = []
             load(items)
         }
+        .environment(\.chatCards, ChatCardsContext(icons: icons, app: cardApp, open: openCardLink))
         .task { await store.loadSessions() }
         .task(id: store.isRunning) { if !store.isRunning { await store.loadSessions() } }
     }
@@ -327,6 +346,10 @@ struct ChatBubble: View {
     let bubble: ChatStore.Bubble
     /// Answers an approval or the questions of the running turn; nil once the turn is over.
     let answer: ((String, Bool, [String: [String]]?) async -> String?)?
+    /// The reply is the conversation's latest, so its cards may act while their token is good.
+    var cardsActionable = false
+    /// The conversation's card stores; nil draws no cards.
+    var cardStores: ChatCardStores? = nil
 
     var body: some View {
         if bubble.isUser { user } else { reply }
@@ -394,6 +417,9 @@ struct ChatBubble: View {
                     Text(verbatim: note).font(.footnote).foregroundStyle(note.hasPrefix("⚠️") ? Theme.danger : .secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+            }
+            if !bubble.cards.isEmpty, let cardStores {
+                ChatCardsView(cards: bubble.cards, actionable: cardsActionable, stores: cardStores)
             }
             ForEach(Array(bubble.pending.enumerated()), id: \.offset) { item in
                 ChatSteerLine(text: item.element, pending: true)
