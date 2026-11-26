@@ -788,7 +788,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       ["owner", createAppModelRoutes(appModelRouteOpts)],
       ["app", createChatRoutes({ service: chat, token: config.apiToken, appForToken: (t) => storage.appForToken(t), widget })],
       ["public", createIdentityRoutes({ version, id: packageStore.spaceId, name: config.name, token: config.apiToken, uptime: () => uptime.summary() })],
-      ["owner", createUptimeRoutes({ uptime, token: config.apiToken })],
+      ["owner", createUptimeRoutes({ uptime, token: config.apiToken, appForToken: (t) => storage.appForToken(t) })],
       ["owner", panelRoutes],
       ["owner", createPackageRoutes({ installer: packageInstaller, token: config.apiToken, trustedKeys: packageTrustKeys, runtime: packageRuntime, lifecycle: packageLifecycle, activate: activatePackage })],
       ["owner", createActivityRoutes({ token: config.apiToken, tasks: () => scheduler.running(), modelCalls: () => model.inFlight(), agentTurns: () => agentRuns.running(), terminals: () => terminal.status().active, packageChanges: () => packageInstaller.busy + packageLifecycle.busy })],
@@ -841,6 +841,8 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       "/api/services": "app-read",
       "/api/peers": "app-read",
       "/api/agents": "app-read",
+      // How long this Space has run (docs/usage.md#uptime): space-ops shows it next to each machine's resources.
+      "/api/space/uptime": "app-read",
       // An app runs its own agents from its page through its own proxy, with its token (docs/panel.md#apps-and-their-agents);
       // the routes refuse another app's agents.
       "/api/agents/:app/:agent/chat": "app",

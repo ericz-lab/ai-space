@@ -96,4 +96,20 @@ describe("GET /api/space/uptime", () => {
     expect(res.headers.get("cache-control")).toBe("no-store");
     expect(await res.json()).toEqual({ ok: true, uptime: { startedAt: new Date(T0).toISOString(), currentMs: 90_000, totalMs: 90_000, firstStartedAt: new Date(T0).toISOString(), restarts: 0 } });
   });
+
+  test("an app reads it with its own token; no token, a wrong token and an unknown app token stay out", async () => {
+    const c = clock();
+    const store = new UptimeStore(new Database(":memory:"), c);
+    const routes = createUptimeRoutes({ uptime: store, token: "op", appForToken: async (t) => (t === "app-token" ? "space-ops" : undefined) });
+    const get = (auth?: string) => routes["/api/space/uptime"].GET(new Request("http://x/api/space/uptime", auth ? { headers: { authorization: auth } } : {}));
+    store.start(meta, null);
+    c.add(60_000);
+    const app = await get("Bearer app-token");
+    expect(app.status).toBe(200);
+    expect(await app.json()).toMatchObject({ ok: true, uptime: { currentMs: 60_000, totalMs: 60_000, restarts: 0 } });
+    expect((await get("Bearer op")).status).toBe(200);
+    expect((await get()).status).toBe(401);
+    expect((await get("Bearer nope")).status).toBe(401);
+    expect((await get("Basic app-token")).status).toBe(401);
+  });
 });
