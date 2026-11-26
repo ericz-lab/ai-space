@@ -123,9 +123,13 @@ struct WidgetBlock: Decodable, Hashable {
     var zones: [Zone]?
     var time: String?
     var tanks: [Tank]?
+    /// Text the reader can copy from the block (docs/app-spec.md#views-copy-and-actions).
+    var copy: String?
+    /// A write-back control on the block: a `check` or a `button`; nil for anything else.
+    var action: WidgetAction?
 
     private enum CodingKeys: String, CodingKey {
-        case type, label, caption, url, tone, value, display, delta, style, signed, points, min, max, zones, time, tanks
+        case type, label, caption, url, tone, value, display, delta, style, signed, points, min, max, zones, time, tanks, copy, action
     }
 
     init(from decoder: Decoder) throws {
@@ -151,6 +155,9 @@ struct WidgetBlock: Decodable, Hashable {
         zones = try? c.decode([Zone].self, forKey: .zones)
         time = try? c.decode(String.self, forKey: .time)
         tanks = try? c.decode([Tank].self, forKey: .tanks)
+        if let text = try? c.decode(String.self, forKey: .copy), !text.isEmpty, text.count <= WidgetAction.maxCopy { copy = text }
+        // A malformed action, or a kind a block cannot have, leaves the block without one.
+        if let a = try? c.decode(WidgetAction.self, forKey: .action), a.kind.onBlock { action = a }
     }
 
     /// The value the block leads with, or nil when the app could not obtain it (WidgetBlocks.tsx `shown`).
@@ -246,24 +253,6 @@ enum BlockFormat {
         if a >= 1e6 { return (v / 1e6, "M") }
         if a >= 1e3 { return (v / 1e3, "K") }
         return (v, "")
-    }
-}
-
-enum WidgetLayout {
-    /// Compact rows beside the hero, per card size (ROWS in WidgetBlocks.tsx).
-    static func rows(size: String?) -> Int {
-        switch size {
-        case "2x1": return 4
-        case "1x2": return 6
-        case "2x2": return 10
-        default: return 2
-        }
-    }
-
-    /// Whether the payload is older than the app said it stays true.
-    static func isOutdated(asOf: String?, staleAfterMs: Double?, now: Date = Date()) -> Bool {
-        guard let asOf, let staleAfterMs, staleAfterMs > 0, let date = ISO8601.parse(asOf) else { return false }
-        return now.timeIntervalSince(date) * 1000 > staleAfterMs
     }
 }
 

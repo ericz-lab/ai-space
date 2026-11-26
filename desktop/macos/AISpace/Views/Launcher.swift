@@ -278,32 +278,49 @@ struct LauncherPage: View {
         }
     }
 
-    /// The cards on the panel's grid: a widget's size spans columns and rows, and the cards of a row are as tall as the row.
-    private func widgetGrid(_ widgets: [CatalogWidget], on screen: String?) -> some View {
-        CardGrid {
-            ForEach(widgets) { widget in
-                let entry = Catalogue.entry(widget)
-                WidgetCard(widget: widget, icons: icons, open: { url in if !arranging { open(url, widget: entry) } })
-                    .contextMenu {
-                        EntryMenu(model: model, connection: connection, store: store, entry: entry, screen: screen)
-                        Divider()
-                        sizeMenu(widget)
-                    }
-                    .modifier(Arrangeable(active: arranging && screen != nil, remove: { unpin(entry.key, from: screen) }, corner: 18))
-                    .overlay(alignment: .topTrailing) {
-                        if arranging && screen != nil {
-                            Menu { sizeMenu(widget) } label: {
-                                Text(verbatim: widget.size ?? "1x1").font(.caption.weight(.semibold)).monospacedDigit()
+    /// A screen's cards in the stepless layout when the Space keeps frames (Views/WidgetArea.swift);
+    /// the library's cards, and every card of an older Space, on the panel's grid: a widget's size
+    /// spans columns and rows, and the cards of a row are as tall as the row.
+    @ViewBuilder private func widgetGrid(_ widgets: [CatalogWidget], on screen: String?) -> some View {
+        if let screen, let catalogue = loader.catalogue, catalogue.hasStepless {
+            WidgetArea(loader: loader, widgets: widgets, align: catalogue.widgetAlign ?? .start, editing: arranging) { widget, box in
+                widgetCard(widget, on: screen, box: box)
+            }
+        } else {
+            CardGrid {
+                ForEach(widgets) { widget in
+                    widgetCard(widget, on: screen, box: nil)
+                        .overlay(alignment: .topTrailing) {
+                            if arranging && screen != nil {
+                                Menu { sizeMenu(widget) } label: {
+                                    Text(verbatim: widget.size ?? "1x1").font(.caption.weight(.semibold)).monospacedDigit()
+                                }
+                                .menuStyle(.button).buttonStyle(.bordered).controlSize(.small).fixedSize()
+                                .padding(.top, 10).padding(.trailing, 12)
+                                .help(Text("Size"))
                             }
-                            .menuStyle(.button).buttonStyle(.bordered).controlSize(.small).fixedSize()
-                            .padding(.top, 10).padding(.trailing, 12)
-                            .help(Text("Size"))
                         }
-                    }
-                    .simultaneousGesture(hold(on: screen))
-                    .layoutValue(key: CardSpanKey.self, value: CardSpan.of(widget.size))
+                        .layoutValue(key: CardSpanKey.self, value: CardSpan.of(widget.size))
+                }
             }
         }
+    }
+
+    /// One card: its controls respond on a screen that is not being arranged; in the library they
+    /// are drawn and do nothing, as the panel's library previews.
+    private func widgetCard(_ widget: CatalogWidget, on screen: String?, box: WidgetCardBox?) -> some View {
+        let entry = Catalogue.entry(widget)
+        let stepless = loader.catalogue?.hasStepless == true
+        return WidgetCard(widget: widget, icons: icons, api: stepless ? loader.api : nil, replace: { [loader] in loader.replace($0) },
+                          stepless: stepless, live: screen != nil && !arranging, box: box,
+                          open: { url in if !arranging { open(url, widget: entry) } })
+            .contextMenu {
+                EntryMenu(model: model, connection: connection, store: store, entry: entry, screen: screen)
+                Divider()
+                sizeMenu(widget)
+            }
+            .modifier(Arrangeable(active: arranging && screen != nil, remove: { unpin(entry.key, from: screen) }, corner: 18))
+            .simultaneousGesture(hold(on: screen))
     }
 
     /// The four sizes of the panel's grid; the Space keeps the choice for every panel and client.
@@ -317,12 +334,16 @@ struct LauncherPage: View {
         }
     }
 
+    /// A size alone: the Space drops the card's frame, and so does the card on show at once.
     private func resize(_ widget: CatalogWidget, to size: String) {
+        let before = LayoutWrite(frames: [widget.id: widget.storedFrame], sizes: [widget.id: widget.size ?? "1x1"])
+        withAnimation(.snappy) { loader.apply(LayoutWrite(sizes: [widget.id: size])) }
         Task {
             do {
                 try await loader.api.send("PUT", "/api/panel/layout", json: ["sizes": [widget.id: size]])
                 await loader.refresh(afterCurrent: true)
             } catch {
+                loader.apply(before)
                 NSSound.beep()
             }
         }
