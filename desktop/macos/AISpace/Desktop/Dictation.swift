@@ -9,6 +9,8 @@ import SwiftUI
 /// goes once into whatever field has the keyboard, through the clipboard and a paste
 /// (DictationRules). What the clipboard held comes back afterwards. Provisional text is never typed
 /// into the field and corrected: that cannot be done reliably across apps.
+/// Holding right ⌥ records the same way, but the text is sent to an app of the Space as a note
+/// (`POST /api/capture/text`, the `.capture` destination) and never pasted.
 @MainActor
 final class Dictation {
     private unowned let model: AppModel
@@ -16,6 +18,10 @@ final class Dictation {
     private let hud = DictationHUD()
     /// The Space the recording goes to, while one is on.
     private var listener: URL?
+    /// Which key's recording this is, from its press until the next press starts another.
+    private var destination: DictationRules.Destination?
+    /// A note on its way to the app: no new recording meanwhile.
+    private var sending = false
     private var watchers: Set<AnyCancellable> = []
     /// Between fn and the recorder starting, while a Space is chosen.
     private var choosing = false
@@ -34,26 +40,30 @@ final class Dictation {
         }.store(in: &watchers)
     }
 
-    /// fn held: a press while the previous transcript is still on its way does nothing.
-    func begin() {
-        guard live.state == .idle, !choosing else { return }
+    /// fn or right ⌥ held: a press of either key while a recording, its transcript or a note
+    /// is still on its way does nothing.
+    func begin(_ destination: DictationRules.Destination) {
+        guard live.state == .idle, !choosing, !sending else { return }
+        self.destination = destination
         choosing = true
         released = false
         hud.space = (model.selected ?? model.store.defaultConnection)?.name
+        hud.hint = DictationRules.listeningHint(destination)
         hud.follow(.starting, text: "")
         Task {
-            await start()
+            await start(destination)
             choosing = false
         }
     }
 
-    /// fn let go.
-    func end() {
+    /// The key let go: only the key that started the recording ends it.
+    func end(_ destination: DictationRules.Destination) {
+        guard DictationRules.ends(destination, recording: self.destination) else { return }
         if choosing { released = true; return }
         live.stop()
     }
 
-    private func start() async {
+    private func start(_ destination: DictationRules.Destination) async {
         // The Space chosen at the top left of the main window, and never another: the saved
         // Spaces may not all be the person's own, and speech goes nowhere unasked.
         guard let c = model.selected ?? model.store.defaultConnection else {
@@ -73,10 +83,60 @@ final class Dictation {
                 : String(localized: "\(c.name) cannot transcribe speech."))
             return
         }
+        // A note needs an app that takes one, on the Space that transcribes it.
+        var target: ScreenshotRules.Target?
+        if destination == .capture {
+            guard let list = try? await space.api.get("/api/capture", as: DictationRules.TextTargets.self) else {
+                hud.note(String(localized: "\(c.name) is not connected. Voice input needs the Space."))
+                return
+            }
+            target = DictationRules.captureTarget(list.textTargets ?? [], chosen: Preferences.shared.voiceCaptureTargets[c.id.uuidString])
+            guard target != nil else {
+                hud.note(DictationRules.noTargetNote(space: c.name))
+                return
+            }
+        }
         // Released before the Space answered: too short to have said anything.
         guard !released else { hud.follow(.idle, text: ""); return }
         listener = space.api.base
-        live.start(api: space.api) { [weak self] text in self?.insert(text) }
+        let api = space.api
+        live.start(api: api) { [weak self] text in
+            if let target { self?.send(text, to: target, api: api) } else { self?.insert(text) }
+        }
+    }
+
+    /// A note to the app: never into the field. Sent once with a fresh id, and again with the same
+    /// id after a network error; when it does not arrive the text is left on the clipboard.
+    private func send(_ text: String, to target: ScreenshotRules.Target, api: SpaceAPI) {
+        let text = DictationRules.tidy(text)
+        let title = target.displayTitle()
+        let body = DictationRules.captureBody(text: text, id: UUID())
+        let path = DictationRules.capturePath(to: target)
+        sending = true
+        hud.sending(DictationRules.tail(text))
+        Task {
+            defer { sending = false }
+            var failure: String?
+            var answer: DictationRules.CaptureAnswer?
+            for attempt in 0..<2 {
+                do {
+                    let data = try await api.send("POST", path, json: body)
+                    answer = try? JSONDecoder().decode(DictationRules.CaptureAnswer.self, from: data)
+                    failure = DictationRules.kept(answer) ? nil : String(localized: "the app did not keep it")
+                    break
+                } catch {
+                    failure = HubStore.message(error)
+                    if attempt > 0 || !DictationRules.retries(error) { break }
+                }
+            }
+            if let failure {
+                // Not transient: this is the only copy of what was said.
+                write(text, to: NSPasteboard.general, transient: false)
+                hud.note(DictationRules.failedNote(title: title, reason: failure))
+            } else {
+                hud.note(DictationRules.sentNote(title: title, label: answer?.label), done: true)
+            }
+        }
     }
 
     /// The transcript goes through the clipboard: written, pasted, and the earlier contents put
@@ -145,14 +205,17 @@ final class Dictation {
 final class DictationHUD {
     enum Look: Equatable {
         case listening(String)
-        /// Released: what was heard so far, until the final text is in.
+        /// Released: what was heard so far, until the final text is in; or a note on its way to an app.
         case transcribing(String)
-        case note(String)
+        /// `done`: a note was kept by its app, rather than something gone wrong.
+        case note(String, done: Bool)
     }
 
     private var look: Look?
     /// The name of the Space that listens, shown small beside what is heard.
     var space: String?
+    /// What it says while it listens and nothing is heard yet: which key to let go of.
+    var hint = DictationRules.listeningHint(.field)
     private lazy var panel: NSPanel = makePanel()
     private var host: NSHostingView<DictationHUDView>?
     /// Counts what was shown, so a note's timer hides only that note.
@@ -161,7 +224,7 @@ final class DictationHUD {
     func follow(_ state: LiveVoice.State, text: String) {
         switch state {
         case .starting, .recording:
-            show(.listening(text.isEmpty ? String(localized: "Listening… let go of fn to finish") : DictationRules.tail(DictationRules.tidy(text))))
+            show(.listening(text.isEmpty ? hint : DictationRules.tail(DictationRules.tidy(text))))
         case .finishing: show(.transcribing(DictationRules.tail(DictationRules.tidy(text))))
         case .idle:
             // A note just shown (a failed transcription) outlives the end of the recording.
@@ -170,8 +233,11 @@ final class DictationHUD {
         }
     }
 
-    func note(_ text: String) {
-        show(.note(text))
+    /// A note on its way to its app, after the recording ended.
+    func sending(_ text: String) { show(.transcribing(text)) }
+
+    func note(_ text: String, done: Bool = false) {
+        show(.note(text, done: done))
         let mine = shown
         DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
             guard let self, self.shown == mine else { return }
@@ -237,8 +303,8 @@ struct DictationHUDView: View {
                 if text.isEmpty { Text("Transcribing…") }
                 else { Text(verbatim: text).lineLimit(3).fixedSize(horizontal: false, vertical: true).foregroundStyle(.secondary) }
                 listener
-            case .note(let text):
-                Image(systemName: "mic.slash").foregroundStyle(.secondary)
+            case .note(let text, let done):
+                Image(systemName: done ? "checkmark.circle.fill" : "mic.slash").foregroundStyle(done ? Theme.success : Color.secondary)
                 Text(verbatim: text).fixedSize(horizontal: false, vertical: true)
             case nil:
                 EmptyView()
