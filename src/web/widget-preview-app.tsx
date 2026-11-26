@@ -1,12 +1,29 @@
 import { useEffect, useState } from "react";
 import type { WidgetInfo } from "./api.ts";
 import { LangContext, type Lang, translate } from "./i18n.ts";
+import { DEFAULT_THEME, defaultPreferences, PRESETS, resolveTokens, type Scheme, toHex } from "./theme.ts";
 import { WidgetArea } from "./WidgetArea.tsx";
 import { postWidget } from "./widget-interact.ts";
 import { type Align, type LayoutWrite, applyWrite } from "./widget-layout.ts";
 
-/** What the preview page hands its client: the language, the scheme, the cards as the feed made them and the area's alignment. */
-export type PreviewData = { lang: Lang; scheme: "light" | "dark"; widgets: WidgetInfo[]; align?: Align; autoRefresh: string[]; everyMs: number };
+/** The preview's accent: `accent=<hex>` (with or without `#`), else the default preset's (Aurora). */
+export function previewAccent(value: string | null, scheme: Scheme): string {
+  const v = value?.trim().replace(/^#?/, "#");
+  return v && /^#[0-9a-f]{6}$/i.test(v) ? v.toLowerCase() : toHex(DEFAULT_THEME[scheme].accent);
+}
+
+/** The variables the panel paints for an accent: theme.ts resolves its companions (on-accent, link, focus) as for an operator's override. */
+export function accentVars(accent: string, scheme: Scheme): Record<string, string> {
+  const t = resolveTokens({ ...defaultPreferences(scheme), overrides: { light: { accent }, dark: { accent } } }, scheme);
+  return { "--accent": t.accent, "--on-accent": t.onAccent, "--link": t.link, "--focus": t.focus };
+}
+
+/** Each built-in preset's accent in this scheme, for the picker's swatches. */
+export const presetAccents = (scheme: Scheme) =>
+  PRESETS.map((p) => ({ name: p.name, accent: toHex(resolveTokens({ ...defaultPreferences(scheme), presetId: p.id }, scheme).accent) }));
+
+/** What the preview page hands its client: the language, the scheme, the accent, the cards as the feed made them and the area's alignment. */
+export type PreviewData = { lang: Lang; scheme: "light" | "dark"; accent: string; widgets: WidgetInfo[]; align?: Align; autoRefresh: string[]; everyMs: number };
 
 /** The preview's layout write: the panel's route, answered from the preview server's memory. */
 async function putLayout(body: unknown): Promise<boolean> {

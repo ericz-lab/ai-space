@@ -8,14 +8,14 @@ import { LayoutStore, orderBy, withLayout } from "../space/panel/layout.ts";
 import type { WidgetInfo } from "./api.ts";
 import { translate } from "./i18n.ts";
 import { PreviewSources, liveCards, previewCards } from "./widget-preview-fixtures.ts";
-import { type PreviewData, PreviewApp } from "./widget-preview-app.tsx";
+import { accentVars, type PreviewData, PreviewApp, presetAccents, previewAccent } from "./widget-preview-app.tsx";
 
 /**
  * Local visual review only: fixed fixtures, no workspace, credentials or live services. The cards
  * are the production `Widget` component, fed by the real `WidgetFeed` (sanitizing, actions,
  * refresh) over in-memory sources, so what responds here is what responds on the panel.
  *
- *   bun src/web/widget-preview.tsx          http://127.0.0.1:18937/?theme=dark|light&lang=en|zh&opacity=0-100
+ *   bun src/web/widget-preview.tsx          http://127.0.0.1:18937/?theme=dark|light&lang=en|zh&opacity=0-100&style=mono|default&accent=<hex>
  *
  * The cards sit in the panel's widget area (WidgetArea.tsx); the control bar's Edit button turns on
  * its edit mode. The layout (frames, alignment, order) lives in this process's memory behind the
@@ -25,6 +25,11 @@ import { type PreviewData, PreviewApp } from "./widget-preview-app.tsx";
 export function previewOpacity(value: string | null): number {
   return value !== null && value.trim() && Number.isFinite(Number(value))
     ? Math.max(0, Math.min(100, Math.round(Number(value)))) : 76;
+}
+
+/** The card style the preview opens in: `data-widget-style` on <html> (styles.css, "Mono widget style"); mono unless asked otherwise. */
+export function previewStyle(value: string | null): "mono" | "default" {
+  return value === "default" ? "default" : "mono";
 }
 
 const HOST = "http://preview.invalid";
@@ -89,11 +94,18 @@ export async function previewPage(url: URL, preview = previewFeed(), layout?: La
   const opacity = previewOpacity(url.searchParams.get("opacity"));
   const scheme = url.searchParams.get("theme") === "light" ? "light" : "dark";
   const lang = url.searchParams.get("lang") === "zh" ? "zh" : "en";
-  const data: PreviewData = { lang, scheme, widgets: await previewWidgets(preview, layout), align: layout?.read().widgetAlign ?? "start", autoRefresh: AUTO_REFRESH, everyMs: AUTO_EVERY_MS };
+  const style = previewStyle(url.searchParams.get("style"));
+  const accent = previewAccent(url.searchParams.get("accent"), scheme);
+  // Painted inline on <html> from the start, as the panel's boot script does, so nothing flashes.
+  const accentStyle = Object.entries(accentVars(accent, scheme)).map(([k, v]) => `${k}: ${v}`).join("; ");
+  const swatches = presetAccents(scheme)
+    .map((p) => `<button type="button" data-accent="${p.accent}" aria-pressed="${p.accent === accent}" aria-label="${p.name}" title="${p.name} ${p.accent}" style="--swatch: ${p.accent}"></button>`)
+    .join("");
+  const data: PreviewData = { lang, scheme, accent, widgets: await previewWidgets(preview, layout), align: layout?.read().widgetAlign ?? "start", autoRefresh: AUTO_REFRESH, everyMs: AUTO_EVERY_MS };
   // JSON inside a script element: `<` is escaped so no text can close the element.
   const json = JSON.stringify(data).replace(/</g, "\\u003c");
   return `<!doctype html>
-<html lang="${lang}" data-theme="${scheme}" data-backdrop="orbit" data-preview="${url.searchParams.get("appearance") === "production" ? "production" : "custom"}">
+<html lang="${lang}" data-theme="${scheme}" data-backdrop="orbit" data-preview="${url.searchParams.get("appearance") === "production" ? "production" : "custom"}"${style === "mono" ? ' data-widget-style="mono"' : ""} style="${accentStyle}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -106,9 +118,16 @@ export async function previewPage(url: URL, preview = previewFeed(), layout?: La
   <div class="aurora" aria-hidden="true"><iframe title="Orbit" src="/orbit?theme=${scheme}"></iframe></div>
   <div id="preview-root">${renderToStaticMarkup(<PreviewApp data={data} />)}</div>
   <div class="opacity-controls">
-    <label for="widget-opacity">${translate(lang, "appearance.opacity")}</label>
-    <input id="widget-opacity" type="range" min="0" max="100" step="1" value="${opacity}" aria-valuetext="${opacity}%">
-    <output for="widget-opacity" id="opacity-value">${opacity}%</output>
+    <div class="style-switch" role="group" aria-label="Card style">
+      <button type="button" data-style="mono" aria-pressed="${style === "mono"}">Mono</button>
+      <button type="button" data-style="default" aria-pressed="${style === "default"}">Default</button>
+    </div>
+    <div class="accent-pick" role="group" aria-label="Accent">${swatches}<input type="color" value="${accent}" aria-label="Custom accent" title="Custom accent"></div>
+    <span class="opacity-group">
+      <label for="widget-opacity">${translate(lang, "appearance.opacity")}</label>
+      <input id="widget-opacity" type="range" min="0" max="100" step="1" value="${opacity}" aria-valuetext="${opacity}%">
+      <output for="widget-opacity" id="opacity-value">${opacity}%</output>
+    </span>
     <button type="button" id="edit-toggle" aria-pressed="false">${translate(lang, "layout.edit")}</button>
   </div>
   <script type="application/json" id="preview-data">${json}</script>
@@ -124,6 +143,21 @@ export async function previewPage(url: URL, preview = previewFeed(), layout?: La
       url.searchParams.set('opacity', String(value));
       history.replaceState(null, '', url);
     });
+    // The card style flips live: mono cards are opaque on a flat board, so the opacity slider is off there.
+    const syncStyle = () => {
+      const mono = document.documentElement.dataset.widgetStyle === 'mono';
+      for (const b of document.querySelectorAll('.style-switch button')) b.setAttribute('aria-pressed', String((b.dataset.style === 'mono') === mono));
+      slider.disabled = mono;
+    };
+    for (const b of document.querySelectorAll('.style-switch button')) b.addEventListener('click', () => {
+      if (b.dataset.style === 'mono') document.documentElement.dataset.widgetStyle = 'mono';
+      else delete document.documentElement.dataset.widgetStyle;
+      syncStyle();
+      const url = new URL(location.href);
+      url.searchParams.set('style', b.dataset.style);
+      history.replaceState(null, '', url);
+    });
+    syncStyle();
   </script>
 </body>
 </html>`;
