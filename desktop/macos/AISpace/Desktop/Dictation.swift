@@ -13,9 +13,9 @@ import SwiftUI
 final class Dictation {
     private unowned let model: AppModel
     private let live = LiveVoice()
-    /// Only asks each Space whether it can transcribe (`GET /api/voice`), as a field's microphone does.
-    private let probe = VoiceInput()
     private let hud = DictationHUD()
+    /// The Space the recording goes to, while one is on.
+    private var listener: URL?
     private var watchers: Set<AnyCancellable> = []
     /// Between fn and the recorder starting, while a Space is chosen.
     private var choosing = false
@@ -26,7 +26,12 @@ final class Dictation {
     init(model: AppModel) {
         self.model = model
         live.$state.combineLatest(live.$text).sink { [weak self] state, text in self?.hud.follow(state, text: text) }.store(in: &watchers)
-        live.$error.sink { [weak self] error in if let error { self?.hud.note(error) } }.store(in: &watchers)
+        live.$error.sink { [weak self] error in
+            guard let self, let error else { return }
+            // Asked again next time: the Space may have lost its voice since it said it had one.
+            if let listener { VoiceInput.forget(listener) }
+            hud.note(error)
+        }.store(in: &watchers)
     }
 
     /// fn held: a press while the previous transcript is still on its way does nothing.
@@ -34,6 +39,7 @@ final class Dictation {
         guard live.state == .idle, !choosing else { return }
         choosing = true
         released = false
+        hud.space = (model.selected ?? model.store.defaultConnection)?.name
         hud.follow(.starting, text: "")
         Task {
             await start()
@@ -48,28 +54,29 @@ final class Dictation {
     }
 
     private func start() async {
-        // One Space, the one chosen in Settings or else the selected one, and never another: the
-        // saved Spaces may not all be the person's own, and speech goes nowhere unasked.
-        let pinned = Preferences.shared.voiceInputSpace.flatMap { id in model.store.connections.first { $0.id.uuidString == id } }
-        guard let c = pinned ?? model.selected ?? model.store.defaultConnection else {
+        // The Space chosen at the top left of the main window, and never another: the saved
+        // Spaces may not all be the person's own, and speech goes nowhere unasked.
+        guard let c = model.selected ?? model.store.defaultConnection else {
+            hud.space = nil
             hud.note(String(localized: "Add a Space first to use voice input."))
             return
         }
-        guard let space = model.lives[c.id], space.status == .ok || space.status == .unknown else {
+        hud.space = c.name
+        guard let space = model.lives[c.id], space.status == .ok || space.status == .unknown,
+              let can = await VoiceInput.transcribes(space.api) else {
             hud.note(String(localized: "\(c.name) is not connected. Voice input needs the Space."))
             return
         }
-        await probe.check(space.api)
-        guard probe.state != .unavailable else {
+        guard can else {
             hud.note(model.store.connections.count > 1
-                ? String(localized: "\(c.name) cannot transcribe speech. Choose another Space in Settings → General → Transcribe with.")
+                ? String(localized: "\(c.name) cannot transcribe speech. Switch to a Space with voice input at the top left of the window.")
                 : String(localized: "\(c.name) cannot transcribe speech."))
             return
         }
-        let chosen = space.api
-        // Released before a Space answered: too short to have said anything.
+        // Released before the Space answered: too short to have said anything.
         guard !released else { hud.follow(.idle, text: ""); return }
-        live.start(api: chosen) { [weak self] text in self?.insert(text) }
+        listener = space.api.base
+        live.start(api: space.api) { [weak self] text in self?.insert(text) }
     }
 
     /// The transcript goes through the clipboard: written, pasted, and the earlier contents put
@@ -144,6 +151,8 @@ final class DictationHUD {
     }
 
     private var look: Look?
+    /// The name of the Space that listens, shown small beside what is heard.
+    var space: String?
     private lazy var panel: NSPanel = makePanel()
     private var host: NSHostingView<DictationHUDView>?
     /// Counts what was shown, so a note's timer hides only that note.
@@ -176,7 +185,7 @@ final class DictationHUD {
         let panel = self.panel
         guard let host else { return }
         // Set, not observed: the size below must be the new look's, measured now.
-        host.rootView = DictationHUDView(look: look)
+        host.rootView = DictationHUDView(look: look, space: space)
         host.layoutSubtreeIfNeeded()
         let size = host.fittingSize
         let pointer = NSEvent.mouseLocation
@@ -205,7 +214,7 @@ final class DictationHUD {
         panel.animationBehavior = .none
         panel.isExcludedFromWindowsMenu = true
         panel.ignoresMouseEvents = true
-        let host = NSHostingView(rootView: DictationHUDView(look: nil))
+        let host = NSHostingView(rootView: DictationHUDView(look: nil, space: nil))
         panel.contentView = host
         self.host = host
         return panel
@@ -214,6 +223,7 @@ final class DictationHUD {
 
 struct DictationHUDView: View {
     let look: DictationHUD.Look?
+    let space: String?
 
     var body: some View {
         HStack(spacing: 8) {
@@ -221,10 +231,12 @@ struct DictationHUDView: View {
             case .listening(let text):
                 Image(systemName: "mic.fill").foregroundStyle(Theme.danger).symbolEffect(.pulse, isActive: true)
                 Text(verbatim: text).lineLimit(3).fixedSize(horizontal: false, vertical: true)
+                listener
             case .transcribing(let text):
                 ProgressView().controlSize(.small)
                 if text.isEmpty { Text("Transcribing…") }
                 else { Text(verbatim: text).lineLimit(3).fixedSize(horizontal: false, vertical: true).foregroundStyle(.secondary) }
+                listener
             case .note(let text):
                 Image(systemName: "mic.slash").foregroundStyle(.secondary)
                 Text(verbatim: text).fixedSize(horizontal: false, vertical: true)
@@ -241,5 +253,15 @@ struct DictationHUDView: View {
         .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(Color.primary.opacity(0.14), lineWidth: 1))
         .padding(4)
         .accessibilityElement(children: .combine)
+    }
+
+    /// Which Space hears it: the one chosen at the top left of the main window.
+    @ViewBuilder private var listener: some View {
+        if let space {
+            Text(verbatim: space).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(Color.primary.opacity(0.08), in: Capsule())
+                .accessibilityLabel(Text("Listening with \(space)"))
+        }
     }
 }
