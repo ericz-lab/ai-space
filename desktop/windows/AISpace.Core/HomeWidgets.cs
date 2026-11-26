@@ -74,7 +74,20 @@ public abstract record WidgetBlock(BlockText Label)
     public BlockText? Caption { get; init; }
     public string? Url { get; init; }
     public Tone? Tone { get; init; }
+    /// <summary>Text the block's copy control puts on the clipboard (docs/app-spec.md#views-copy-and-actions).</summary>
+    public string? Copy { get; init; }
+    /// <summary>The block's write-back control, a <c>check</c> or a <c>button</c>; drawn only on a local widget.</summary>
+    public BlockAction? Action { get; init; }
 }
+
+/// <summary>A write-back control on one block: <c>check</c> (a round tick in place of the status dot) or <c>button</c> (a pill at its end).</summary>
+public sealed record BlockAction(string Id, string Kind, BlockText Label, BlockText? Confirm = null);
+
+/// <summary>A control in the card's footer: <c>input</c> (one text field with its send button, at most one) or <c>button</c>.</summary>
+public sealed record CardAction(string Id, string Kind, BlockText Label, BlockText? Placeholder = null, BlockText? Confirm = null);
+
+/// <summary>A read-only switch inside a card: its label and its own blocks, the same rules as the top-level ones.</summary>
+public sealed record WidgetView(string Id, BlockText Label, IReadOnlyList<WidgetBlock> Blocks);
 
 public sealed record MetricBlock(BlockText Label, double? Value, NumberStyle Style) : WidgetBlock(Label)
 {
@@ -132,13 +145,29 @@ public sealed record HomeWidget(string Id, string App, string Name, string Title
     public string? AsOf { get; init; }
     public double? StaleAfterMs { get; init; }
     public string? Error { get; init; }
+    /// <summary>The read-only views of the card (2 to 4), the first the default; null without them (an older Space, or none declared).</summary>
+    public IReadOnlyList<WidgetView>? Views { get; init; }
+    /// <summary>The card's own controls (at most 3, one <c>input</c>); null without them.</summary>
+    public IReadOnlyList<CardAction>? Actions { get; init; }
+    /// <summary>The stepless layout's frame the operator gave the card; null: drawn from <see cref="Size"/>.</summary>
+    public Frame? Frame { get; init; }
     /// <summary>What the card shows, as the Space sent it, without the time it was read: two reads that draw the same card are equal.</summary>
     public string State { get; init; } = "";
+    /// <summary><see cref="State"/> without the size and the frame: what the card's content depends on when the layout draws its box.</summary>
+    public string Content { get; init; } = "";
 
     public string DisplayTitle(string? lang = null) => Lang.Pick(Title, I18n, true, lang);
 
     public bool Wide => Size is "2x1" or "2x2";
     public bool Tall => Size is "1x2" or "2x2";
+
+    /// <summary>A stored frame within the server's bounds (src/space/panel/layout.ts <c>isFrame</c>); anything else is none.</summary>
+    private static Frame? FrameOf(JsonElement w)
+    {
+        if (!w.TryGetProperty("frame", out var f) || f.ValueKind != JsonValueKind.Object) return null;
+        return HomeJson.Num(f, "w") is { } fw && HomeJson.Num(f, "h") is { } fh && fw is >= WidgetLayout.MinFrac and <= 1 && fh is >= WidgetLayout.MinH and <= WidgetLayout.MaxH
+            ? new Frame(fw, fh) : null;
+    }
 
     public static HomeWidget? Decode(JsonElement w)
     {
@@ -153,18 +182,20 @@ public sealed record HomeWidget(string Id, string App, string Name, string Title
             items = list.EnumerateArray().Where(i => i.ValueKind == JsonValueKind.Object && HomeJson.Str(i, "text") is not null)
                 .Select(i => new WidgetItem(HomeJson.Str(i, "text")!, HomeJson.Str(i, "url") is { Length: > 0 } u ? u : null, HomeJson.Str(i, "time"))).ToList();
         }
-        List<WidgetBlock>? blocks = null;
-        if (w.TryGetProperty("blocks", out var bl) && bl.ValueKind == JsonValueKind.Array)
+        var blocks = WidgetBlocks.DecodeList(w, "blocks");
+        var views = WidgetBlocks.DecodeViews(w);
+        var actions = WidgetBlocks.DecodeActions(w);
+        if (blocks is not null || views is not null || actions is not null)
         {
-            blocks = [];
-            foreach (var b in bl.EnumerateArray())
-            {
-                if (WidgetBlocks.Decode(b) is { } block) blocks.Add(block);
-                if (blocks.Count >= WidgetBlocks.MaxBlocks) break;
-            }
+            (blocks, views, actions) = WidgetActions.Dedupe(blocks, views, actions);
         }
-        var state = new StringBuilder();
-        foreach (var key in new[] { "ok", "error", "stale", "items", "blocks", "kind", "size" })
+        var content = new StringBuilder();
+        foreach (var key in new[] { "ok", "error", "stale", "items", "blocks", "kind", "views", "actions" })
+        {
+            if (w.TryGetProperty(key, out var v)) content.Append(key).Append('=').Append(v.GetRawText()).Append('\n');
+        }
+        var state = new StringBuilder(content.ToString());
+        foreach (var key in new[] { "size", "frame" })
         {
             if (w.TryGetProperty(key, out var v)) state.Append(key).Append('=').Append(v.GetRawText()).Append('\n');
         }
@@ -183,7 +214,11 @@ public sealed record HomeWidget(string Id, string App, string Name, string Title
             AsOf = HomeJson.Str(w, "asOf"),
             StaleAfterMs = HomeJson.Num(w, "staleAfterMs"),
             Error = HomeJson.Str(w, "error"),
+            Views = views,
+            Actions = actions,
+            Frame = FrameOf(w),
             State = state.ToString(),
+            Content = content.ToString(),
         };
     }
 }
@@ -313,7 +348,76 @@ public static class WidgetBlocks
                 break;
             }
         }
-        return block is null ? null : block with { Caption = BlockText.Decode(r, "caption"), Url = UrlOf(r), Tone = ToneOf(r) };
+        return block is null ? null : block with
+        {
+            Caption = BlockText.Decode(r, "caption"),
+            Url = UrlOf(r),
+            Tone = ToneOf(r),
+            Copy = HomeJson.Str(r, "copy") is { Length: >= 1 and <= MaxCopy } copy ? copy : null,
+            Action = BlockActionOf(r),
+        };
+    }
+
+    public const int MaxCopy = 8000, MinViews = 2, MaxViews = 4, MaxCardActions = 3, MaxActionValue = 2000;
+    private static readonly System.Text.RegularExpressions.Regex ViewId = new("^[a-z0-9][a-z0-9_-]{0,31}$");
+    private static readonly System.Text.RegularExpressions.Regex ActionId = new("^[A-Za-z0-9._:-]{1,128}$");
+
+    private static BlockAction? BlockActionOf(JsonElement r)
+    {
+        if (!r.TryGetProperty("action", out var a) || a.ValueKind != JsonValueKind.Object) return null;
+        if (HomeJson.Str(a, "id") is not { } id || !ActionId.IsMatch(id) || HomeJson.Str(a, "kind") is not ("check" or "button") || BlockText.Decode(a, "label") is not { } label) return null;
+        return new BlockAction(id, HomeJson.Str(a, "kind")!, label, BlockText.Decode(a, "confirm"));
+    }
+
+    /// <summary>The blocks of a list, valid ones only, at most <see cref="MaxBlocks"/>; null when it is not a list.</summary>
+    internal static List<WidgetBlock>? DecodeList(JsonElement o, string key)
+    {
+        if (!o.TryGetProperty(key, out var bl) || bl.ValueKind != JsonValueKind.Array) return null;
+        var blocks = new List<WidgetBlock>();
+        foreach (var b in bl.EnumerateArray())
+        {
+            if (Decode(b) is { } block) blocks.Add(block);
+            if (blocks.Count >= MaxBlocks) break;
+        }
+        return blocks;
+    }
+
+    /// <summary>
+    /// The views of a payload (src/space/panel/blocks.ts <c>sanitizeViews</c>): 2 to 4 with a valid,
+    /// unique id, a label and at least one valid block; null when fewer than two remain.
+    /// </summary>
+    public static List<WidgetView>? DecodeViews(JsonElement w)
+    {
+        if (!w.TryGetProperty("views", out var vs) || vs.ValueKind != JsonValueKind.Array) return null;
+        var output = new List<WidgetView>();
+        foreach (var v in vs.EnumerateArray())
+        {
+            if (output.Count >= MaxViews) break;
+            if (v.ValueKind != JsonValueKind.Object || HomeJson.Str(v, "id") is not { } id || !ViewId.IsMatch(id) || output.Any(x => x.Id == id)) continue;
+            if (BlockText.Decode(v, "label") is not { } label || DecodeList(v, "blocks") is not { Count: > 0 } blocks) continue;
+            output.Add(new WidgetView(id, label, blocks));
+        }
+        return output.Count >= MinViews ? output : null;
+    }
+
+    /// <summary>
+    /// The card-level actions (src/space/panel/blocks.ts <c>sanitizeActions</c>): valid ones only, at
+    /// most 3, one <c>input</c> (a second is dropped), ids unique; null when none is valid.
+    /// </summary>
+    public static List<CardAction>? DecodeActions(JsonElement w)
+    {
+        if (!w.TryGetProperty("actions", out var list) || list.ValueKind != JsonValueKind.Array) return null;
+        var output = new List<CardAction>();
+        foreach (var a in list.EnumerateArray())
+        {
+            if (output.Count >= MaxCardActions) break;
+            if (a.ValueKind != JsonValueKind.Object || HomeJson.Str(a, "id") is not { } id || !ActionId.IsMatch(id) || output.Any(x => x.Id == id)) continue;
+            var kind = HomeJson.Str(a, "kind");
+            if (kind is not ("input" or "button") || kind == "input" && output.Any(x => x.Kind == "input")) continue;
+            if (BlockText.Decode(a, "label") is not { } label) continue;
+            output.Add(new CardAction(id, kind, label, kind == "input" ? BlockText.Decode(a, "placeholder") : null, BlockText.Decode(a, "confirm")));
+        }
+        return output.Count > 0 ? output : null;
     }
 
     // Values.
@@ -401,7 +505,7 @@ public static class WidgetBlocks
                 if (b.Points[i].V is not { } v) continue;
                 var top = Math.Min(Y(v), zero);
                 var bottom = Math.Max(Y(v), zero);
-                bars.Add(new SparkBar(i * step + step * 0.15, step * 0.7, top, Math.Max(bottom, top + 0.01), b.Signed && v < 0, i == last));
+                bars.Add(new SparkBar(i * step + step * 0.15, step * 0.7, top, Math.Max(bottom, top + 0.01), b.Signed && v < 0, i == last) { Index = i });
             }
             return new Spark(true, zero, [], bars);
         }
@@ -422,7 +526,11 @@ public static class WidgetBlocks
     }
 }
 
-public sealed record SparkBar(double X, double Width, double Top, double Bottom, bool Negative, bool Latest);
+public sealed record SparkBar(double X, double Width, double Top, double Bottom, bool Negative, bool Latest)
+{
+    /// <summary>The point the bar stands for, so the one under the pointer can be drawn at full strength.</summary>
+    public int Index { get; init; }
+}
 
 /// <summary>A trend drawn in a unit square: <see cref="Runs"/> of a line, or <see cref="BarList"/> from <see cref="Zero"/>.</summary>
 public sealed record Spark(bool Bars, double Zero, IReadOnlyList<IReadOnlyList<(double X, double Y)>> Runs, IReadOnlyList<SparkBar> BarList);
