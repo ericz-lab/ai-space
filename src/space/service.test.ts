@@ -200,6 +200,12 @@ describe("restart, status, remove", () => {
     expect(await serviceStatus(d)).toMatchObject({ installed: false });
   });
 
+  test("a unit of the same name loaded from another file is not this workspace's service", async () => {
+    const elsewhere = (cmd: string[]) => (cmd.includes("show") ? { code: 0, stdout: "LoadState=loaded\nActiveState=active\nSubState=running\nUnitFileState=enabled\nFragmentPath=/somewhere/else/ai-space.service\nNRestarts=0\nMainPID=77\n", stderr: "" } : undefined);
+    const { d } = await deps("linux", elsewhere);
+    expect(await serviceStatus(d)).toMatchObject({ installed: false, running: false, enabled: false, pid: 0 });
+  });
+
   test("on a Mac a restart unloads and loads the label", async () => {
     const { d, ran, units } = await deps("darwin");
     await serviceInstall(d);

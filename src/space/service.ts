@@ -373,7 +373,12 @@ export type ServiceStatus = {
 export async function serviceStatus(d: ServiceDeps): Promise<ServiceStatus> {
   const { h, p } = await current(d);
   const installed = await exists(h.file);
-  const s = await h.show().catch((e: Error) => ({ loadState: "unknown", activeState: "unknown", subState: e.message, unitFileState: "", fragmentPath: "", restarts: 0, mainPid: 0 }) as UnitState);
+  let s = await h.show().catch((e: Error) => ({ loadState: "unknown", activeState: "unknown", subState: e.message, unitFileState: "", fragmentPath: "", restarts: 0, mainPid: 0 }) as UnitState);
+  // The manager answers by name, for the whole user: a unit of this name loaded from another file
+  // (this machine's real service, seen from a workspace with its own unit directory) is not this one.
+  // Compared as real paths: a home behind a symlink makes the manager's spelling differ from ours.
+  const real = (path: string) => realpath(path).catch(() => resolve(path));
+  if (s.fragmentPath && (await real(s.fragmentPath)) !== (await real(h.file))) s = { loadState: "not-found", activeState: "inactive", subState: "dead", unitFileState: "", fragmentPath: "", restarts: 0, mainPid: 0 };
   return {
     kind: h.kind,
     manager: h.manager.kind,
