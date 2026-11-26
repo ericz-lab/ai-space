@@ -6,14 +6,14 @@ import { WidgetFeed, type WidgetView } from "../space/panel/widgets.ts";
 import type { WidgetInfo } from "./api.ts";
 import { translate } from "./i18n.ts";
 import { PreviewSources, liveCards, previewCards } from "./widget-preview-fixtures.ts";
-import { type PreviewData, PreviewApp } from "./widget-preview-app.tsx";
+import { accentVars, type PreviewData, PreviewApp, presetAccents, previewAccent } from "./widget-preview-app.tsx";
 
 /**
  * Local visual review only: fixed fixtures, no workspace, credentials or live services. The cards
  * are the production `Widget` component, fed by the real `WidgetFeed` (sanitizing, actions,
  * refresh) over in-memory sources, so what responds here is what responds on the panel.
  *
- *   bun src/web/widget-preview.tsx          http://127.0.0.1:18937/?theme=dark|light&lang=en|zh&opacity=0-100&style=mono|default
+ *   bun src/web/widget-preview.tsx          http://127.0.0.1:18937/?theme=dark|light&lang=en|zh&opacity=0-100&style=mono|default&accent=<hex>
  */
 export function previewOpacity(value: string | null): number {
   return value !== null && value.trim() && Number.isFinite(Number(value))
@@ -81,11 +81,17 @@ export async function previewPage(url: URL, preview = previewFeed()): Promise<st
   const scheme = url.searchParams.get("theme") === "light" ? "light" : "dark";
   const lang = url.searchParams.get("lang") === "zh" ? "zh" : "en";
   const style = previewStyle(url.searchParams.get("style"));
-  const data: PreviewData = { lang, scheme, widgets: await previewWidgets(preview), autoRefresh: AUTO_REFRESH, everyMs: AUTO_EVERY_MS };
+  const accent = previewAccent(url.searchParams.get("accent"), scheme);
+  // Painted inline on <html> from the start, as the panel's boot script does, so nothing flashes.
+  const accentStyle = Object.entries(accentVars(accent, scheme)).map(([k, v]) => `${k}: ${v}`).join("; ");
+  const swatches = presetAccents(scheme)
+    .map((p) => `<button type="button" data-accent="${p.accent}" aria-pressed="${p.accent === accent}" aria-label="${p.name}" title="${p.name} ${p.accent}" style="--swatch: ${p.accent}"></button>`)
+    .join("");
+  const data: PreviewData = { lang, scheme, accent, widgets: await previewWidgets(preview), autoRefresh: AUTO_REFRESH, everyMs: AUTO_EVERY_MS };
   // JSON inside a script element: `<` is escaped so no text can close the element.
   const json = JSON.stringify(data).replace(/</g, "\\u003c");
   return `<!doctype html>
-<html lang="${lang}" data-theme="${scheme}" data-backdrop="orbit" data-preview="${url.searchParams.get("appearance") === "production" ? "production" : "custom"}"${style === "mono" ? ' data-widget-style="mono"' : ""}>
+<html lang="${lang}" data-theme="${scheme}" data-backdrop="orbit" data-preview="${url.searchParams.get("appearance") === "production" ? "production" : "custom"}"${style === "mono" ? ' data-widget-style="mono"' : ""} style="${accentStyle}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -102,6 +108,7 @@ export async function previewPage(url: URL, preview = previewFeed()): Promise<st
       <button type="button" data-style="mono" aria-pressed="${style === "mono"}">Mono</button>
       <button type="button" data-style="default" aria-pressed="${style === "default"}">Default</button>
     </div>
+    <div class="accent-pick" role="group" aria-label="Accent">${swatches}<input type="color" value="${accent}" aria-label="Custom accent" title="Custom accent"></div>
     <span class="opacity-group">
       <label for="widget-opacity">${translate(lang, "appearance.opacity")}</label>
       <input id="widget-opacity" type="range" min="0" max="100" step="1" value="${opacity}" aria-valuetext="${opacity}%">

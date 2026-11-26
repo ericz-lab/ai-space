@@ -1,11 +1,11 @@
-/* The preview shell only; widget layout and glass come from the production stylesheet. */
+/* The preview shell only; widget layout and glass come from the production stylesheet. The accent
+   is the picker's (accent=<hex>, Aurora's without it), painted on <html> as the panel paints it. */
 :root[data-theme="dark"] {
   --bg: #04050e;
   --panel: rgba(20, 24, 46, 0.97);
-  --accent: #93a4ff;
   --solid: #1c2140;
 }
-:root[data-theme="dark"][data-preview="custom"]:not([data-widget-style="mono"]) .widget { --accent: #9ba8ff; background: rgba(27, 29, 43, var(--widget-alpha)); }
+:root[data-theme="dark"][data-preview="custom"]:not([data-widget-style="mono"]) .widget { background: rgba(27, 29, 43, var(--widget-alpha)); }
 :root[data-theme="light"] .aurora { display: none; }
 :root[data-theme="light"][data-preview="custom"]:not([data-widget-style="mono"]) .widget { background: rgba(255, 255, 255, var(--widget-alpha)); }
 .shell { max-width: 1080px; }
@@ -48,3 +48,12 @@
 :root[data-widget-style="mono"] .preview-search { background: var(--m-card); color: var(--m-ink); }
 :root[data-widget-style="mono"] .preview-search span { color: var(--m-muted); }
 :root[data-widget-style="mono"] .preview-note { color: var(--m-muted); }
+/* The accent picker: a swatch per built-in preset, then any colour. */
+.accent-pick { display: flex; align-items: center; gap: 4px; }
+.accent-pick button {
+  width: 22px; height: 22px; padding: 0; border: 2px solid transparent; border-radius: 50%;
+  background: var(--swatch); box-shadow: inset 0 0 0 2px #202334; cursor: pointer;
+}
+.accent-pick button[aria-pressed="true"] { border-color: #fafaf8; }
+.accent-pick button:focus-visible, .accent-pick input:focus-visible { outline: 2px solid white; outline-offset: 2px; }
+.accent-pick input { width: 26px; height: 24px; padding: 0; border: 0; background: transparent; cursor: pointer; }

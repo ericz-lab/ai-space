@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { accentVars, previewAccent } from "./widget-preview-app.tsx";
 import { previewFeed, previewOpacity, previewPage, previewStyle } from "./widget-preview.tsx";
 
 test("preview defaults to 76 and bounds finite opacity inputs", () => {
@@ -58,4 +59,17 @@ test("the preview opens in the mono card style unless asked for the default one"
   const plain = await previewPage(new URL("http://localhost/?style=default"));
   expect(plain).not.toContain('data-widget-style="mono"');
   expect(plain).toContain('data-style="default" aria-pressed="true"');
+});
+
+test("the preview paints the picked accent, Aurora's without one, and lists a swatch per preset", async () => {
+  expect(previewAccent(null, "dark")).toBe("#8b5cf6");
+  expect(previewAccent("C2410C", "light")).toBe("#c2410c");
+  expect(previewAccent("#4be3a8", "dark")).toBe("#4be3a8");
+  expect(previewAccent("red;x", "light")).toBe("#8b5cf6");
+  expect(accentVars("#c2410c", "light")).toEqual({ "--accent": "#c2410c", "--on-accent": "#ffffff", "--link": "#c2410c", "--focus": "#c2410c" });
+  const html = await previewPage(new URL("http://localhost/?accent=c2410c&theme=light"));
+  expect(html).toContain('style="--accent: #c2410c; --on-accent: #ffffff;');
+  expect(html.match(/<button type="button" data-accent=/g)).toHaveLength(7);
+  expect(html).toContain('data-accent="#c2410c" aria-pressed="true" aria-label="Warm"');
+  expect(await previewPage(new URL("http://localhost/?accent=%22%3E%3Cscript%3E"))).toContain('style="--accent: #8b5cf6;');
 });

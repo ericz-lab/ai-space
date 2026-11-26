@@ -467,21 +467,20 @@ function Spark({ b, lang, big, onPoint }: { b: TrendBlock; lang: Lang; big?: boo
       </svg>,
       // The same bars as boxes, for a card style that draws them as capsules (an svg rect's radius
       // stretches with the chart); hidden in the default style.
-      <span className="wb-hbars" aria-hidden="true">
+      <span className="wb-hbars" aria-hidden="true" style={{ "--slots": Math.max(pts.length, 2) } as React.CSSProperties}>
         {pts.map((p, i) => {
-          if (p.v === null) return null;
-          const top = Math.min(y(p.v), zero);
-          const h = Math.max(Math.abs(y(p.v) - zero), 0.5);
+          // Zero or missing draws nothing; a positive bar stands on the zero line, a negative one hangs from it.
+          if (p.v === null || p.v === 0) return null;
+          const h = Math.abs(y(p.v) - zero);
           const neg = p.v < 0;
           return (
             <i
               key={i}
               className={`wb-hb${i === strong ? "" : " past"}${neg ? " neg" : ""}`}
               style={{
-                // Centred in its slot; the card style sets the width, so a capsule stays a capsule on a short chart.
+                // Centred in its slot; the card style sets the width from the slot.
                 left: pct(i * 10 + 5, W),
-                width: pct(7, W),
-                top: pct(top, H),
+                ...(neg ? { top: pct(zero, H) } : { bottom: pct(H - zero, H) }),
                 height: pct(h, H),
                 background: b.signed ? (neg ? "var(--tone-negative)" : "var(--tone-positive)") : "var(--accent)",
                 animationDelay: `${Math.min(i, 30) * 16}ms`,

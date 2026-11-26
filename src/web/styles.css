@@ -2118,14 +2118,18 @@ a.wb-tank-cell:hover { background: var(--glass-strong); }
    compact type, pills, small bursts of signal orange. The tokens are the reference's (light and
    dark follow data-theme, as theme.ts sets it). Inside a card they are mapped onto the panel's own
    variables, so the card's component rules above follow without being repeated; the rules here
-   only change shapes and sizes.
+   only change shapes and sizes. The accent is the theme's own, made deeper per card surface:
+   color-mix(in oklab, accent N%, black), N checked for every preset in mono-accent.test.ts.
    ========================================================================================== */
 :root[data-widget-style="mono"] {
   --m-board: #e7e7e7; --m-card: #fafaf8; --m-coal: #1e1e1e; --m-black: #050505;
   --m-ink: #050505; --m-ink-inv: #fafaf8; --m-muted: #585858; --m-faint: #b5b5b5;
   --m-hairline: #ececec; --m-dark-rule: #2c2c2c; --m-ring: transparent; --m-raised: #dbdbdb; --m-segment-empty: #e7e7e7;
   --m-white: #fafaf8; --m-near-black: #050505; --m-tab-ink: #b5b5b5;
-  --m-accent: #fd4a1b; --m-lime: #ddf31c; --m-green: #34c759; --m-blue: #3c9af1;
+  --m-lime: #ddf31c; --m-green: #34c759; --m-blue: #3c9af1;
+  /* The theme's accent, read here before a card redefines --accent (theme.ts paints it inline on
+     <html>, so a change at runtime flows through). Each card deepens it by --c-mix (below). */
+  --m-accent-src: var(--accent);
   /* Not in the reference: orange is the accent, so "bad" needs a red of its own. */
   --m-red: #ff453a;
   /* The coal card's own values. */
@@ -2142,13 +2146,15 @@ a.wb-tank-cell:hover { background: var(--glass-strong); }
   --c-bg: var(--m-card); --c-ink: var(--m-ink); --c-muted: var(--m-muted); --c-rule: var(--m-hairline);
   --c-raised: var(--m-raised); --c-seg: var(--m-segment-empty);
   --c-btn: var(--m-black); --c-btn-ink: var(--m-ink-inv); --c-btn-hover: #333333;
+  /* The accent: the theme's, deepened (MONO_MIX in mono-accent.ts), and the mark on it. */
+  --c-mix: 75%; --c-on: #ffffff;
   /* Tones as fills (bars, dots, tanks, arcs) and as text. */
   --c-pos: var(--m-green); --c-neg: var(--m-red); --c-warn: var(--m-lime);
   --c-pos-text: var(--m-green); --c-neg-text: var(--m-red); --c-warn-text: var(--m-lime);
   /* The panel's variables the card's rules read. Times and captions are text, so faint = muted. */
   --text: var(--c-ink); --muted: var(--c-muted); --faint: var(--c-muted); --hairline: var(--c-rule);
   --glass-strong: var(--c-rule); --solid: var(--c-bg); --bg: var(--c-bg);
-  --accent: var(--m-accent); --on-accent: var(--m-near-black); --focus: var(--m-accent);
+  --accent: color-mix(in oklab, var(--m-accent-src) var(--c-mix), #000); --on-accent: var(--c-on); --focus: var(--accent);
   --tone-positive: var(--c-pos); --tone-negative: var(--c-neg); --tone-warning: var(--c-warn);
   --tone-positive-text: var(--c-pos-text); --tone-negative-text: var(--c-neg-text); --tone-warning-text: var(--c-warn-text);
   --success: var(--c-pos); --warning: var(--c-warn-text); --danger: var(--c-neg-text);
@@ -2171,6 +2177,16 @@ a.wb-tank-cell:hover { background: var(--glass-strong); }
   --c-pos: var(--m-green); --c-neg: var(--m-red); --c-warn: var(--m-lime);
   --c-pos-text: var(--m-green); --c-neg-text: var(--m-red); --c-warn-text: var(--m-lime);
   color-scheme: dark;
+}
+:root[data-widget-style="mono"][data-theme="dark"] .widget { --c-mix: 90%; --c-on: #000000; }
+/* A coal card in the light scheme takes the light accent undeepened: deepening only loses contrast there. */
+:root[data-widget-style="mono"]:not([data-theme="dark"]) .widgets > .widget:nth-child(even) { --c-mix: 100%; --c-on: #000000; }
+:root[data-widget-style="mono"][data-theme="dark"] .widgets > .widget:nth-child(even) { --c-mix: 85%; }
+/* Black or white on the accent by its luminance (WCAG's Y is xyz-d65's y): the crossing is at 0.179. */
+@supports (color: color(from red xyz-d65 clamp(0, (0.179 - y) * 1e6, 1) y z)) {
+  :root[data-widget-style="mono"] .widget {
+    --on-accent: color(from var(--accent) xyz-d65 clamp(0, (0.179 - y) * 1e6, 0.9505) clamp(0, (0.179 - y) * 1e6, 1) clamp(0, (0.179 - y) * 1e6, 1.089));
+  }
 }
 :root[data-widget-style="mono"] .widgets.editing .widget { outline-color: color-mix(in srgb, var(--m-ink) 28%, transparent); }
 
@@ -2265,23 +2281,25 @@ a.wb-tank-cell:hover { background: var(--glass-strong); }
 /* Trend: capsule bars, the past quieter; a 2px line without its area; the readout as a playhead. */
 :root[data-widget-style="mono"] .wb-area, :root[data-widget-style="mono"] .wb-spark .wb-sb { display: none; }
 :root[data-widget-style="mono"] .wb-zero { stroke: var(--c-raised); }
-:root[data-widget-style="mono"] .wb-hbars { display: block; position: absolute; inset: 0; pointer-events: none; }
+:root[data-widget-style="mono"] .wb-hbars { display: block; position: absolute; inset: 0; pointer-events: none; container-type: size; --cap-max: 28px; }
+:root[data-widget-style="mono"] .wb-row .wb-hbars { --cap-max: 12px; }
+/* About 60% of its slot, at least as tall as it is wide, so the smallest value is a dot. */
 :root[data-widget-style="mono"] .wb-hb {
-  position: absolute; display: block; border-radius: 999px; min-height: 2px; max-width: 14px; translate: -50% 0;
+  --cap: min(calc(60cqw / var(--slots)), var(--cap-max));
+  position: absolute; display: block; width: var(--cap); min-height: var(--cap); border-radius: 999px; translate: -50% 0;
   transform-origin: 50% 100%; animation: wb-grow-y 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
 :root[data-widget-style="mono"] .wb-hb.neg { transform-origin: 50% 0; }
-:root[data-widget-style="mono"] .wb-row .wb-hb { max-width: 7px; }
 :root[data-widget-style="mono"] .wb-hb.past { opacity: 0.5; }
-:root[data-widget-style="mono"] .wb-spark-rule { width: 1.5px; margin-left: -0.75px; top: -6px; background: var(--m-accent); }
-:root[data-widget-style="mono"] .wb-spark-rule::before { content: ""; position: absolute; top: -4px; left: 50%; width: 7px; height: 7px; margin-left: -3.5px; border-radius: 50%; background: var(--m-accent); }
-:root[data-widget-style="mono"] .wb-spark-dot { width: 9px; height: 9px; margin: -4.5px 0 0 -4.5px; background: var(--m-accent); box-shadow: 0 0 0 2px var(--c-bg); }
+:root[data-widget-style="mono"] .wb-spark-rule { width: 1.5px; margin-left: -0.75px; top: -6px; background: var(--accent); }
+:root[data-widget-style="mono"] .wb-spark-rule::before { content: ""; position: absolute; top: -4px; left: 50%; width: 7px; height: 7px; margin-left: -3.5px; border-radius: 50%; background: var(--accent); }
+:root[data-widget-style="mono"] .wb-spark-dot { width: 9px; height: 9px; margin: -4.5px 0 0 -4.5px; background: var(--accent); box-shadow: 0 0 0 2px var(--c-bg); }
 
 /* Check: an 18px ring; ticked, an accent disc with a near-black mark, the row struck through. */
 :root[data-widget-style="mono"] .wb-check { width: 18px; height: 18px; border: 1.5px solid var(--c-muted); }
 :root[data-widget-style="mono"] .wb-check::before { inset: -5px; }
 :root[data-widget-style="mono"] .wb-check:hover:not(:disabled) { border-color: var(--c-ink); }
-:root[data-widget-style="mono"] .wb-check.on { background: var(--m-accent); border-color: var(--m-accent); color: var(--m-near-black); }
+:root[data-widget-style="mono"] .wb-check.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 :root[data-widget-style="mono"] .wb-check svg { width: 12px; height: 12px; }
 :root[data-widget-style="mono"] .wb-done { opacity: 1; }
 :root[data-widget-style="mono"] .wb-done .wb-lt, :root[data-widget-style="mono"] .wb-done .wb-v { color: var(--c-muted); }
@@ -2303,7 +2321,7 @@ a.wb-tank-cell:hover { background: var(--glass-strong); }
 :root[data-widget-style="mono"] .wa-input { height: 38px; padding: 0 14px; border: 1px solid var(--c-raised); background: var(--c-bg); color: var(--c-ink); font-size: 13px; }
 :root[data-widget-style="mono"] .wa-input::placeholder { color: var(--c-muted); }
 :root[data-widget-style="mono"] .wa-input:disabled { opacity: 1; color: var(--c-muted); }
-:root[data-widget-style="mono"] .wa-send { width: 36px; height: 36px; background: var(--m-accent); color: var(--m-near-black); transition: filter 0.15s ease, transform 0.1s ease; }
+:root[data-widget-style="mono"] .wa-send { width: 36px; height: 36px; background: var(--accent); color: var(--on-accent); transition: filter 0.15s ease, transform 0.1s ease; }
 :root[data-widget-style="mono"] .wa-send svg { width: 16px; height: 16px; }
 :root[data-widget-style="mono"] .wa-send:disabled { opacity: 1; background: var(--c-raised); color: var(--c-muted); }
 :root[data-widget-style="mono"] .widget-foot { margin-top: 14px; }
@@ -2316,8 +2334,8 @@ a.wb-tank-cell:hover { background: var(--glass-strong); }
 :root[data-widget-style="mono"] .widget-views button:hover:not(:disabled) { color: var(--m-white); }
 :root[data-widget-style="mono"] .widget-views button[aria-selected="true"] { background: var(--m-white); color: var(--m-near-black); }
 /* Pager: round dots, the current one in ink. */
-:root[data-widget-style="mono"] .wb-pdot::before { width: 7px; height: 7px; background: var(--c-raised); }
-:root[data-widget-style="mono"] .wb-pdot:hover:not(:disabled)::before { background: var(--c-muted); }
+:root[data-widget-style="mono"] .wb-pdot::before { width: 7px; height: 7px; background: color-mix(in srgb, var(--c-ink) 45%, var(--c-bg)); }
+:root[data-widget-style="mono"] .wb-pdot:hover:not(:disabled)::before { background: color-mix(in srgb, var(--c-ink) 70%, var(--c-bg)); }
 :root[data-widget-style="mono"] .wb-pdot[aria-current]::before { background: var(--c-ink); transform: none; }
 /* Copy: a small round button; "Copied" a green chip. */
 :root[data-widget-style="mono"] .wb-copy { background: var(--c-rule); color: var(--c-ink); transition: opacity 0.15s ease, filter 0.15s ease; }
@@ -2338,7 +2356,7 @@ a.wb-tank-cell:hover { background: var(--glass-strong); }
   mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round'%3E%3Ccircle cx='8' cy='8' r='6.2'/%3E%3Cpath d='M8 4.8v3.8M8 11h.01'/%3E%3C/svg%3E");
 }
 /* Focus: a 2px accent ring 3px out. */
-:root[data-widget-style="mono"] .widget :is(.wb-ctl, .wa-btn, .wa-send, .wa-input, .widget-views button, .wb-pdot, .widget-refresh, a):focus-visible { outline: 2px solid var(--m-accent); outline-offset: 3px; }
+:root[data-widget-style="mono"] .widget :is(.wb-ctl, .wa-btn, .wa-send, .wa-input, .widget-views button, .wb-pdot, .widget-refresh, a):focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 /* A value that changed flashes in the text colour of its tone. */
 :root[data-widget-style="mono"] .wb-flash-up { animation-name: wb-mono-flash-up; }
 :root[data-widget-style="mono"] .wb-flash-down { animation-name: wb-mono-flash-down; }
