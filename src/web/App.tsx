@@ -33,7 +33,9 @@ import Packages from "./Packages.tsx";
 import FeedbackSettings from "./FeedbackSettings.tsx";
 import { backdropOf, previewAppearance, useAccentParam, useAppearance, withAccent } from "./theme.ts";
 import ThemeSettings from "./ThemeSettings.tsx";
-import { type DragProps, HEALTH, STATUS, Tile, Widget } from "./Tiles.tsx";
+import { type DragProps, HEALTH, STATUS, Tile } from "./Tiles.tsx";
+import { WidgetArea } from "./WidgetArea.tsx";
+import { type Align, type LayoutWrite, applyWrite } from "./widget-layout.ts";
 
 // Launcher-style panel: App and Agent tiles with hover details, widget cards, a chat window.
 // The page is a row of screens (docs/panel.md#screens): the library with everything on the left,
@@ -412,7 +414,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
     editingRef.current = editing;
   }, [editing]);
   useEffect(() => {
-    const blank = (e: MouseEvent | PointerEvent) => e.button === 0 && !(e.target as Element).closest(".tile, .modal, .overlay, .pop, .empty, .pet, .widget, .screens-hint, .lib-toast, a, button, input, select, textarea");
+    const blank = (e: MouseEvent | PointerEvent) => e.button === 0 && !(e.target as Element).closest(".tile, .modal, .overlay, .pop, .empty, .pet, .widget, .wl-toolbar, .screens-hint, .lib-toast, a, button, input, select, textarea");
     let timer: ReturnType<typeof setTimeout> | undefined;
     let sx = 0;
     let sy = 0;
@@ -460,10 +462,13 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
   // later goes to the library and does not crowd the home screen.
   const [screens, setScreens] = useState<Screen[] | null>(null);
   const [layoutState, setLayoutState] = useState<"loading" | "ok" | "failed">("loading");
+  // Where a widget row's free space goes (docs/panel.md#resize-a-widget).
+  const [widgetAlign, setWidgetAlign] = useState<Align>("start");
   useEffect(() => {
-    getJson<{ layout: { screens: Screen[] | null } }>("/api/panel/layout")
+    getJson<{ layout: { screens: Screen[] | null; widgetAlign?: Align } }>("/api/panel/layout")
       .then((d) => {
         if (d.layout.screens) setScreens(d.layout.screens);
+        if (d.layout.widgetAlign) setWidgetAlign(d.layout.widgetAlign);
         setLayoutState("ok");
       })
       .catch(() => setLayoutState("failed"));
@@ -583,8 +588,11 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
     updateScreens((cur) => pin(cur, screenId, key));
     if (size) {
       const id = parseKey(key)?.id;
-      const w = widgets.find((x) => x.id === id);
-      if (w) resizeWidget(w, size, true);
+      if (id && widgets.some((x) => x.id === id)) {
+        const write = { sizes: { [id]: size } };
+        setWidgets((cur) => applyWrite(cur, write));
+        void putLayout(write);
+      }
     }
   };
   const unpinEntry = (key: string) => {
@@ -659,15 +667,23 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
   // marked instead (`data-drop`), and the move happens when the tile is dropped.
   const dragRef = useRef<{ kind: string; group: string[]; index: number; over: number } | null>(null);
   const [dragOver, setDragOver] = useState<{ kind: string; index: number } | null>(null);
-  // A widget size dragged in edit mode: shown while the drag goes on, stored in the layout (as an
-  // override of the manifest's) when the handle is released.
-  const resizeWidget = (w: WidgetInfo, size: string, commit: boolean) => {
-    setWidgets((cur) => cur.map((x) => (x.id === w.id ? { ...x, size } : x)));
-    if (commit) void putLayout({ sizes: { [w.id]: size } });
+  // The widget area's writes (WidgetArea.tsx): frames, their classic sizes and the alignment, drawn
+  // at once and stored; the area puts the previous layout back when the save fails.
+  const applyLayout = (write: LayoutWrite) => {
+    setWidgets((cur) => applyWrite(cur, write));
+    if (write.widgetAlign) setWidgetAlign(write.widgetAlign);
   };
-  // A card answered by an action or a refresh takes its entry's place; the size shown stays the
-  // one the panel has (the operator's override, or a drag in progress).
-  const replaceWidget = (next: WidgetInfo) => setWidgets((cur) => cur.map((x) => (x.id === next.id ? { ...next, size: x.size } : x)));
+  const saveLayout = (write: LayoutWrite) =>
+    sendJson("PUT", "/api/panel/layout", write).then(
+      () => true,
+      (e) => {
+        console.warn("widget layout not saved:", e);
+        return false;
+      },
+    );
+  // A card answered by an action or a refresh takes its entry's place; the size and frame shown stay
+  // the ones the panel has (the operator's, or a drag in progress).
+  const replaceWidget = (next: WidgetInfo) => setWidgets((cur) => cur.map((x) => (x.id === next.id ? { ...next, size: x.size, ...(x.frame ? { frame: x.frame } : {}) } : x)));
   const showHiddenWidgets = () => {
     const ids = hiddenWidgets;
     setHiddenWidgets([]);
@@ -932,22 +948,17 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
           </div>
         )}
         {cards.length > 0 && (
-          <div className={`widgets ${editing ? "editing" : ""}`}>
-            {cards.map((key, i) => {
-              const w = widgetOf.get(parseKey(key)!.id)!;
-              return (
-                <Widget
-                  key={key}
-                  w={w}
-                  theme={scheme}
-                  dragProps={dragProps("widgets", cards, i)}
-                  onResize={editing ? (size, commit) => resizeWidget(w, size, commit) : undefined}
-                  onRemove={editing ? () => unpinEntry(key) : undefined}
-                  onUpdate={replaceWidget}
-                />
-              );
-            })}
-          </div>
+          <WidgetArea
+            cards={cards.map((key) => ({ key, w: widgetOf.get(parseKey(key)!.id)! }))}
+            align={widgetAlign}
+            editing={editing}
+            theme={scheme}
+            onRemove={unpinEntry}
+            onUpdate={replaceWidget}
+            onReorder={(from, to) => updateScreens((cur) => move(cur, s.id, cards, from, to))}
+            apply={applyLayout}
+            save={saveLayout}
+          />
         )}
       </>
     );

@@ -31,3 +31,9 @@
 
 :root[data-preview="production"] .opacity-controls { display: none; }
 .preview-note { margin: -28px auto 24px; max-width: 640px; text-align: center; font: 12px system-ui; color: var(--muted); }
+#edit-toggle {
+  margin-left: 6px; padding: 4px 12px; border-radius: 999px; border: 1px solid #ffffff33;
+  background: transparent; color: inherit; font: inherit; cursor: pointer;
+}
+#edit-toggle[aria-pressed="true"] { background: #93a4ff; border-color: transparent; color: #11132a; font-weight: 600; }
+#edit-toggle:focus-visible { outline: 2px solid white; outline-offset: 2px; }

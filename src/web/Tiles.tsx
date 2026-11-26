@@ -1,4 +1,4 @@
-import { type FormEvent, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { type CSSProperties, type FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import { type BlockAction, type CardAction, isImgIcon, relTime, type WidgetBlock, type WidgetInfo } from "./api.ts";
 import { type Key, localized, useLang, withLang } from "./i18n.ts";
 import { useAccentParam, withAccent } from "./theme.ts";
@@ -133,16 +133,27 @@ export function Tile({
   );
 }
 
-/** Grid gap of `.widgets`, for turning a drag distance into columns and rows. */
-const WIDGET_GAP = 20;
-const MAX_COLS = 2;
-const MAX_ROWS = 2;
+/** What the widget area (WidgetArea.tsx) hands a card it lays out itself. */
+export type CardFrame = {
+  /** The card's box in the area: position and size, px. */
+  style: CSSProperties;
+  /** The size class its inner layout follows, from the drawn box rather than the stored size. */
+  sizeClass: string;
+  /** Edit mode: the resize handles, drawn inside the card. */
+  handles?: ReactNode;
+  /** Edit mode: the card's size in px, shown in the head (`W × H`). */
+  readout?: string;
+  /** Edit mode, while an edge is dragged: the readout is highlighted. */
+  resizing?: boolean;
+};
 
 export function Widget({
   w,
   dragProps,
   theme,
-  onResize,
+  editing,
+  frame,
+  cardRef,
   onRemove,
   extra,
   onUpdate,
@@ -151,7 +162,11 @@ export function Widget({
   w: WidgetInfo;
   dragProps?: DragProps;
   theme: string;
-  onResize?: (size: string, commit: boolean) => void;
+  /** Edit mode: the card's controls are drawn and inert. */
+  editing?: boolean;
+  /** The card's box when the widget area lays it out (absent: the card is sized by its content, as in the library). */
+  frame?: CardFrame;
+  cardRef?: (el: HTMLDivElement | null) => void;
   /** Edit mode: removes the card from the screen (it stays in the library). */
   onRemove?: () => void;
   /** Controls at the end of the card's head (the library's Add button and size). */
@@ -166,10 +181,11 @@ export function Widget({
   const title = localized(lang, w).title;
   const embed = `${w.peer ? `/api/peers/${encodeURIComponent(w.peer)}` : "/api"}/widgets/${encodeURIComponent(w.app)}/${encodeURIComponent(w.name)}/embed?theme=${theme}&lang=${lang}`;
   const link = w.link ? withAccent(withLang(w.link, lang), accent) : "";
-  const tall = w.size.endsWith("x2");
+  const size = frame?.sizeClass ?? w.size;
+  const tall = size.endsWith("x2");
   // In edit mode and in the library the controls are drawn and inert; a peer's card has no
   // write-back controls at all (its hub strips them, and the card does not rely on that).
-  const live = !onResize && !onRemove && !preview && !extra;
+  const live = !editing && !onRemove && !preview && !extra;
   const acts = !w.peer;
   const actLive = live && acts && !!onUpdate;
   const views = w.ok && w.views && w.views.length > 1 ? w.views : undefined;
@@ -264,73 +280,15 @@ export function Widget({
   };
   const asOf = w.ok ? w.asOf : undefined;
   const outdated = w.ok && isOutdated(w.asOf, w.staleAfterMs);
-  const card = useRef<HTMLDivElement>(null);
-  const [resizing, setResizing] = useState<string | null>(null);
-  // A size change (a drag snapping to the next cell, or a layout loaded later) is animated from the
-  // card's previous box to its new one: grid spans cannot transition, so the box is measured before
-  // and after the render and tweened with the Web Animations API.
-  const lastBox = useRef<{ w: number; h: number } | null>(null);
-  useLayoutEffect(() => {
-    const el = card.current;
-    if (!el) return;
-    const r = el.getBoundingClientRect();
-    const prev = lastBox.current;
-    lastBox.current = { w: r.width, h: r.height };
-    if (!prev || (prev.w === r.width && prev.h === r.height) || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    el.style.overflow = "hidden";
-    const anim = el.animate([{ width: `${prev.w}px`, height: `${prev.h}px` }, { width: `${r.width}px`, height: `${r.height}px` }], { duration: 240, easing: "cubic-bezier(0.2, 0.8, 0.2, 1)" });
-    anim.onfinish = () => {
-      el.style.overflow = "";
-    };
-  }, [w.size]);
-  // Edit mode: the handle in the bottom-right corner resizes by dragging (pointer events, so the
-  // HTML5 drag that reorders cards does not start). One cell is the card's current width divided by
-  // its columns; crossing half a cell snaps to the next size, and the size is saved on release.
-  const startResize = (e: React.PointerEvent) => {
-    if (!onResize || !card.current) return;
-    e.preventDefault();
-    e.stopPropagation();
-    const [cols0, rows0] = w.size.split("x").map(Number) as [number, number];
-    const rect = card.current.getBoundingClientRect();
-    const cellW = (rect.width - WIDGET_GAP * (cols0 - 1)) / cols0;
-    const cellH = (rect.height - WIDGET_GAP * (rows0 - 1)) / rows0;
-    const x0 = e.clientX;
-    const y0 = e.clientY;
-    let last = w.size;
-    const sizeAt = (ev: PointerEvent) => {
-      const cols = Math.min(MAX_COLS, Math.max(1, cols0 + Math.round((ev.clientX - x0) / (cellW + WIDGET_GAP))));
-      const rows = Math.min(MAX_ROWS, Math.max(1, rows0 + Math.round((ev.clientY - y0) / (cellH + WIDGET_GAP))));
-      return `${cols}x${rows}`;
-    };
-    const move = (ev: PointerEvent) => {
-      const next = sizeAt(ev);
-      setResizing(next);
-      if (next !== last) {
-        last = next;
-        onResize(next, false);
-      }
-    };
-    const up = (ev: PointerEvent) => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-      window.removeEventListener("pointercancel", up);
-      setResizing(null);
-      onResize(sizeAt(ev), true);
-      // The release also produces a click, wherever the pointer ended up; a click on the
-      // background would leave edit mode, so the one that follows this drag is swallowed.
-      const swallow = (c: MouseEvent) => {
-        c.stopPropagation();
-        c.preventDefault();
-      };
-      window.addEventListener("click", swallow, { capture: true, once: true });
-      setTimeout(() => window.removeEventListener("click", swallow, { capture: true }), 400);
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
-    window.addEventListener("pointercancel", up);
-  };
   return (
-    <div ref={card} className={`widget s${w.size}${w.stale ? " stale" : ""}${hasBlocks ? " has-blocks" : ""}${resizing ? " resizing" : ""}`} {...(dragProps as object)} title={w.stale ? t("widget.stale", { peer: w.peer ?? "" }) : undefined}>
+    <div
+      ref={cardRef}
+      className={`widget s${size}${frame ? " framed" : ""}${w.stale ? " stale" : ""}${hasBlocks ? " has-blocks" : ""}${frame?.resizing ? " resizing" : ""}`}
+      style={frame?.style}
+      data-widget={w.id}
+      {...(dragProps as object)}
+      title={w.stale ? t("widget.stale", { peer: w.peer ?? "" }) : undefined}
+    >
       {onRemove && (
         <button
           className="tile-del"
@@ -379,10 +337,10 @@ export function Widget({
               {outdated ? t("widget.outdated", { time: relTime(asOf, lang) }) : relTime(asOf, lang)}
             </span>
           ))}
-        {onResize && <span className="widget-size">{(resizing ?? w.size).replace("x", "×")}</span>}
+        {frame?.readout && <span className="widget-size">{frame.readout}</span>}
         {extra && <span className="widget-extra">{extra}</span>}
       </div>
-      {onResize && <span className="widget-grip" title={t("widget.resizeHint")} draggable={false} onPointerDown={startResize} onDragStart={(e) => e.preventDefault()} />}
+      {frame?.handles}
       {views && view && (
         <div
           className="widget-views"
@@ -407,7 +365,7 @@ export function Widget({
       {w.kind === "embed" ? (
         <iframe title={title} src={embed} sandbox="allow-scripts" loading="lazy" />
       ) : w.ok && blocks?.length ? (
-        <Blocks key={viewKey} blocks={blocks} size={w.size} ctx={ctx} flash={flash?.key === viewKey ? flash : undefined} />
+        <Blocks key={viewKey} blocks={blocks} size={size} fit={!!frame} ctx={ctx} flash={flash?.key === viewKey ? flash : undefined} />
       ) : w.ok ? (
         <div className="widget-list">
           {w.items.slice(0, tall ? 14 : 6).map((it, i) => (

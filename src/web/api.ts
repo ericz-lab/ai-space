@@ -189,6 +189,8 @@ export type WidgetInfo = {
   link: string;
   kind: "items" | "embed";
   size: string;
+  /** The stepless layout's frame the operator gave the card (src/web/widget-layout.ts); absent = drawn from `size`. */
+  frame?: { w: number; h: number };
 } & ({ ok: true; items: WidgetItem[]; blocks?: WidgetBlock[]; views?: WidgetViewDef[]; actions?: CardAction[]; asOf?: string; staleAfterMs?: number } | { ok: false; error: string });
 
 /** One peer machine as `GET /api/services` and `GET /api/peers` report it. */

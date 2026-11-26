@@ -172,7 +172,7 @@ describe("panel api", () => {
 
   test("layout: order and hidden set are stored and applied", async () => {
     const put = await call("/api/panel/layout", jsonInit("PUT", { order: { apps: ["notes", "docs"] }, hidden: ["docs"] }));
-    expect(put.body.layout).toEqual({ order: { apps: ["notes", "docs"], agents: [], widgets: [] }, hidden: ["docs"], sizes: {}, hiddenWidgets: [], screens: null });
+    expect(put.body.layout).toEqual({ order: { apps: ["notes", "docs"], agents: [], widgets: [] }, hidden: ["docs"], sizes: {}, hiddenWidgets: [], screens: null, frames: {}, widgetAlign: "start" });
     expect((await call("/api/apps")).body.apps.map((a: Body) => a.name)).toEqual(["notes"]);
     expect((await call("/api/apps?all=1")).body.apps.map((a: Body) => a.name)).toEqual(["notes", "docs", "feed", "old"]);
     const unhide = await call("/api/apps/docs", jsonInit("PATCH", { hidden: false }));
@@ -212,6 +212,23 @@ describe("panel api", () => {
     const cleared = await call("/api/panel/layout", jsonInit("PUT", { sizes: { "notes/recent": null } }));
     expect(cleared.body.layout.sizes).toEqual({});
     expect((await call("/api/widgets")).body.widgets.find((w: Body) => w.id === "notes/recent").size).toBe("2x1");
+  });
+
+  test("layout: a frame stored on the panel rides on the widget views, the list and the action answer", async () => {
+    try {
+      const put = await call("/api/panel/layout", jsonInit("PUT", { frames: { "notes/recent": { w: 0.4, h: 360 } }, sizes: { "notes/recent": "1x1" }, widgetAlign: "center" }));
+      expect(put.body.layout).toMatchObject({ frames: { "notes/recent": { w: 0.4, h: 360 } }, sizes: { "notes/recent": "1x1" }, widgetAlign: "center" });
+      const listed = (await call("/api/widgets")).body.widgets;
+      expect(listed.find((w: Body) => w.id === "notes/recent")).toMatchObject({ size: "1x1", frame: { w: 0.4, h: 360 } });
+      expect(listed.find((w: Body) => w.id === "docs/w")).not.toHaveProperty("frame");
+      const fresh = await call("/api/widgets/notes/recent/refresh", { method: "POST" });
+      expect(fresh.body.widget).toMatchObject({ id: "notes/recent", size: "1x1", frame: { w: 0.4, h: 360 } });
+      expect((await call("/api/panel/layout", jsonInit("PUT", { frames: { "notes/recent": { w: 2, h: 360 } } }))).status).toBe(400);
+      expect((await call("/api/panel/layout", jsonInit("PUT", { widgetAlign: "end" }))).status).toBe(400);
+    } finally {
+      await call("/api/panel/layout", jsonInit("PUT", { frames: { "notes/recent": null }, sizes: { "notes/recent": null }, widgetAlign: "start" }));
+    }
+    expect((await call("/api/widgets")).body.widgets.find((w: Body) => w.id === "notes/recent")).not.toHaveProperty("frame");
   });
 
   test("layout: a widget removed on the panel stays removed until shown again, and its app stays", async () => {

@@ -1,8 +1,9 @@
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { BlockAction, BlockText, Format, GaugeBlock, MetricBlock, ProgressBlock, StatusBlock, Tank, TanksBlock, Tone, TrendBlock, WidgetBlock } from "../space/panel/blocks.ts";
 import { relTime } from "./api.ts";
 import { LOCALE, type Lang, useLang } from "./i18n.ts";
 import { type Change, copyText, nearestIndex, pagesOf, swipePage } from "./widget-interact.ts";
+import { rowsThatFit } from "./widget-layout.ts";
 
 // A widget's blocks as a state card (docs/app-spec.md#blocks-a-state-card-instead-of-a-list): the
 // first block is the hero, the rest compact rows, as many as the card's size holds. The layout
@@ -594,13 +595,55 @@ function Pager({ n, page, onPage, live }: { n: number; page: number; onPage: (i:
   );
 }
 
-export function Blocks({ blocks, size, ctx = INERT, flash }: { blocks: WidgetBlock[]; size: string; ctx?: BlockCtx; flash?: Flash }) {
+/**
+ * The rows a card of a fixed height (`fit`) shows per page, from the room actually left under its
+ * hero: the tallest row and the rows' gap measured, the pager's height kept free when the rows need
+ * pages. `null` until measured, and for a card sized by its content; the size's table applies then.
+ */
+function useFitRows(fit: boolean, total: number, deps: unknown[]): [React.RefObject<HTMLDivElement | null>, number | null] {
+  const ref = useRef<HTMLDivElement>(null);
+  const [per, setPer] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!fit || !el || total === 0) {
+      setPer(null);
+      return;
+    }
+    const measure = () => {
+      const region = el.querySelector<HTMLElement>(":scope > .wb-rows, :scope > .wb-paged");
+      const rows = region ? [...region.querySelectorAll<HTMLElement>(".wb-row")] : [];
+      const list = region?.matches(".wb-rows") ? region : region?.querySelector<HTMLElement>(".wb-rows");
+      if (!region || !rows.length || !list) return;
+      const cs = getComputedStyle(list);
+      const gap = parseFloat(cs.rowGap) || 0;
+      const cols = cs.gridTemplateColumns.split(" ").filter(Boolean).length || 1;
+      const top = list.getBoundingClientRect().top;
+      const avail = el.getBoundingClientRect().bottom - top;
+      const pager = region.querySelector<HTMLElement>(".wb-pager");
+      // The pager's own box and margins (the paged region itself may stretch to the card's height).
+      const pm = pager ? getComputedStyle(pager) : null;
+      const pagerH = pager && pm ? pager.getBoundingClientRect().height + (parseFloat(pm.marginTop) || 0) + (parseFloat(pm.marginBottom) || 0) : 26;
+      // The rows in order, once each: every page is laid out (the hidden ones as sizers).
+      const heights = rows.slice(0, total).map((r) => r.getBoundingClientRect().height);
+      const next = rowsThatFit(avail, heights, gap, cols, pagerH);
+      setPer((cur) => (cur === next ? cur : next));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [fit, total, ...deps]);
+  return [ref, fit ? per : null];
+}
+
+export function Blocks({ blocks, size, fit = false, ctx = INERT, flash }: { blocks: WidgetBlock[]; size: string; fit?: boolean; ctx?: BlockCtx; flash?: Flash }) {
   const { lang } = useLang();
   const [page, setPage] = useState(0);
   const swipe = useRef<{ x: number; y: number } | null>(null);
   const [hero, ...rest] = blocks;
+  const [box, fitted] = useFitRows(fit, rest.length, [size, blocks]);
   if (!hero) return null;
-  const per = ROWS[size] ?? 2;
+  const per = fitted ?? ROWS[size] ?? 2;
   const pages = pagesOf(rest, per);
   const cur = Math.min(page, pages.length - 1);
   const mark = (i: number) => {
@@ -609,7 +652,7 @@ export function Blocks({ blocks, size, ctx = INERT, flash }: { blocks: WidgetBlo
   };
   const row = (b: WidgetBlock, i: number) => <Row key={`${i}:${b.type}:${b.action?.id ?? ""}`} b={b} lang={lang} ctx={ctx} flash={mark(i + 1)} />;
   return (
-    <div className={`wb wb-s${size}`}>
+    <div ref={box} className={`wb wb-s${size}`}>
       <Hero b={hero} lang={lang} ctx={ctx} flash={mark(0)} />
       {pages.length === 1 ? (
         rest.length > 0 && <div className="wb-rows">{rest.map((b, i) => row(b, i))}</div>
