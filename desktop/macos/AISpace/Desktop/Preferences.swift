@@ -48,9 +48,6 @@ final class Preferences: ObservableObject {
     @Published var voiceInput: Bool { didSet { defaults.set(voiceInput, forKey: "voiceInputFn") } }
     /// What voice input is transcribed in (VoiceLanguage): "" the app's language, "auto" detect, or a code.
     @Published var voiceLanguage: String { didSet { defaults.set(voiceLanguage, forKey: VoiceLanguage.defaultsKey) } }
-    /// The Space that hears voice input, as a connection id; nil is the selected Space. Speech is
-    /// never sent to a Space the person did not choose: the saved Spaces may not all be theirs.
-    @Published var voiceInputSpace: String? { didSet { defaults.set(voiceInputSpace, forKey: "voiceInputSpace") } }
     /// The agent Quick Chat last talked to, as `<connection id> <agent id>`.
     @Published var quickChatAgent: String? { didSet { defaults.set(quickChatAgent, forKey: "quickChatAgent") } }
     /// How this Mac draws the app and which of the panel's themes, whatever a browser is set to.
@@ -106,7 +103,8 @@ final class Preferences: ObservableObject {
         quickChat = Shortcut(rawValue: defaults.string(forKey: "quickChat") ?? "") ?? .optionSpace
         voiceInput = defaults.bool(forKey: "voiceInputFn")
         voiceLanguage = defaults.string(forKey: VoiceLanguage.defaultsKey) ?? VoiceLanguage.sameAsApp
-        voiceInputSpace = defaults.string(forKey: "voiceInputSpace")
+        // Voice input once had a Space of its own here; it follows the selected Space now.
+        defaults.removeObject(forKey: "voiceInputSpace")
         quickChatAgent = defaults.string(forKey: "quickChatAgent")
         appearance = Appearance(rawValue: defaults.string(forKey: "appearance") ?? "") ?? .system
         themeID = defaults.string(forKey: "theme") ?? ThemePreset.aurora.id
