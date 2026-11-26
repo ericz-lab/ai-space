@@ -236,6 +236,52 @@ Fields every block may carry: `label` (required), `caption` (a short line under 
 
 Honesty applies to every block. A value the app could not obtain is `null` and the panel shows it as missing; a series has the points the app recorded and no others, a missing day is `null` and never interpolated. `asOf` (ISO 8601) says when the data was produced; with `staleAfter` (seconds) the panel marks the card as out of date once `asOf` is older than that. The panel never parses numbers out of `text`.
 
+#### Views, copy and actions
+
+The same `items` response may also let a reader switch what a card shows, copy a block's text, and write back to the app. Everything here is optional and additive: an older panel or peer ignores the fields and shows `blocks` or `items`. The manifest does not change.
+
+**Views** are a read-only switch inside a card, such as today, 7 days and 30 days:
+
+```json
+{
+  "ok": true,
+  "items": [ … ],
+  "blocks": [ … ],
+  "views": [
+    { "id": "today", "label": { "en": "Today", "zh": "今日" }, "blocks": [ … ] },
+    { "id": "7d",    "label": { "en": "7 days", "zh": "7 天" }, "blocks": [ … ] }
+  ]
+}
+```
+
+A payload has 2 to 4 views; with fewer than two valid ones the field is dropped. `id` matches `^[a-z0-9][a-z0-9_-]{0,31}$` and is unique, `label` is block text and required, and `blocks` follow the rules of the top-level `blocks` (at most 12, sanitized and linked the same way); a view without a valid block is dropped. `blocks` stays and equals the first view's, for a panel that does not know views. The panel draws a small segmented control under the card's head; the first view is the default, the reader's choice is remembered per widget in the browser, and the chosen view's first block is the hero.
+
+**Copy.** Any block may carry `"copy": "<text>"` (1 to 8000 characters, not localized). The panel shows a copy control on that block (on hover or focus with a mouse, always on a touch screen); a click copies the text and confirms in place. A block with both `copy` and `url` keeps both, and the copy control does not follow the link.
+
+**Actions** write back to the app. They are declared in the payload and sent to the widget's own `source` by POST; ai-space only calls the declared `source`, and only with an action id that the widget's latest payload declared. A block carries at most one:
+
+```json
+{ "type": "status", "label": "Buy milk", "value": "today",
+  "action": { "id": "done:42", "kind": "check", "label": { "en": "Mark done", "zh": "标记完成" } } }
+```
+
+and the card at most three:
+
+```json
+"actions": [
+  { "id": "add",   "kind": "input",  "label": { "en": "Add", "zh": "添加" },
+    "placeholder": { "en": "Add a task…", "zh": "添加待办…" } },
+  { "id": "rerun", "kind": "button", "label": { "en": "Run now", "zh": "立即检查" },
+    "confirm": { "en": "Run all checks now?", "zh": "现在运行全部检查？" } }
+]
+```
+
+`id` is 1 to 128 characters of `[A-Za-z0-9._:-]`, and the app puts whatever it needs into it (`done:42`). Ids are unique within the payload: a repeated id is dropped, except that the same action (same id and kind) may appear again in another view, since the top-level `blocks` repeat the first view's. `kind` is `check` or `button` on a block, `input` or `button` on the card, with at most one `input`. `label` is required: it is the control's accessible name, and a `check` shows it as a tooltip. `placeholder` belongs to an `input`. With `confirm` (block text) the panel asks in the card before sending. A `check` is a round checkbox at the start of the block in place of the status dot, a block `button` a small pill at its end, and the card's actions sit in its footer: the `input` as a text field with a send button, the buttons as pills.
+
+What the app receives: `POST <source>` with `content-type: application/json` and `x-space-widget-action: 1`, body `{ "action": "<id>", "value": "<text>" }`; `value` comes only with an `input`, trimmed, 1 to 2000 characters. ai-space waits 8 seconds. The app answers `{ "ok": true, "message": <block text, optional> }` or `{ "ok": false, "error": "<text>" }`, with any HTTP status; an id it does not know is `{ "ok": false, "error": "unknown action" }`. Make actions idempotent where possible: marking a finished task finished again is `ok: true`. On success ai-space drops the widget's cache and reads the source again, so the card shows the new state at once, with the app's `message` in a line at its bottom; on failure the card shows the error there, keeps what the person typed, and unticks an optimistic `check`. The panel sends one action at a time per card. Actions on a peer's widget are not forwarded: the hub strips `actions` and every `action` from a peer's cards (views and copy pass through).
+
+A local card with `asOf` also refreshes on demand: its time in the head is a button that drops the cached payload and reads the source again.
+
 Contract for `kind: embed`. `source` is a page the app serves; the panel loads it in a sandboxed iframe of the declared size, in the viewer's theme and language (the page receives `?theme=light|dark&lang=<tag>`, `lang` being the panel's language such as `en` or `zh`; a page may ignore it). ai-space proxies the page (`/api/widgets/:app/:name/embed`), so it must be self-contained: inline styles and scripts, or absolute public URLs. It must work without cookies and without a public origin.
 
 ### `pets`
@@ -620,6 +666,7 @@ API, for apps and their agents:
 | `GET /api/events/stream`, `POST /api/events/ack`, `GET /api/events/:id`, `GET /api/deliveries` | Stream deliveries to the app, ack them, read an event with its deliveries ([events.md](events.md)). The stream and ack also serve external consumers, programs outside the space with their own operator-made credential ([events.md](events.md#external-consumers)). |
 | `POST /api/call/:app/:capability`, `GET /api/capabilities`, `GET /api/calls` | Call another app's capability as this app; the catalogue (a peer's apps carry its `health` and `asOf`); call history. |
 | `GET /api/widgets` | Every widget's latest payload (used by the panel). |
+| `POST /api/widgets/:app/:name/action`, `POST /api/widgets/:app/:name/refresh` | Send a declared widget action (`{ action, value? }`) to the widget's source, or read the source again; both answer `{ ok, widget }` with the fresh card. Operator only, as the panel calls them; an app token is refused ([Views, copy and actions](#views-copy-and-actions)). |
 | `POST /api/agents/:app/:agent/chat` | One chat turn, streamed as server-sent events; `sessionId` continues a session. |
 | `POST /api/notify`, `GET /api/notifications?app` | Send a notification; read the app's own delivery history. |
 | `POST /api/model/run` | One model call for the app, counted in the ledger ([model.md](model.md)). |
@@ -754,7 +801,7 @@ notify:
 | Built-in model gateway, `/api/model-gateway/*` | Implemented (`src/space/gateway/`): passthrough of Anthropic Messages, OpenAI audio and OpenAI Images for ai-space's own runtimes and speech, never for apps ([model-gateway.md](model-gateway.md)) |
 | Speech service, `/api/speech/*`, `speech` | Implemented (`src/space/speech/`): `voice-studio`, `speech-server`, `openai-compatible` and `minimax` providers; `dashscope`, live through an API and `clone` later ([speech.md](speech.md#later)) |
 | Chat service, `/api/chat/*`, the widget | Implemented (`src/space/chat/`, `src/web/chat-widget/`) |
-| `widgets`, `/api/widgets` | Implemented (`src/space/panel/`) |
+| `widgets`, `/api/widgets` | Implemented (`src/space/panel/`); views, copy, actions and refresh on the web panel (`src/web/WidgetBlocks.tsx`, `src/web/Tiles.tsx`); the Mac, iPhone and Linux clients ignore them and show `blocks` |
 | `pets`, `/api/pets` | Implemented (`src/space/panel/pet-spec.ts`, `src/space/panel/pets.ts`, `src/web/Pet.tsx`); this space only, not across peers; not in package manifests |
 | Space mood, `/api/pets/mood` | Implemented (`src/space/panel/mood.ts`); read by the panel's Claude pet and the Mac, iPhone and Linux clients' pets; this machine's turns only |
 | `checks`, `/api/checks` | Implemented (`src/space/checks/`, `src/space/panel/api.ts`); the inspection page is space-ops |

@@ -334,6 +334,7 @@ export default function Library({
                   key={e.key}
                   w={addMode && !pinnedHere ? { ...w, size } : w}
                   theme={theme}
+                  preview
                   extra={
                     addMode ? (
                       <>

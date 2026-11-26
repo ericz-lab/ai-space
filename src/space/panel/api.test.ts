@@ -11,8 +11,12 @@ import { HealthProbe } from "./health.ts";
 import { LayoutStore } from "./layout.ts";
 import { AppRegistry } from "./registry.ts";
 import { WidgetFeed } from "./widgets.ts";
+import { SESSION_COOKIE, composeRoutes, gateRoutes } from "../auth/gate.ts";
+import { AuthService } from "../auth/service.ts";
+import { AuthStore } from "../auth/store.ts";
 
 let server: ReturnType<typeof Bun.serve>;
+let panelOpts: Parameters<typeof createPanelRoutes>[0];
 let base = "";
 let home = "";
 const registry = new AppRegistry();
@@ -24,10 +28,19 @@ const running: Record<string, string[]> = {};
 let shared: { id: string; url?: string }[] = [];
 
 // Loopback calls the panel makes (health, widget sources) are answered here.
-const fakeFetch = (async (input: string | URL | Request) => {
+/** Actions the fake widget source received. */
+const widgetPosts: unknown[] = [];
+let widgetReads = 0;
+const fakeFetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = String(input instanceof Request ? input.url : input);
   if (url.endsWith("/healthz")) return new Response("ok");
-  if (url.endsWith("/api/widget"))
+  if (url.endsWith("/api/widget") && init?.method === "POST") {
+    const body = JSON.parse(String(init.body)) as { action: string };
+    widgetPosts.push(body);
+    return body.action === "fail" ? Response.json({ ok: false, error: "the list is locked" }, { status: 500 }) : Response.json({ ok: true, message: { en: "Done" } });
+  }
+  if (url.endsWith("/api/widget")) {
+    widgetReads++;
     return Response.json({
       ok: true,
       items: [{ text: "First", url: "https://notes.example.com/1", time: "2026-09-04T09:00:00Z", extra: 1 }],
@@ -39,7 +52,9 @@ const fakeFetch = (async (input: string | URL | Request) => {
         { type: "tanks", label: "Tanks", tanks: [{ label: "a", value: 1, max: 2, url: "/?a=1" }, { label: "b", value: 1, max: 2, url: "javascript:alert(1)" }] },
         { type: "nope", label: "x" },
       ],
+      actions: [{ id: "rerun", kind: "button", label: "Run" }, { id: "fail", kind: "button", label: "Fail" }],
     });
+  }
   if (url.endsWith("/api/broken")) return Response.json({ ok: false, error: "db locked" });
   if (url.endsWith("/board?theme=dark")) return new Response("<html>board dark</html>", { headers: { "content-type": "text/html" } });
   if (url.endsWith("/board?theme=light&lang=zh")) return new Response("<html>board zh</html>", { headers: { "content-type": "text/html" } });
@@ -84,7 +99,7 @@ widgets:
   server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
-    routes: createPanelRoutes({
+    routes: createPanelRoutes(panelOpts = {
       ws,
       registry,
       layout: new LayoutStore(db),
@@ -241,6 +256,54 @@ describe("panel api", () => {
     // A language that is not a tag is dropped, so the page gets only theme (and the fake answers its default).
     expect(await (await fetch(`${base}/api/widgets/notes/board/embed?theme=dark&lang=../x`)).text()).toBe("<html>board dark</html>");
     expect((await call("/api/widgets/notes/recent/embed")).status).toBe(404);
+  });
+
+  test("widget actions and refresh: a declared action reaches the source, the fresh card comes back", async () => {
+    await call("/api/panel/layout", jsonInit("PUT", { sizes: { "notes/recent": "2x2" } }));
+    try {
+      const before = widgetReads;
+      const done = await call("/api/widgets/notes/recent/action", jsonInit("POST", { action: "rerun", value: "x" }));
+      expect(done.status).toBe(200);
+      expect(done.body).toMatchObject({ ok: true, message: { en: "Done" }, widget: { id: "notes/recent", ok: true, size: "2x2", actions: [{ id: "rerun" }, { id: "fail" }] } });
+      expect(widgetPosts.at(-1)).toEqual({ action: "rerun" });
+      expect(widgetReads).toBeGreaterThan(before);
+      const failed = await call("/api/widgets/notes/recent/action", jsonInit("POST", { action: "fail" }));
+      expect(failed).toEqual({ status: 502, body: { ok: false, error: "the list is locked" } });
+      const posts = widgetPosts.length;
+      expect((await call("/api/widgets/notes/recent/action", jsonInit("POST", { action: "rm -rf" }))).status).toBe(400);
+      expect((await call("/api/widgets/notes/recent/action", { method: "POST", body: "nope" })).status).toBe(400);
+      expect((await call("/api/widgets/notes/board/action", jsonInit("POST", { action: "rerun" }))).status).toBe(404);
+      expect((await call("/api/widgets/ghost/w/action", jsonInit("POST", { action: "rerun" }))).status).toBe(404);
+      expect(widgetPosts.length).toBe(posts);
+      const reads = widgetReads;
+      const fresh = await call("/api/widgets/notes/recent/refresh", { method: "POST" });
+      expect(fresh.body).toMatchObject({ ok: true, widget: { id: "notes/recent", size: "2x2" } });
+      expect(widgetReads).toBe(reads + 1);
+      expect((await call("/api/widgets/notes/board/refresh", { method: "POST" })).status).toBe(404);
+    } finally {
+      await call("/api/panel/layout", jsonInit("PUT", { sizes: { "notes/recent": null } }));
+    }
+  });
+
+  test("widget actions and refresh are operator routes: no session or an app token is refused", async () => {
+    const auth = new AuthService(new AuthStore(new Database(":memory:")), { hashCost: { memoryCost: 1024, timeCost: 1 } });
+    await auth.init("correct horse");
+    const login = await auth.login("correct horse", { client: "t" });
+    if (!login.ok) throw new Error("login failed");
+    // The panel's table is composed as an owner table in src/index.ts, with no override for these keys.
+    const { routes, policies } = composeRoutes([["owner", createPanelRoutes(panelOpts)]]);
+    const gated = gateRoutes(routes, policies, { mode: "builtin", auth, operatorToken: "op", isAppCredential: async (t) => t === "app-t" });
+    const posts = widgetPosts.length;
+    for (const path of ["/api/widgets/:app/:name/action", "/api/widgets/:app/:name/refresh"]) {
+      expect(policies.get(path)).toBe("owner");
+      const h = (gated[path] as Record<string, (r: Request) => Promise<Response>>).POST!;
+      const req = (headers: Record<string, string>) => Object.assign(new Request(`http://127.0.0.1/${path.replace(":app", "notes").replace(":name", "recent")}`, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify({ action: "rerun" }) }), { params: { app: "notes", name: "recent" } });
+      expect((await h(req({}))).status).toBe(401);
+      expect((await h(req({ authorization: "Bearer app-t" }))).status).toBe(401);
+      expect((await h(req({ authorization: "Bearer op" }))).status).toBe(200);
+      expect((await h(req({ cookie: `${SESSION_COOKIE}=${login.token}` }))).status).toBe(200);
+    }
+    expect(widgetPosts.length).toBe(posts + 2);
   });
 
   test("appcolor reads the theme-color meta and caches it", async () => {

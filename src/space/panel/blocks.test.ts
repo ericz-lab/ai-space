@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { MAX_BLOCKS, sanitizeBlock, sanitizeBlocks } from "./blocks.ts";
+import { MAX_BLOCKS, MAX_COPY, declaredActions, dedupeActionIds, sanitizeActions, sanitizeBlock, sanitizeBlocks, sanitizeViews } from "./blocks.ts";
 
 describe("widget blocks", () => {
   test("a metric keeps the contract's fields and drops the rest", () => {
@@ -85,5 +85,79 @@ describe("widget blocks", () => {
     expect(sanitizeBlocks({})).toBeUndefined();
     expect(sanitizeBlocks([1, null, { type: "metric", label: "a", value: 1 }])).toEqual([{ type: "metric", label: "a", value: 1 }]);
     expect(sanitizeBlocks(Array.from({ length: 20 }, () => ({ type: "metric", label: "a", value: 1 })))?.length).toBe(MAX_BLOCKS);
+  });
+});
+
+describe("widget interactions: copy, actions, views", () => {
+  const m = (label: string, extra: Record<string, unknown> = {}) => ({ type: "metric", label, value: 1, ...extra });
+
+  test("copy is a string of 1 to 8000 characters, kept as is", () => {
+    expect(sanitizeBlock(m("a", { copy: "  prompt\n" }))?.copy).toBe("  prompt\n");
+    expect(sanitizeBlock(m("a", { copy: "x".repeat(MAX_COPY) }))?.copy?.length).toBe(MAX_COPY);
+    expect(sanitizeBlock(m("a", { copy: "x".repeat(MAX_COPY + 1) }))?.copy).toBeUndefined();
+    expect(sanitizeBlock(m("a", { copy: "" }))?.copy).toBeUndefined();
+    expect(sanitizeBlock(m("a", { copy: { en: "x" } }))?.copy).toBeUndefined();
+  });
+
+  test("a block action is check or button with a valid id and a label", () => {
+    expect(sanitizeBlock({ type: "status", label: "Milk", value: "today", action: { id: "done:42", kind: "check", label: { en: "Done", zh: "完成" }, confirm: "Sure?", extra: 1 } })?.action)
+      .toEqual({ id: "done:42", kind: "check", label: { en: "Done", zh: "完成" }, confirm: "Sure?" });
+    expect(sanitizeBlock(m("a", { action: { id: "run", kind: "button", label: "Run" } }))?.action).toEqual({ id: "run", kind: "button", label: "Run" });
+    for (const action of [
+      { id: "add", kind: "input", label: "Add" },
+      { id: "bad id", kind: "button", label: "x" },
+      { id: "x".repeat(129), kind: "button", label: "x" },
+      { id: "", kind: "button", label: "x" },
+      { id: "ok", kind: "button" },
+      { id: 4, kind: "button", label: "x" },
+      "done:1",
+    ]) expect(sanitizeBlock(m("a", { action }))?.action).toBeUndefined();
+    // A bad action drops the action only, not the block.
+    expect(sanitizeBlock(m("a", { action: { id: "?", kind: "check", label: "x" } }))).toEqual({ type: "metric", label: "a", value: 1 });
+  });
+
+  test("card actions: input or button, at most 3, one input, unique ids, placeholder only on input", () => {
+    expect(sanitizeActions([
+      { id: "add", kind: "input", label: "Add", placeholder: "Add a task…" },
+      { id: "add2", kind: "input", label: "Second input" },
+      { id: "add", kind: "button", label: "Same id" },
+      { id: "rerun", kind: "button", label: "Run now", placeholder: "dropped", confirm: { en: "Run?" } },
+      { id: "check", kind: "check", label: "Not a card kind" },
+      { id: "x", kind: "button" },
+      { id: "a", kind: "button", label: "A" },
+      { id: "b", kind: "button", label: "B" },
+    ])).toEqual([
+      { id: "add", kind: "input", label: "Add", placeholder: "Add a task…" },
+      { id: "rerun", kind: "button", label: "Run now", confirm: { en: "Run?" } },
+      { id: "a", kind: "button", label: "A" },
+    ]);
+    expect(sanitizeActions([{ id: "x", kind: "check", label: "x" }])).toBeUndefined();
+    expect(sanitizeActions("add")).toBeUndefined();
+  });
+
+  test("views: 2 to 4 with valid unique ids, a label and a valid block; fewer than 2 drops the field", () => {
+    const v = (id: unknown, blocks: unknown[] = [m("x")], label: unknown = "L") => ({ id, label, blocks });
+    expect(sanitizeViews([v("today"), v("7d")])?.map((x) => x.id)).toEqual(["today", "7d"]);
+    expect(sanitizeViews([v("today"), v("Bad"), v("-x"), v("a".repeat(33)), v("today"), v("e", []), v("f", [{ type: "nope", label: "x" }]), v("g", [m("x")], "")])).toBeUndefined();
+    expect(sanitizeViews([v("a"), v("b"), v("c"), v("d"), v("e")])?.map((x) => x.id)).toEqual(["a", "b", "c", "d"]);
+    expect(sanitizeViews([v("a"), v("b", [m("x"), { type: "nope" }])])?.[1]?.blocks).toEqual([{ type: "metric", label: "x", value: 1 }]);
+    expect(sanitizeViews([v("a", Array.from({ length: 20 }, (_, i) => m(`r${i}`))), v("b")])?.[0]?.blocks.length).toBe(MAX_BLOCKS);
+    expect(sanitizeViews({ a: 1 })).toBeUndefined();
+  });
+
+  test("duplicate action ids: the later is dropped; the same action may recur in another view", () => {
+    const act = (id: string, kind = "check") => ({ action: { id, kind, label: "x" } });
+    const blocks = sanitizeBlocks([m("a", act("done:1")), m("b", act("done:1")), m("c", act("add", "button"))])!;
+    const views = sanitizeViews([
+      { id: "today", label: "Today", blocks: [m("a", act("done:1")), m("d", act("done:2"))] },
+      { id: "all", label: "All", blocks: [m("e", act("done:2", "button")), m("f", act("done:3"))] },
+    ])!;
+    const actions = sanitizeActions([{ id: "add", kind: "input", label: "Add" }])!;
+    const p = { blocks, views, actions };
+    dedupeActionIds(p);
+    expect(p.blocks.map((b) => b.action?.id)).toEqual(["done:1", undefined, undefined]);
+    expect(p.views[0]!.blocks.map((b) => b.action?.id)).toEqual(["done:1", "done:2"]);
+    expect(p.views[1]!.blocks.map((b) => b.action?.id)).toEqual([undefined, "done:3"]);
+    expect([...declaredActions(p)]).toEqual([["add", "input"], ["done:1", "check"], ["done:2", "check"], ["done:3", "check"]]);
   });
 });

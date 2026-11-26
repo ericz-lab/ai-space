@@ -13,7 +13,7 @@ import type { ManifestCheck } from "../checks/spec.ts";
 /** A check as GET /api/checks lists it; `i18n` carries the app's translated title and the check's text. */
 export type CheckView = ManifestCheck & { id: string; app: string; appTitle: string; url: string; i18n?: Record<string, { appTitle?: string; title?: string; description?: string }> };
 import { retireAppDir } from "./uninstall.ts";
-import { EMBED_HEADERS, type WidgetFeed, sourceUrl } from "./widgets.ts";
+import { EMBED_HEADERS, type WidgetActResult, type WidgetFeed, sourceUrl } from "./widgets.ts";
 import { NoPet, type PetFeed } from "./pets.ts";
 import type { SpaceMood } from "./mood.ts";
 
@@ -32,6 +32,8 @@ import type { SpaceMood } from "./mood.ts";
  *   GET    /api/checks                   every active app's declared checks (docs/app-spec.md#checks), with the URL to read; this space only
  *   GET    /api/widgets                  every widget's latest payload
  *   GET    /api/widgets/:app/:name/embed the page of a `kind: embed` widget, proxied from its source
+ *   POST   /api/widgets/:app/:name/action   { action, value? }: forwards a declared action to the widget's source, answers the fresh card
+ *   POST   /api/widgets/:app/:name/refresh  drops the widget's cache and answers the fresh card (local widgets only)
  *   GET    /api/pets                     the desk pets apps declare (docs/app-spec.md#pets)
  *   GET    /api/pets/mood                the Space's mood for the panel's own pet and the native clients' (docs/app-spec.md#space-mood)
  *   GET    /api/pets/:app/:name/sheet    a pet's sprite sheet, proxied from its source
@@ -48,6 +50,9 @@ import type { SpaceMood } from "./mood.ts";
  *
  * The lists (apps, services, widgets) show the active icon pack's icons over
  * the manifests'; `?icons=manifest` returns the manifests' own.
+ *
+ * The two widget writes are operator routes like the layout write: the `owner` table in
+ * src/index.ts, so an app's token never reaches them (docs/auth.md#access-policy).
  *
  * These routes are what the browser calls. They carry no bearer token: the
  * panel is reached through the operator's tunnel and access layer, and on the
@@ -179,6 +184,15 @@ export function createPanelRoutes(opts: PanelApiOptions): Routes {
     const taken = new Set([...views, ...remote].map((v) => v.id));
     const shared = (opts.sharedApps?.(hidden) ?? []).filter((v) => !taken.has(v.id) && (all || (v.url && !v.hidden)));
     return orderBy([...views, ...remote, ...shared], lay.order.apps, (v) => v.id, tier);
+  };
+
+  // A card the panel replaces in place: the operator's size and the active icon pack apply as in GET /api/widgets.
+  const widgetAnswer = async (req: Request, r: WidgetActResult): Promise<Response> => {
+    if (!r.ok) return error(r.status, r.error);
+    const o = await overridesFor(req);
+    const size = layout.read().sizes[r.widget.id];
+    const w = applyToWidget(o, size ? { ...r.widget, size } : r.widget);
+    return json({ ok: true, widget: w, ...(r.message !== undefined ? { message: r.message } : {}) });
   };
 
   const listServices = async (): Promise<ServiceView[]> => {
@@ -316,6 +330,18 @@ export function createPanelRoutes(opts: PanelApiOptions): Routes {
         // `hidden` lists the widgets removed from the panel, so the settings can show them again.
         return json({ ok: true, widgets: orderBy(all, lay.order.widgets, (w) => w.id, tier).map((w) => applyToWidget(o, w)), hidden: lay.hiddenWidgets, asOf: new Date().toISOString() });
       }),
+    },
+
+    "/api/widgets/:app/:name/action": {
+      POST: wrap(async (req) => {
+        const body = (await req.json().catch(() => null)) as { action?: unknown; value?: unknown } | null;
+        if (!body || typeof body !== "object") return error(400, "body must be { action, value? }");
+        return widgetAnswer(req, await widgets.act(name(req.params.app), name(req.params.name), body));
+      }),
+    },
+
+    "/api/widgets/:app/:name/refresh": {
+      POST: wrap(async (req) => widgetAnswer(req, await widgets.refresh(name(req.params.app), name(req.params.name)))),
     },
 
     "/api/widgets/:app/:name/embed": {
