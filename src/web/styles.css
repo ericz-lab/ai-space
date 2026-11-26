@@ -1579,6 +1579,8 @@ a.widget-title:hover { color: var(--text); }
 .wb-zero { stroke: color-mix(in srgb, var(--text) 18%, transparent); stroke-width: 1; }
 .wb-spark .past { opacity: 0.6; }
 .wb-area { opacity: 0.14; }
+/* Markup the mono card style draws (a gauge hero's arc, capsule bars); the default style does not. */
+.wb-arc, .wb-hbars { display: none; }
 .wb-bar { position: relative; display: block; height: 6px; border-radius: 3px; background: var(--hairline); overflow: hidden; margin-top: 4px; }
 .wb-bar > span { position: absolute; inset: 0 auto 0 0; border-radius: 3px; }
 .wb-scale { position: relative; display: block; height: 6px; margin: 8px 0 4px; }
@@ -2108,3 +2110,253 @@ a.wb-tank-cell:hover { background: var(--glass-strong); }
 .setcard .setrow.feedback-row { cursor: default; align-items: flex-start; }
 .feedback-text { min-width: 0; flex: 1; overflow-wrap: anywhere; }
 .feedback-text b { font-weight: 500; margin-right: 4px; }
+
+/* ==========================================================================================
+   Mono widget style: the style book's "Mono Widget Board", an alternative look for the widget
+   cards. On with data-widget-style="mono" on <html>; without the attribute nothing below applies.
+   Opaque cards on a flat board, 28px corners, white and coal cards alternating by position,
+   compact type, pills, small bursts of signal orange. The tokens are the reference's (light and
+   dark follow data-theme, as theme.ts sets it). Inside a card they are mapped onto the panel's own
+   variables, so the card's component rules above follow without being repeated; the rules here
+   only change shapes and sizes.
+   ========================================================================================== */
+:root[data-widget-style="mono"] {
+  --m-board: #e7e7e7; --m-card: #fafaf8; --m-coal: #1e1e1e; --m-black: #050505;
+  --m-ink: #050505; --m-ink-inv: #fafaf8; --m-muted: #585858; --m-faint: #b5b5b5;
+  --m-hairline: #ececec; --m-dark-rule: #2c2c2c; --m-ring: transparent; --m-raised: #dbdbdb; --m-segment-empty: #e7e7e7;
+  --m-white: #fafaf8; --m-near-black: #050505; --m-tab-ink: #b5b5b5;
+  --m-accent: #fd4a1b; --m-lime: #ddf31c; --m-green: #34c759; --m-blue: #3c9af1;
+  /* Not in the reference: orange is the accent, so "bad" needs a red of its own. */
+  --m-red: #ff453a;
+  /* The coal card's own values. */
+  --m-coal-ink: #fafaf8; --m-coal-muted: #b5b5b5; --m-coal-rule: #2c2c2c; --m-coal-raised: #37373a; --m-coal-segment: #2c2c2e;
+}
+:root[data-widget-style="mono"][data-theme="dark"] {
+  --m-board: #0c0c0d; --m-card: #1c1c1e; --m-coal: #000000; --m-black: #000000;
+  --m-ink: #f2f2f2; --m-ink-inv: #f2f2f2; --m-muted: #8e8e93; --m-faint: #4a4a4d;
+  --m-hairline: #2a2a2c; --m-dark-rule: #2a2a2c; --m-ring: #2a2a2c; --m-raised: #37373a; --m-segment-empty: #2c2c2e;
+  --m-coal-ink: #f2f2f2; --m-coal-muted: #8e8e93; --m-coal-rule: #2a2a2c; --m-coal-raised: #37373a; --m-coal-segment: #2c2c2e;
+}
+:root[data-widget-style="mono"] .widget {
+  /* The card's roles (c-*); the coal card sets its own below. */
+  --c-bg: var(--m-card); --c-ink: var(--m-ink); --c-muted: var(--m-muted); --c-rule: var(--m-hairline);
+  --c-raised: var(--m-raised); --c-seg: var(--m-segment-empty);
+  --c-btn: var(--m-black); --c-btn-ink: var(--m-ink-inv); --c-btn-hover: #333333;
+  /* Tones as fills (bars, dots, tanks, arcs) and as text. */
+  --c-pos: var(--m-green); --c-neg: var(--m-red); --c-warn: var(--m-lime);
+  --c-pos-text: var(--m-green); --c-neg-text: var(--m-red); --c-warn-text: var(--m-lime);
+  /* The panel's variables the card's rules read. Times and captions are text, so faint = muted. */
+  --text: var(--c-ink); --muted: var(--c-muted); --faint: var(--c-muted); --hairline: var(--c-rule);
+  --glass-strong: var(--c-rule); --solid: var(--c-bg); --bg: var(--c-bg);
+  --accent: var(--m-accent); --on-accent: var(--m-near-black); --focus: var(--m-accent);
+  --tone-positive: var(--c-pos); --tone-negative: var(--c-neg); --tone-warning: var(--c-warn);
+  --tone-positive-text: var(--c-pos-text); --tone-negative-text: var(--c-neg-text); --tone-warning-text: var(--c-warn-text);
+  --success: var(--c-pos); --warning: var(--c-warn-text); --danger: var(--c-neg-text);
+  background: var(--c-bg); color: var(--c-ink);
+  -webkit-backdrop-filter: none; backdrop-filter: none; box-shadow: none;
+  border: 1px solid var(--m-ring); border-radius: 28px; padding: 18px;
+  font-variant-numeric: tabular-nums;
+}
+/* A light card in the light scheme: the reference's green, lime and red are too light there, as
+   words (4.5:1) and, green and lime, as marks (3:1); these are the nearest that pass. */
+:root[data-widget-style="mono"]:not([data-theme="dark"]) .widget {
+  --c-pos: #248a3d; --c-warn: #849400;
+  --c-pos-text: #1e7a34; --c-neg-text: #d70015; --c-warn-text: #5c6600;
+}
+/* Every second card is coal (the reference's .dark), by position, not by app. */
+:root[data-widget-style="mono"] .widgets > .widget:nth-child(even) {
+  --c-bg: var(--m-coal); --c-ink: var(--m-coal-ink); --c-muted: var(--m-coal-muted); --c-rule: var(--m-coal-rule);
+  --c-raised: var(--m-coal-raised); --c-seg: var(--m-coal-segment);
+  --c-btn: var(--m-white); --c-btn-ink: var(--m-near-black); --c-btn-hover: #d5d5d3;
+  --c-pos: var(--m-green); --c-neg: var(--m-red); --c-warn: var(--m-lime);
+  --c-pos-text: var(--m-green); --c-neg-text: var(--m-red); --c-warn-text: var(--m-lime);
+  color-scheme: dark;
+}
+:root[data-widget-style="mono"] .widgets.editing .widget { outline-color: color-mix(in srgb, var(--m-ink) 28%, transparent); }
+
+/* Head: the title in ink, the as-of time, its refresh and the peer as small muted pills. */
+:root[data-widget-style="mono"] .widget-head { gap: 8px; margin-bottom: 14px; }
+:root[data-widget-style="mono"] .widget-title { color: var(--c-ink); font-size: 15px; font-weight: 500; line-height: 1.25; }
+:root[data-widget-style="mono"] a.widget-title:hover { color: var(--c-ink); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+:root[data-widget-style="mono"] .widget-ico { border-radius: 8px; }
+:root[data-widget-style="mono"] .widget-asof, :root[data-widget-style="mono"] .widget-peer {
+  display: inline-flex; align-items: center; gap: 4px; min-height: 24px; padding: 0 9px; border: 0; border-radius: 999px;
+  background: var(--c-rule); color: var(--c-muted); font-size: 11px; font-weight: 500; line-height: 1;
+}
+:root[data-widget-style="mono"] .widget-peer { margin-left: 0; }
+:root[data-widget-style="mono"] .widget-asof.outdated { color: var(--c-warn-text); }
+:root[data-widget-style="mono"] .widget-refresh { min-height: 28px; margin: -2px 0 -2px auto; }
+:root[data-widget-style="mono"] .widget-refresh-ico { opacity: 0.6; }
+:root[data-widget-style="mono"] .widget-refresh:hover:not(:disabled) { background: var(--c-rule); color: var(--c-ink); filter: brightness(0.92); }
+
+/* Hero: a 12px label, a 44px number at weight 500 with tight tracking, a 15px unit beside it. */
+:root[data-widget-style="mono"] .wb { gap: 12px; }
+:root[data-widget-style="mono"] .wb-hero { gap: 6px; padding: 2px 6px; margin: -2px -6px; }
+:root[data-widget-style="mono"] .wb-label { font-size: 12px; color: var(--c-muted); }
+:root[data-widget-style="mono"] .wb-hero-value,
+:root[data-widget-style="mono"] .wb-hero.wb-progress .wb-hero-value { font-size: 44px; line-height: 1; font-weight: 500; letter-spacing: -0.055em; padding: 2px 0; }
+:root[data-widget-style="mono"] .wb-usep { display: none; }
+:root[data-widget-style="mono"] .wb-unit { font-size: 15px; letter-spacing: 0; margin-left: 3px; }
+:root[data-widget-style="mono"] .wb-hero-value.missing { font-size: 15px; letter-spacing: 0; }
+:root[data-widget-style="mono"] .wb-hero.wb-status .wb-hero-value { font-size: 19px; line-height: 1.3; font-weight: 500; letter-spacing: -0.01em; }
+:root[data-widget-style="mono"] .wb-caption { font-size: 12px; color: var(--c-muted); }
+:root[data-widget-style="mono"] .wb-time { font-size: 11px; color: var(--c-muted); }
+/* A change is a chip: green or red with near-black text when the app gives it a tone, a quiet chip without. */
+:root[data-widget-style="mono"] .wb-delta {
+  display: inline-flex; align-items: center; align-self: flex-start; gap: 3px; padding: 3px 8px; border-radius: 999px;
+  background: var(--c-rule); color: var(--c-ink); font-size: 12px; font-weight: 500; line-height: 1.25; white-space: nowrap;
+}
+:root[data-widget-style="mono"] .wb-delta[data-tone] { --tone-positive-text: var(--m-near-black); --tone-negative-text: var(--m-near-black); --tone-warning-text: var(--m-near-black); }
+:root[data-widget-style="mono"] .wb-delta[data-tone="positive"] { background: var(--m-green); }
+:root[data-widget-style="mono"] .wb-delta[data-tone="negative"] { background: var(--m-red); }
+:root[data-widget-style="mono"] .wb-delta[data-tone="warning"] { background: var(--m-lime); }
+:root[data-widget-style="mono"] .wb-delta-label { font-weight: 400; }
+:root[data-widget-style="mono"] .wb-row-value .wb-delta { padding: 2px 7px; font-size: 11px; }
+
+/* Rows: one hairline above the group (beside the hero on a 2x1 card, a rule on its left). */
+:root[data-widget-style="mono"] .wb > .wb-rows, :root[data-widget-style="mono"] .wb > .wb-paged { border-top: 1px solid var(--c-rule); padding-top: 8px; }
+:root[data-widget-style="mono"] .wb-s2x1 > .wb-rows, :root[data-widget-style="mono"] .wb-s2x1 > .wb-paged { border-top: 0; padding-top: 0; border-left: 1px solid var(--c-rule); padding-left: 18px; }
+:root[data-widget-style="mono"] .wb-rows { row-gap: 0; }
+:root[data-widget-style="mono"] .wb-row { gap: 4px; padding: 6px; margin: 0 -6px; }
+:root[data-widget-style="mono"] .wb-row-head .wb-label { font-size: 12px; color: var(--c-muted); }
+:root[data-widget-style="mono"] .wb-row-value { font-size: 14px; font-weight: 500; }
+:root[data-widget-style="mono"] .wb a, :root[data-widget-style="mono"] .wb > div, :root[data-widget-style="mono"] .wb .wb-linked, :root[data-widget-style="mono"] .wb .wb-live { border-radius: 14px; }
+:root[data-widget-style="mono"] .wb > .wb-rows, :root[data-widget-style="mono"] .wb > .wb-paged { border-radius: 0; }
+@media (max-width: 700px) {
+  :root[data-widget-style="mono"] .wb-s2x1 > .wb-rows, :root[data-widget-style="mono"] .wb-s2x1 > .wb-paged { border-left: 0; padding-left: 0; border-top: 1px solid var(--c-rule); padding-top: 8px; }
+}
+
+/* Progress: five capsules as a hero (one fill under a mask), a round-ended pill bar in a row. */
+:root[data-widget-style="mono"] .wb-bar { height: 7px; border-radius: 999px; background: var(--c-seg); margin-top: 6px; }
+:root[data-widget-style="mono"] .wb-bar > span { border-radius: 999px; }
+:root[data-widget-style="mono"] .wb-hero .wb-bar {
+  --gap: 4px; --cap: 13.5px; --seg: calc((100% - 4 * var(--gap)) / 5 + var(--gap));
+  height: 27px; border-radius: 0; margin-top: 10px;
+  -webkit-mask:
+    radial-gradient(circle at var(--cap) 50%, #000 calc(var(--cap) - 0.5px), transparent var(--cap)) 0 0 / var(--seg) 100% repeat-x,
+    radial-gradient(circle at calc(100% - var(--gap) - var(--cap)) 50%, #000 calc(var(--cap) - 0.5px), transparent var(--cap)) 0 0 / var(--seg) 100% repeat-x,
+    linear-gradient(90deg, transparent var(--cap), #000 var(--cap), #000 calc(100% - var(--gap) - var(--cap)), transparent calc(100% - var(--gap) - var(--cap))) 0 0 / var(--seg) 100% repeat-x;
+  mask:
+    radial-gradient(circle at var(--cap) 50%, #000 calc(var(--cap) - 0.5px), transparent var(--cap)) 0 0 / var(--seg) 100% repeat-x,
+    radial-gradient(circle at calc(100% - var(--gap) - var(--cap)) 50%, #000 calc(var(--cap) - 0.5px), transparent var(--cap)) 0 0 / var(--seg) 100% repeat-x,
+    linear-gradient(90deg, transparent var(--cap), #000 var(--cap), #000 calc(100% - var(--gap) - var(--cap)), transparent calc(100% - var(--gap) - var(--cap))) 0 0 / var(--seg) 100% repeat-x;
+}
+:root[data-widget-style="mono"] .wb-hero .wb-bar > span { border-radius: 0; }
+
+/* Gauge: a 270-degree arc as a hero, the value under it; a pill scale with a round marker in a row. */
+:root[data-widget-style="mono"] .wb-hero.wb-gauge { align-items: center; text-align: center; }
+:root[data-widget-style="mono"] .wb-hero.wb-gauge > :not(.wb-arc, .wb-hero-value, .wb-caption) { align-self: stretch; text-align: left; }
+:root[data-widget-style="mono"] .wb-hero .wb-scale { display: none; }
+:root[data-widget-style="mono"] .wb-hero .wb-arc { display: block; order: 1; width: 128px; height: auto; margin-top: 2px; overflow: visible; }
+:root[data-widget-style="mono"] .wb-hero.wb-gauge .wb-hero-value { order: 2; margin-top: -4px; }
+:root[data-widget-style="mono"] .wb-hero.wb-gauge .wb-caption { order: 3; }
+:root[data-widget-style="mono"] .wb-arc path { fill: none; stroke-width: 8; }
+:root[data-widget-style="mono"] .wb-arc-track { stroke: var(--c-seg); stroke-linecap: round; }
+:root[data-widget-style="mono"] .wb-arc-zone { opacity: 0.38; }
+:root[data-widget-style="mono"] .wb-arc-meter { stroke-linecap: round; animation: wb-arc-in 0.8s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+@keyframes wb-arc-in { from { stroke-dasharray: 0 100; } }
+:root[data-widget-style="mono"] .wb-scale { height: 7px; margin: 9px 0 5px; border-radius: 999px; background: var(--c-seg); }
+:root[data-widget-style="mono"] .wb-zone { opacity: 0.5; border-radius: 0; }
+:root[data-widget-style="mono"] .wb-zone:first-child { border-radius: 999px 0 0 999px; }
+:root[data-widget-style="mono"] .wb-zone:nth-last-child(1 of .wb-zone) { border-radius: 0 999px 999px 0; }
+:root[data-widget-style="mono"] .wb-zone:first-child:nth-last-child(1 of .wb-zone) { border-radius: 999px; }
+:root[data-widget-style="mono"] .wb-marker { top: -3.5px; width: 14px; height: 14px; margin-left: -7px; background: var(--c-ink); box-shadow: 0 0 0 3px var(--c-bg); }
+
+/* Trend: capsule bars, the past quieter; a 2px line without its area; the readout as a playhead. */
+:root[data-widget-style="mono"] .wb-area, :root[data-widget-style="mono"] .wb-spark .wb-sb { display: none; }
+:root[data-widget-style="mono"] .wb-zero { stroke: var(--c-raised); }
+:root[data-widget-style="mono"] .wb-hbars { display: block; position: absolute; inset: 0; pointer-events: none; }
+:root[data-widget-style="mono"] .wb-hb {
+  position: absolute; display: block; border-radius: 999px; min-height: 2px; max-width: 14px; translate: -50% 0;
+  transform-origin: 50% 100%; animation: wb-grow-y 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+:root[data-widget-style="mono"] .wb-hb.neg { transform-origin: 50% 0; }
+:root[data-widget-style="mono"] .wb-row .wb-hb { max-width: 7px; }
+:root[data-widget-style="mono"] .wb-hb.past { opacity: 0.5; }
+:root[data-widget-style="mono"] .wb-spark-rule { width: 1.5px; margin-left: -0.75px; top: -6px; background: var(--m-accent); }
+:root[data-widget-style="mono"] .wb-spark-rule::before { content: ""; position: absolute; top: -4px; left: 50%; width: 7px; height: 7px; margin-left: -3.5px; border-radius: 50%; background: var(--m-accent); }
+:root[data-widget-style="mono"] .wb-spark-dot { width: 9px; height: 9px; margin: -4.5px 0 0 -4.5px; background: var(--m-accent); box-shadow: 0 0 0 2px var(--c-bg); }
+
+/* Check: an 18px ring; ticked, an accent disc with a near-black mark, the row struck through. */
+:root[data-widget-style="mono"] .wb-check { width: 18px; height: 18px; border: 1.5px solid var(--c-muted); }
+:root[data-widget-style="mono"] .wb-check::before { inset: -5px; }
+:root[data-widget-style="mono"] .wb-check:hover:not(:disabled) { border-color: var(--c-ink); }
+:root[data-widget-style="mono"] .wb-check.on { background: var(--m-accent); border-color: var(--m-accent); color: var(--m-near-black); }
+:root[data-widget-style="mono"] .wb-check svg { width: 12px; height: 12px; }
+:root[data-widget-style="mono"] .wb-done { opacity: 1; }
+:root[data-widget-style="mono"] .wb-done .wb-lt, :root[data-widget-style="mono"] .wb-done .wb-v { color: var(--c-muted); }
+
+/* Buttons: pills. A card's own buttons are the reference's primary (black) on a light card and
+   inverse (white) on a coal one; a block's button and a confirm's cancel the quiet pill. */
+:root[data-widget-style="mono"] .wb-btn, :root[data-widget-style="mono"] .wa-btn {
+  min-height: 32px; padding: 0 14px; border: 1px solid transparent; background: var(--c-rule); color: var(--c-ink);
+  font-size: 12px; font-weight: 500; transition: filter 0.15s ease, transform 0.1s ease;
+}
+:root[data-widget-style="mono"] .wb-btn { min-height: 28px; padding: 0 12px; margin: -4px 0; }
+:root[data-widget-style="mono"] .wb-btn::before { inset: 0; }
+:root[data-widget-style="mono"] .widget-actions .wa-btn, :root[data-widget-style="mono"] .widget-confirm .wa-btn.primary { background: var(--c-btn); color: var(--c-btn-ink); border-color: var(--m-ring); }
+:root[data-widget-style="mono"] .wb-btn:hover:not(:disabled), :root[data-widget-style="mono"] .wa-btn:hover:not(:disabled), :root[data-widget-style="mono"] .wa-send:hover:not(:disabled) { filter: brightness(0.85); }
+:root[data-widget-style="mono"] .widget-actions .wa-btn:hover:not(:disabled), :root[data-widget-style="mono"] .widget-confirm .wa-btn.primary:hover:not(:disabled) { filter: none; background: var(--c-btn-hover); }
+:root[data-widget-style="mono"] .wb-btn:disabled, :root[data-widget-style="mono"] .wa-btn:disabled { opacity: 1; background: var(--c-raised); color: var(--c-muted); }
+/* Input: a 38px pill field and a round 36px accent button carrying the arrow. */
+:root[data-widget-style="mono"] .wa-form { gap: 6px; }
+:root[data-widget-style="mono"] .wa-input { height: 38px; padding: 0 14px; border: 1px solid var(--c-raised); background: var(--c-bg); color: var(--c-ink); font-size: 13px; }
+:root[data-widget-style="mono"] .wa-input::placeholder { color: var(--c-muted); }
+:root[data-widget-style="mono"] .wa-input:disabled { opacity: 1; color: var(--c-muted); }
+:root[data-widget-style="mono"] .wa-send { width: 36px; height: 36px; background: var(--m-accent); color: var(--m-near-black); transition: filter 0.15s ease, transform 0.1s ease; }
+:root[data-widget-style="mono"] .wa-send svg { width: 16px; height: 16px; }
+:root[data-widget-style="mono"] .wa-send:disabled { opacity: 1; background: var(--c-raised); color: var(--c-muted); }
+:root[data-widget-style="mono"] .widget-foot { margin-top: 14px; }
+:root[data-widget-style="mono"] .widget-foot:not(.has-controls) { margin-top: 0; }
+:root[data-widget-style="mono"] .widget-confirm-text { font-size: 13px; color: var(--c-ink); }
+
+/* Views: the reference's tabs, a dark pill track, the chosen view a white pill. */
+:root[data-widget-style="mono"] .widget-views { gap: 4px; padding: 3px; margin: -2px 0 14px; background: var(--m-dark-rule); }
+:root[data-widget-style="mono"] .widget-views button { min-height: 28px; padding: 0 13px; color: var(--m-tab-ink); font-size: 12px; font-weight: 500; }
+:root[data-widget-style="mono"] .widget-views button:hover:not(:disabled) { color: var(--m-white); }
+:root[data-widget-style="mono"] .widget-views button[aria-selected="true"] { background: var(--m-white); color: var(--m-near-black); }
+/* Pager: round dots, the current one in ink. */
+:root[data-widget-style="mono"] .wb-pdot::before { width: 7px; height: 7px; background: var(--c-raised); }
+:root[data-widget-style="mono"] .wb-pdot:hover:not(:disabled)::before { background: var(--c-muted); }
+:root[data-widget-style="mono"] .wb-pdot[aria-current]::before { background: var(--c-ink); transform: none; }
+/* Copy: a small round button; "Copied" a green chip. */
+:root[data-widget-style="mono"] .wb-copy { background: var(--c-rule); color: var(--c-ink); transition: opacity 0.15s ease, filter 0.15s ease; }
+:root[data-widget-style="mono"] .wb-copy:hover:not(:disabled) { background: var(--c-rule); color: var(--c-ink); filter: brightness(0.88); }
+:root[data-widget-style="mono"] .wb-copy.done { color: var(--c-ink); }
+:root[data-widget-style="mono"] .wb-copy svg { width: 14px; height: 14px; }
+:root[data-widget-style="mono"] .wb-copy-tip { margin-right: 4px; padding: 3px 8px; background: var(--m-green); color: var(--m-near-black); font-size: 11px; font-weight: 500; }
+/* What came back: one 12px line after a small icon, an error in the negative colour. */
+:root[data-widget-style="mono"] .widget-msg { font-size: 12px; color: var(--c-ink); }
+:root[data-widget-style="mono"] .widget-msg.error { color: var(--c-neg-text); }
+:root[data-widget-style="mono"] .widget-msg:not(:empty)::before {
+  content: ""; display: inline-block; width: 14px; height: 14px; margin-right: 5px; vertical-align: -3px; background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round'%3E%3Ccircle cx='8' cy='8' r='6.2'/%3E%3Cpath d='M8 7.4v3.6M8 5h.01'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round'%3E%3Ccircle cx='8' cy='8' r='6.2'/%3E%3Cpath d='M8 7.4v3.6M8 5h.01'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+:root[data-widget-style="mono"] .widget-msg.error:not(:empty)::before {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round'%3E%3Ccircle cx='8' cy='8' r='6.2'/%3E%3Cpath d='M8 4.8v3.8M8 11h.01'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round'%3E%3Ccircle cx='8' cy='8' r='6.2'/%3E%3Cpath d='M8 4.8v3.8M8 11h.01'/%3E%3C/svg%3E");
+}
+/* Focus: a 2px accent ring 3px out. */
+:root[data-widget-style="mono"] .widget :is(.wb-ctl, .wa-btn, .wa-send, .wa-input, .widget-views button, .wb-pdot, .widget-refresh, a):focus-visible { outline: 2px solid var(--m-accent); outline-offset: 3px; }
+/* A value that changed flashes in the text colour of its tone. */
+:root[data-widget-style="mono"] .wb-flash-up { animation-name: wb-mono-flash-up; }
+:root[data-widget-style="mono"] .wb-flash-down { animation-name: wb-mono-flash-down; }
+@keyframes wb-mono-flash-up { 0%, 35% { color: var(--tone-positive-text); } }
+@keyframes wb-mono-flash-down { 0%, 35% { color: var(--tone-negative-text); } }
+@media (pointer: coarse) {
+  :root[data-widget-style="mono"] .wa-input { height: 44px; font-size: 16px; }
+  :root[data-widget-style="mono"] .wa-send { width: 44px; height: 44px; }
+  :root[data-widget-style="mono"] .wa-btn { min-height: 44px; }
+  :root[data-widget-style="mono"] .wb-btn::before { inset: -8px -4px; }
+  :root[data-widget-style="mono"] .wb-check::before { inset: -13px; }
+  :root[data-widget-style="mono"] .widget-views button { min-height: 38px; }
+  :root[data-widget-style="mono"] .widget-refresh { min-height: 44px; margin: -10px 0 -10px auto; }
+}
+@media (max-width: 700px) { :root[data-widget-style="mono"] .wa-input { font-size: 16px; } }
+@media (prefers-reduced-motion: reduce) {
+  :root[data-widget-style="mono"] :is(.wb-arc-meter, .wb-hb, .wb-flash-up, .wb-flash-down) { animation: none; }
+  :root[data-widget-style="mono"] :is(.wb-btn, .wa-btn, .wa-send, .wb-copy):active { transform: none; }
+  :root[data-widget-style="mono"] :is(.wb-btn, .wa-btn, .wa-send, .wb-copy, .widget-refresh) { transition: none; }
+}
+/* ======================================== end of mono ======================================== */

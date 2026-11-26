@@ -61,6 +61,16 @@ function useCountUp(target: number | null): number | null {
 const ROWS: Record<string, number> = { "1x1": 2, "2x1": 4, "1x2": 6, "2x2": 10 };
 
 const TONE_VAR: Record<Tone, string> = { positive: "var(--tone-positive)", negative: "var(--tone-negative)", warning: "var(--tone-warning)", neutral: "var(--muted)" };
+/**
+ * A tone that colours text. A card style may set `--tone-*-text` where the fill colour is too light
+ * for words (4.5:1); without it the fill colour is used, as before.
+ */
+const TONE_TEXT: Record<Tone, string> = {
+  positive: "var(--tone-positive-text, var(--tone-positive))",
+  negative: "var(--tone-negative-text, var(--tone-negative))",
+  warning: "var(--tone-warning-text, var(--tone-warning))",
+  neutral: "var(--muted)",
+};
 
 export function txt(t: BlockText | undefined, lang: Lang): string {
   if (t === undefined) return "";
@@ -70,6 +80,9 @@ export function txt(t: BlockText | undefined, lang: Lang): string {
 
 type Num = { format?: Format; currency?: string; decimals?: number; unit?: BlockText };
 
+const percentFormat = (lang: Lang, d: number | undefined, signed: boolean) =>
+  new Intl.NumberFormat(LOCALE[lang], { style: "percent", minimumFractionDigits: d ?? 0, maximumFractionDigits: d ?? 1, ...(signed ? { signDisplay: "exceptZero" as const } : {}) });
+
 /** A number in the reader's language; `compact` and large currency values abbreviate. */
 export function fmt(v: number, n: Num, lang: Lang, signed = false): string {
   const locale = LOCALE[lang];
@@ -77,7 +90,7 @@ export function fmt(v: number, n: Num, lang: Lang, signed = false): string {
   const sign: Intl.NumberFormatOptions = signed ? { signDisplay: "exceptZero" } : {};
   let s: string;
   if (n.format === "percent") {
-    s = new Intl.NumberFormat(locale, { style: "percent", minimumFractionDigits: d ?? 0, maximumFractionDigits: d ?? 1, ...sign }).format(v / 100);
+    s = percentFormat(lang, d, signed).format(v / 100);
   } else if (n.format === "currency") {
     const big = Math.abs(v) >= 100_000;
     s = new Intl.NumberFormat(locale, {
@@ -96,6 +109,41 @@ export function fmt(v: number, n: Num, lang: Lang, signed = false): string {
   return unit ? `${s} ${unit}` : s;
 }
 
+/** A formatted number split into the number and its unit; `num + sep + unit` is always `fmt(...)`. */
+export type Parts = { num: string; sep: string; unit: string };
+
+/**
+ * `fmt` in two pieces, so a card style can draw the unit smaller than the number. The unit comes
+ * only from the data: the block's `unit`, or the percent sign of `format: "percent"` (from the
+ * formatter's own parts). Anything else, a currency symbol included, stays one string.
+ */
+export function fmtParts(v: number, n: Num, lang: Lang, signed = false): Parts {
+  const unit = txt(n.unit, lang);
+  if (unit) return { num: fmt(v, { ...n, unit: undefined }, lang, signed), sep: " ", unit };
+  const whole = fmt(v, n, lang, signed);
+  if (n.format !== "percent") return { num: whole, sep: "", unit: "" };
+  const parts = percentFormat(lang, n.decimals, signed).formatToParts(v / 100);
+  const at = parts.findIndex((p) => p.type === "percentSign");
+  // Only a trailing sign splits ("50%", "50 %"); a leading one ("%50") stays whole.
+  if (at < 0 || parts.slice(at + 1).length || parts.slice(0, at).every((p) => p.type === "literal")) return { num: whole, sep: "", unit: "" };
+  let end = at;
+  while (end > 0 && parts[end - 1]!.type === "literal") end--;
+  const join = (ps: Intl.NumberFormatPart[]) => ps.map((p) => p.value).join("");
+  return { num: join(parts.slice(0, end)), sep: join(parts.slice(end, at)), unit: parts[at]!.value };
+}
+
+/** A hero value with its unit in a span of its own (smaller in the mono card style); the text reads the same. */
+function Value({ p }: { p: Parts }) {
+  if (!p.unit) return <>{p.num}</>;
+  return (
+    <>
+      {p.num}
+      <span className="wb-usep">{p.sep}</span>
+      <span className="wb-unit">{p.unit}</span>
+    </>
+  );
+}
+
 /** The value a block leads with, or undefined when the app could not obtain it. */
 function shown(b: WidgetBlock, lang: Lang): string | undefined {
   switch (b.type) {
@@ -111,6 +159,21 @@ function shown(b: WidgetBlock, lang: Lang): string | undefined {
     case "status":
       return txt(b.value, lang);
     case "tanks":
+      return undefined;
+  }
+}
+
+/** `shown` as parts, where the block's own number is formatted here (not the app's `display` text). */
+function shownParts(b: WidgetBlock, lang: Lang): Parts | undefined {
+  switch (b.type) {
+    case "metric":
+    case "progress":
+      return b.display || b.value === null ? undefined : fmtParts(b.value, b, lang);
+    case "trend": {
+      const last = [...b.points].reverse().find((p) => p.v !== null);
+      return last?.v == null ? undefined : fmtParts(last.v, b, lang, !!b.signed);
+    }
+    default:
       return undefined;
   }
 }
@@ -315,7 +378,7 @@ function readout(b: WidgetBlock, p: Point | null, lang: Lang): { value: string |
 function Delta({ d, lang }: { d: NonNullable<MetricBlock["delta"]>; lang: Lang }) {
   // A change is colored only when the app says whether it is good or bad: up is not always good.
   return (
-    <span className="wb-delta" style={{ color: d.tone ? TONE_VAR[d.tone] : undefined }}>
+    <span className="wb-delta" data-tone={d.tone} style={{ color: d.tone ? TONE_TEXT[d.tone] : undefined }}>
       {d.value > 0 ? "▲ " : d.value < 0 ? "▼ " : ""}
       {fmt(Math.abs(d.value), d, lang)}
       {d.label && <span className="wb-delta-label"> {txt(d.label, lang)}</span>}
@@ -378,6 +441,7 @@ function Spark({ b, lang, big, onPoint }: { b: TrendBlock; lang: Lang; big?: boo
   const xPct = (i: number) => `${((i * 10 + 5) / W) * 100}%`;
   if (b.style === "bar") {
     const strong = hover ?? last;
+    const pct = (n: number, of: number) => `${(n / of) * 100}%`;
     return wrap(
       <svg className={cls} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label={aria}>
         {pts.map((p, i) => {
@@ -401,6 +465,31 @@ function Spark({ b, lang, big, onPoint }: { b: TrendBlock; lang: Lang; big?: boo
         })}
         <line x1={0} x2={W} y1={zero} y2={zero} className="wb-zero" vectorEffect="non-scaling-stroke" />
       </svg>,
+      // The same bars as boxes, for a card style that draws them as capsules (an svg rect's radius
+      // stretches with the chart); hidden in the default style.
+      <span className="wb-hbars" aria-hidden="true">
+        {pts.map((p, i) => {
+          if (p.v === null) return null;
+          const top = Math.min(y(p.v), zero);
+          const h = Math.max(Math.abs(y(p.v) - zero), 0.5);
+          const neg = p.v < 0;
+          return (
+            <i
+              key={i}
+              className={`wb-hb${i === strong ? "" : " past"}${neg ? " neg" : ""}`}
+              style={{
+                // Centred in its slot; the card style sets the width, so a capsule stays a capsule on a short chart.
+                left: pct(i * 10 + 5, W),
+                width: pct(7, W),
+                top: pct(top, H),
+                height: pct(h, H),
+                background: b.signed ? (neg ? "var(--tone-negative)" : "var(--tone-positive)") : "var(--accent)",
+                animationDelay: `${Math.min(i, 30) * 16}ms`,
+              }}
+            />
+          );
+        })}
+      </span>,
     );
   }
   // A line breaks at a missing point rather than bridging it; each unbroken run gets a faint area
@@ -469,6 +558,45 @@ function Scale({ b, lang }: { b: GaugeBlock; lang: Lang }) {
   );
 }
 
+/** The arc a gauge hero draws in the mono card style: 270 degrees, open at the bottom, in a 100 x 80 box. */
+export const ARC = { cx: 50, cy: 46, r: 40, sweep: 270 } as const;
+
+/** An svg path of a circular arc of `sweep` degrees, symmetric about the vertical, open at the bottom, drawn clockwise. */
+export function arcPath(cx: number, cy: number, r: number, sweep: number): string {
+  const a0 = ((90 + (360 - sweep) / 2) * Math.PI) / 180;
+  const a1 = a0 + (sweep * Math.PI) / 180;
+  const pt = (a: number) => `${+(cx + r * Math.cos(a)).toFixed(2)} ${+(cy + r * Math.sin(a)).toFixed(2)}`;
+  return `M${pt(a0)}A${r} ${r} 0 ${sweep > 180 ? 1 : 0} 1 ${pt(a1)}`;
+}
+
+/** A gauge as shares of its arc (0 to 100, for `pathLength="100"`): the value, and each zone's start and length. */
+export function arcShares(b: Pick<GaugeBlock, "min" | "max" | "value" | "zones">): { value: number | null; zones: { start: number; len: number; tone: Tone }[] } {
+  const range = b.max - b.min || 1;
+  const at = (v: number) => Math.round(Math.max(0, Math.min(100, ((v - b.min) / range) * 100)) * 100) / 100;
+  let from = b.min;
+  const zones = (b.zones ?? []).map((z) => {
+    const start = at(from);
+    from = z.to;
+    return { start, len: Math.max(0, Math.round((at(Math.min(z.to, b.max)) - start) * 100) / 100), tone: z.tone };
+  });
+  return { value: b.value === null ? null : at(b.value), zones };
+}
+
+/** The gauge as an arc: track, faint zones, the value's share in its zone's tone (the accent without one). Hidden in the default style. */
+function Arc({ b, tone }: { b: GaugeBlock; tone: Tone | undefined }) {
+  const d = arcPath(ARC.cx, ARC.cy, ARC.r, ARC.sweep);
+  const s = arcShares(b);
+  return (
+    <svg className="wb-arc" viewBox="0 0 100 80" aria-hidden="true">
+      <path d={d} className="wb-arc-track" />
+      {s.zones.map((z, i) => (
+        <path key={i} d={d} pathLength={100} className="wb-arc-zone" stroke={TONE_VAR[z.tone]} strokeDasharray={`${z.len} 100`} strokeDashoffset={-z.start} />
+      ))}
+      {s.value !== null && <path d={d} pathLength={100} className="wb-arc-meter" stroke={tone && tone !== "neutral" ? TONE_VAR[tone] : "var(--accent)"} strokeDasharray={`${s.value} 100`} />}
+    </svg>
+  );
+}
+
 /** The current zone's tone, for coloring a gauge's value. */
 function gaugeTone(b: GaugeBlock): Tone | undefined {
   if (b.tone) return b.tone;
@@ -485,8 +613,14 @@ function Hero({ b, lang, ctx, flash }: { b: WidgetBlock; lang: Lang; ctx: BlockC
   const counting = useCountUp(b.type === "metric" && !b.display ? b.value : null);
   const read = readout(b, point, lang);
   let value = shown(b, lang);
-  if (read) value = read.value;
-  else if (b.type === "metric" && !b.display && b.value !== null && counting !== null) value = fmt(counting, b, lang);
+  let parts = shownParts(b, lang);
+  if (read) {
+    value = read.value;
+    parts = point?.v != null && b.type === "trend" ? fmtParts(point.v, b, lang, !!b.signed) : undefined;
+  } else if (b.type === "metric" && !b.display && b.value !== null && counting !== null) {
+    value = fmt(counting, b, lang);
+    parts = fmtParts(counting, b, lang);
+  }
   const tone = b.type === "gauge" ? gaugeTone(b) : b.tone;
   const label = txt(b.label, lang);
   const check = ctx.acts && b.action?.kind === "check" ? b.action : undefined;
@@ -516,11 +650,12 @@ function Hero({ b, lang, ctx, flash }: { b: WidgetBlock; lang: Lang; ctx: BlockC
         <span
           key={flash?.n}
           className={`wb-hero-value${value === undefined ? " missing" : ""}${flashCls(flash)}`}
-          style={{ color: b.type === "gauge" && tone && tone !== "neutral" ? TONE_VAR[tone] : undefined }}
+          style={{ color: b.type === "gauge" && tone && tone !== "neutral" ? TONE_TEXT[tone] : undefined }}
         >
-          {value ?? t("widget.noData")}
+          {value === undefined ? t("widget.noData") : parts ? <Value p={parts} /> : value}
         </span>
       )}
+      {b.type === "gauge" && <Arc b={b} tone={tone} />}
       {b.type === "metric" && b.delta && <Delta d={b.delta} lang={lang} />}
       {b.type === "trend" && <Spark b={b} lang={lang} big onPoint={setPoint} />}
       {b.type === "progress" && <Bar b={b} />}
@@ -548,7 +683,7 @@ function Row({ b, lang, ctx, flash }: { b: WidgetBlock; lang: Lang; ctx: BlockCt
           <span className="wb-lt">{label}</span>
         </span>
         {b.type !== "tanks" && (
-          <span className={`wb-row-value${value === undefined ? " missing" : ""}`} style={{ color: (b.type === "gauge" || b.type === "metric") && tone && tone !== "neutral" ? TONE_VAR[tone] : undefined }}>
+          <span className={`wb-row-value${value === undefined ? " missing" : ""}`} style={{ color: (b.type === "gauge" || b.type === "metric") && tone && tone !== "neutral" ? TONE_TEXT[tone] : undefined }}>
             <span key={flash?.n} className={`wb-v${flashCls(flash)}`} title={value}>
               {value ?? t("widget.noData")}
             </span>

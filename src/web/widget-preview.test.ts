@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { previewFeed, previewOpacity, previewPage } from "./widget-preview.tsx";
+import { previewFeed, previewOpacity, previewPage, previewStyle } from "./widget-preview.tsx";
 
 test("preview defaults to 76 and bounds finite opacity inputs", () => {
   for (const value of [null, "", " ", "invalid", "Infinity"]) expect(previewOpacity(value)).toBe(76);
@@ -48,4 +48,14 @@ test("the preview's sources: a check finishes a task, the bank call always fails
   const b = await feed.refresh("market", "watchlist");
   if (!a.ok || !b.ok || !a.widget.ok || !b.widget.ok) throw new Error("market down");
   expect(a.widget.blocks?.[0]).not.toEqual(b.widget.blocks?.[0]);
+});
+
+test("the preview opens in the mono card style unless asked for the default one", async () => {
+  expect(previewStyle(null)).toBe("mono");
+  expect(previewStyle("<b>")).toBe("mono");
+  expect(previewStyle("default")).toBe("default");
+  expect(await previewPage(new URL("http://localhost/"))).toContain('data-widget-style="mono"');
+  const plain = await previewPage(new URL("http://localhost/?style=default"));
+  expect(plain).not.toContain('data-widget-style="mono"');
+  expect(plain).toContain('data-style="default" aria-pressed="true"');
 });

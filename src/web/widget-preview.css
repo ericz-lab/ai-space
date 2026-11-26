@@ -5,9 +5,9 @@
   --accent: #93a4ff;
   --solid: #1c2140;
 }
-:root[data-theme="dark"][data-preview="custom"] .widget { --accent: #9ba8ff; background: rgba(27, 29, 43, var(--widget-alpha)); }
+:root[data-theme="dark"][data-preview="custom"]:not([data-widget-style="mono"]) .widget { --accent: #9ba8ff; background: rgba(27, 29, 43, var(--widget-alpha)); }
 :root[data-theme="light"] .aurora { display: none; }
-:root[data-theme="light"][data-preview="custom"] .widget { background: rgba(255, 255, 255, var(--widget-alpha)); }
+:root[data-theme="light"][data-preview="custom"]:not([data-widget-style="mono"]) .widget { background: rgba(255, 255, 255, var(--widget-alpha)); }
 .shell { max-width: 1080px; }
 .preview-search {
   display: flex; align-items: center; gap: 10px;
@@ -31,3 +31,20 @@
 
 :root[data-preview="production"] .opacity-controls { display: none; }
 .preview-note { margin: -28px auto 24px; max-width: 640px; text-align: center; font: 12px system-ui; color: var(--muted); }
+
+/* The card style switch, beside the opacity slider. */
+.style-switch { display: flex; gap: 2px; padding: 2px; border-radius: 999px; background: #0006; }
+.style-switch button {
+  min-height: 26px; padding: 0 12px; border: 0; border-radius: 999px; background: transparent;
+  color: #c9cbd5; font: 12px system-ui; cursor: pointer;
+}
+.style-switch button[aria-pressed="true"] { background: #fafaf8; color: #050505; }
+.style-switch button:focus-visible { outline: 2px solid white; outline-offset: 2px; }
+.opacity-group { display: contents; }
+/* Mono: a flat board instead of the backdrop; the cards are opaque, so no opacity to set. */
+:root[data-widget-style="mono"] body { background: var(--m-board); }
+:root[data-widget-style="mono"] .aurora { display: none; }
+:root[data-widget-style="mono"] .opacity-group { display: none; }
+:root[data-widget-style="mono"] .preview-search { background: var(--m-card); color: var(--m-ink); }
+:root[data-widget-style="mono"] .preview-search span { color: var(--m-muted); }
+:root[data-widget-style="mono"] .preview-note { color: var(--m-muted); }
