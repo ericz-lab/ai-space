@@ -24,15 +24,37 @@ export type Layout = {
   hiddenWidgets: string[];
   /** The screens, home first; `null` until the panel stores its first set (it seeds the home screen then). */
   screens: Screen[] | null;
+  /**
+   * The stepless layout's frames by widget id (docs/panel.md#resize-a-widget): `w` a fraction of the
+   * widget area's width, `h` a height in px. A widget without one is drawn from its size.
+   */
+  frames: Record<string, WidgetFrame>;
+  /** Where a row's free space goes: after its cards, or split on both sides. */
+  widgetAlign: "start" | "center";
 };
+
+export type WidgetFrame = { w: number; h: number };
+export const FRAME_W = [0.1, 1] as const;
+export const FRAME_H = [140, 900] as const;
 
 /**
  * `sizes` merges: a size sets the widget, `null` returns it to the manifest's.
  * `hiddenWidgets` merges too: `true` removes the widget from the panel, `false` shows it again.
+ * `frames` merges the same way, `null` removing one. A size written for a widget without a frame in
+ * the same patch drops the widget's frame: a client that only knows sizes (the native apps) chose a
+ * classic size, and the panel shows that one.
  */
-export type LayoutPatch = Partial<{ order: Partial<Layout["order"]>; hidden: string[]; sizes: Record<string, string | null>; hiddenWidgets: Record<string, boolean>; screens: Screen[] }>;
+export type LayoutPatch = Partial<{
+  order: Partial<Layout["order"]>;
+  hidden: string[];
+  sizes: Record<string, string | null>;
+  hiddenWidgets: Record<string, boolean>;
+  screens: Screen[];
+  frames: Record<string, WidgetFrame | null>;
+  widgetAlign: string;
+}>;
 
-const EMPTY: Layout = { order: { apps: [], agents: [], widgets: [] }, hidden: [], sizes: {}, hiddenWidgets: [], screens: null };
+const EMPTY: Layout = { order: { apps: [], agents: [], widgets: [] }, hidden: [], sizes: {}, hiddenWidgets: [], screens: null, frames: {}, widgetAlign: "start" };
 const KEY = "layout";
 const MAX_NAMES = 500;
 const MAX_SCREENS = 20;
@@ -65,6 +87,8 @@ export class LayoutStore {
         sizes: sizes(parsed.sizes),
         hiddenWidgets: names(parsed.hiddenWidgets),
         screens: Array.isArray(parsed.screens) ? screens(parsed.screens) : null,
+        frames: frames(parsed.frames),
+        widgetAlign: parsed.widgetAlign === "center" ? "center" : "start",
       };
     } catch {
       return structuredClone(EMPTY);
@@ -89,12 +113,27 @@ export class LayoutStore {
     }
     if (patch.sizes !== undefined) {
       if (typeof patch.sizes !== "object" || patch.sizes === null || Array.isArray(patch.sizes)) throw new Error("sizes must be an object of widget id to size");
+      const framed = patch.frames && typeof patch.frames === "object" ? patch.frames : {};
       for (const [id, size] of Object.entries(patch.sizes)) {
         if (size === null) delete cur.sizes[id];
         else if (isSize(size)) cur.sizes[id] = size;
         else throw new Error(`sizes.${id}: size must be one of ${WIDGET_SIZES.join(", ")} or null`);
+        if (!Object.hasOwn(framed, id)) delete cur.frames[id];
       }
       if (Object.keys(cur.sizes).length > MAX_NAMES) throw new Error("too many sizes");
+    }
+    if (patch.frames !== undefined) {
+      if (typeof patch.frames !== "object" || patch.frames === null || Array.isArray(patch.frames)) throw new Error("frames must be an object of widget id to { w, h }");
+      for (const [id, f] of Object.entries(patch.frames)) {
+        if (f === null) delete cur.frames[id];
+        else if (isFrame(f)) cur.frames[id] = { w: f.w, h: f.h };
+        else throw new Error(`frames.${id}: must be { w, h } with w in [${FRAME_W.join(", ")}] and h in [${FRAME_H.join(", ")}], or null`);
+      }
+      if (Object.keys(cur.frames).length > MAX_NAMES) throw new Error("too many frames");
+    }
+    if (patch.widgetAlign !== undefined) {
+      if (patch.widgetAlign !== "start" && patch.widgetAlign !== "center") throw new Error('widgetAlign must be "start" or "center"');
+      cur.widgetAlign = patch.widgetAlign;
     }
     if (patch.hiddenWidgets !== undefined) {
       const hw = patch.hiddenWidgets;
@@ -120,6 +159,17 @@ export class LayoutStore {
     else set.delete(app);
     return this.update({ hidden: [...set] });
   }
+}
+
+/**
+ * A widget as the panel lists it: the operator's size over the manifest's, and the frame when one is
+ * stored. A frame that came with the widget (a peer's own panel) is not this panel's and is dropped.
+ */
+export function withLayout<T extends { id: string; size: string }>(lay: Layout, w: T): T & { frame?: WidgetFrame } {
+  const { frame: _, ...rest } = w as T & { frame?: unknown };
+  const size = lay.sizes[w.id];
+  const frame = lay.frames[w.id];
+  return { ...(rest as T), ...(size ? { size } : {}), ...(frame ? { frame } : {}) };
 }
 
 /**
@@ -177,6 +227,19 @@ function screens(v: unknown, strict = false): Screen[] {
 }
 
 const isSize = (v: unknown): v is WidgetSize => typeof v === "string" && (WIDGET_SIZES as readonly string[]).includes(v);
+
+const isFrame = (v: unknown): v is WidgetFrame => {
+  if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
+  const { w, h } = v as Record<string, unknown>;
+  return typeof w === "number" && typeof h === "number" && Number.isFinite(w) && Number.isFinite(h) && w >= FRAME_W[0] && w <= FRAME_W[1] && h >= FRAME_H[0] && h <= FRAME_H[1];
+};
+
+function frames(v: unknown): Record<string, WidgetFrame> {
+  const out: Record<string, WidgetFrame> = {};
+  if (typeof v !== "object" || v === null || Array.isArray(v)) return out;
+  for (const [id, f] of Object.entries(v as Record<string, unknown>).slice(0, MAX_NAMES)) if (id && isFrame(f)) out[id] = { w: f.w, h: f.h };
+  return out;
+}
 
 function sizes(v: unknown): Record<string, WidgetSize> {
   const out: Record<string, WidgetSize> = {};

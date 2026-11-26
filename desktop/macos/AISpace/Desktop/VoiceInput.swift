@@ -17,23 +17,37 @@ final class VoiceInput: NSObject, ObservableObject, AVAudioRecorderDelegate {
     @Published var error: String?
 
     private static let maxDuration: TimeInterval = 90
-    /// What each Space answered to `GET /api/voice`, by origin, for the life of the app.
-    private static var known: [URL: Bool] = [:]
+    /// What each Space answered to `GET /api/voice`, by origin, for a minute (VoiceProbes).
+    private static var probes = VoiceProbes()
 
     private var recorder: AVAudioRecorder?
     private var api: SpaceAPI?
     private var deliver: ((String) -> Void)?
 
-    /// Asks the Space whether it can transcribe, once per Space.
-    func check(_ api: SpaceAPI) async {
-        self.api = api
-        if let known = Self.known[api.base] { state = known ? (state == .unavailable ? .idle : state) : .unavailable; return }
+    /// Whether the Space can transcribe: its fresh answer, else asked now. Nil when it did not
+    /// answer (signed out, offline), which is not remembered.
+    static func transcribes(_ api: SpaceAPI) async -> Bool? {
+        if let known = probes.answer(api.base) { return known }
         struct Answer: Decodable { var transcribe: Bool? }
-        // Only an answer is remembered: a request that failed (signed out, offline) is asked again next time.
-        guard let answer = try? await api.get("/api/voice", as: Answer.self) else { return }
+        guard let answer = try? await api.get("/api/voice", as: Answer.self) else { return nil }
         let can = answer.transcribe ?? false
-        Self.known[api.base] = can
-        if state == .unavailable, can { state = .idle }
+        probes.remember(can, for: api.base)
+        return can
+    }
+
+    /// A transcription failed: the next check asks the Space again.
+    static func forget(_ base: URL) { probes.forget(base) }
+
+    /// Asks the Space whether it can transcribe. Another Space than the last one starts hidden,
+    /// so the button never shows on one Space's answer about another.
+    /// A clip being recorded or transcribed still goes to the Space it was started on.
+    func check(_ api: SpaceAPI) async {
+        if state == .recording || state == .transcribing { return }
+        if self.api?.base != api.base { state = .unavailable }
+        self.api = api
+        guard let can = await Self.transcribes(api), self.api?.base == api.base,
+              state == .idle || state == .unavailable else { return }
+        state = can ? .idle : .unavailable
     }
 
     func toggle(_ deliver: @escaping (String) -> Void) {
@@ -94,6 +108,7 @@ final class VoiceInput: NSObject, ObservableObject, AVAudioRecorderDelegate {
                 .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             if !text.isEmpty { deliver?(text) }
         } catch {
+            Self.forget(api.base)
             self.error = String(localized: "Voice input failed: \(HubStore.message(error))")
         }
     }

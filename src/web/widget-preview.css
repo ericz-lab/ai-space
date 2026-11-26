@@ -57,3 +57,9 @@
 .accent-pick button[aria-pressed="true"] { border-color: #fafaf8; }
 .accent-pick button:focus-visible, .accent-pick input:focus-visible { outline: 2px solid white; outline-offset: 2px; }
 .accent-pick input { width: 26px; height: 24px; padding: 0; border: 0; background: transparent; cursor: pointer; }
+#edit-toggle {
+  margin-left: 6px; padding: 4px 12px; border-radius: 999px; border: 1px solid #ffffff33;
+  background: transparent; color: inherit; font: inherit; cursor: pointer;
+}
+#edit-toggle[aria-pressed="true"] { background: #93a4ff; border-color: transparent; color: #11132a; font-weight: 600; }
+#edit-toggle:focus-visible { outline: 2px solid white; outline-offset: 2px; }

@@ -141,6 +141,8 @@ export type Prefs = {
   language?: Lang;
   /** Settings › General › Widgets off: screens show their tiles only (the panel's "Widgets" switch). */
   noWidgets?: boolean;
+  /** The view chosen last on each widget card with views, by widget id (the panel keeps it in the browser). */
+  widgetViews?: Record<string, string>;
   /** The floating ball over every app (floating-ball.ts); off until turned on in Settings › General. */
   floatingBall?: boolean;
   /** The ball's four sections for each Space (connection id → entry keys: top, right, bottom, left; "" the default, "-" none). */

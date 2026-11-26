@@ -29,6 +29,34 @@ ${ICON_SHAPES}
 .wb-delta { font-weight: 600; font-feature-settings: "tnum"; }
 .wb-item { font-size: 0.97em; }
 .wb-embed { border-radius: 10px; }
+.wl-area .widget-card { min-width: 0; }
+.widget-card.resizing { box-shadow: inset 0 0 0 2px alpha(@accent_bg_color, 0.7); }
+.wb-linked { border-radius: 10px; }
+.wb-linked:hover { background: alpha(@window_fg_color, 0.04); }
+.wb-check { min-width: 16px; min-height: 16px; padding: 0; border-radius: 99px; border: 1.5px solid alpha(@window_fg_color, 0.45); background: none; box-shadow: none; }
+.wb-check:hover { border-color: @accent_bg_color; }
+.wb-check.on { background: @accent_bg_color; border-color: @accent_bg_color; color: @accent_fg_color; }
+.wb-done { color: alpha(@window_fg_color, 0.5); }
+.wb-copy { min-width: 24px; min-height: 24px; padding: 0; }
+.wb-btn { min-height: 24px; padding: 0 10px; font-size: 0.9em; }
+.wb-views button { min-height: 26px; padding: 0 10px; font-size: 0.9em; }
+.wb-pager { margin-top: -4px; }
+.wb-pdot { min-width: 22px; min-height: 22px; padding: 0; }
+.wb-pdot-mark { min-width: 6px; min-height: 6px; border-radius: 99px; background: alpha(@window_fg_color, 0.22); }
+.wb-pdot.on .wb-pdot-mark { background: @window_fg_color; }
+.wb-asof { min-height: 24px; padding: 0 6px; color: alpha(@window_fg_color, 0.6); }
+.wb-asof.outdated { color: @warning_color; }
+.wb-readout { color: @accent_color; padding: 0 4px; }
+.wb-hero, .wb-row-value, .wb-status { transition: color 600ms ease-out, background-color 600ms ease-out; }
+.wb-flash-up { color: #2ea043; }
+.wb-flash-down { color: @error_color; }
+.wb-flash-text { background-color: alpha(@window_fg_color, 0.12); border-radius: 4px; }
+.wb-confirm { padding: 6px 8px; border-radius: 10px; background: alpha(@window_fg_color, 0.05); }
+.wl-handle { border-radius: 4px; }
+.wl-handle:hover, .wl-handle:focus-visible { background: alpha(@accent_bg_color, 0.45); }
+.wl-xy { border-radius: 4px 4px 10px 4px; background: alpha(@window_fg_color, 0.18); }
+.wl-toolbar { padding: 6px; border-radius: 12px; background: alpha(@window_fg_color, 0.04); }
+.wl-confirm label { margin: 0 4px; }
 .tone-positive { color: #2ea043; }
 .tone-negative { color: @error_color; }
 .tone-warning { color: @warning_color; }

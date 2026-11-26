@@ -13,7 +13,8 @@ import { builtinTexture, iconWidget } from "./icons.ts";
 import { collectSoon } from "./memory.ts";
 import type { AppModel, Space } from "./model.ts";
 import { ScreenStore } from "./screen-store.ts";
-import { WidgetCards } from "./widget-card.ts";
+import { WidgetArea } from "./widget-area.ts";
+import { WidgetCards, newEmbedView } from "./widget-card.ts";
 import { VoiceButton } from "./voice.ts";
 
 /**
@@ -61,8 +62,12 @@ const PLACE_TRIES = 30;
 
 type Tile = { entry: Entry } | { builtin: (typeof BUILTINS)[number] };
 
-/** `key` is what the page draws now: it is drawn again only when that changes. */
-type Page = { id: string; widget: any; body: any; entry?: any; voice?: VoiceButton; key?: string; note?: any };
+/**
+ * `key` is what the page draws now: it is drawn again only when that changes. `body` holds what is
+ * drawn again with the page; `slot` the screen's widget area, which stays (its cards keep their
+ * state, and a card is drawn again only when its own payload changes); `tail` the last-known note.
+ */
+type Page = { id: string; widget: any; body: any; slot: any; tail: any; area?: WidgetArea; areaUsed?: boolean; entry?: any; voice?: VoiceButton; key?: string; note?: any };
 
 function flow(min: number, max: number, spacing = 4, homogeneous = true): any {
   return new Gtk.FlowBox({ selection_mode: Gtk.SelectionMode.NONE, homogeneous, min_children_per_line: min, max_children_per_line: max, column_spacing: spacing, row_spacing: spacing, valign: Gtk.Align.START });
@@ -93,6 +98,9 @@ export class HomePage {
   private readonly carousel: any;
   private readonly dots: any;
   private readonly menuButton: any;
+  private readonly toasts: any;
+  /** The screen whose widget layout is being edited (Edit Layout), if any. */
+  private editing: string | undefined;
   private readonly store = new ScreenStore();
   private readonly cards: WidgetCards;
   private pages: Page[] = [];
@@ -114,12 +122,14 @@ export class HomePage {
     readonly model: AppModel,
     private readonly actions: HomeActions,
   ) {
+    const home = this;
     this.cards = new WidgetCards({
-      open: (w, link) => {
-        const space = this.space;
-        if (!space) return;
-        if (link) this.actions.openLink(space, link);
-        else this.actions.open(space, widgetEntry(w));
+      open: (w, link) => this.openWidget(w, link),
+      post: (w, what, body) => (this.space ? this.model.widgetPost(this.space, w, what, body) : Promise.resolve({ ok: false, error: "no space" })),
+      replace: (w) => this.space && this.model.replaceWidget(this.space, w),
+      // An older Space has no refresh route: its cards keep the old "Updated" line instead.
+      get writes() {
+        return home.space?.catalogue?.stepless === true;
       },
     });
     this.widget = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL });
@@ -135,9 +145,12 @@ export class HomePage {
       const page = this.pages[index];
       if (!page || (this.placing && page.id !== this.placing)) return;
       this.shownId = page.id;
+      // Edit Layout belongs to the screen it was started on.
+      if (this.editing && this.editing !== page.id) this.setEditing(undefined);
       this.renderDots();
     });
-    this.widget.append(this.carousel);
+    this.toasts = new Adw.ToastOverlay({ child: this.carousel, vexpand: true, hexpand: true });
+    this.widget.append(this.toasts);
     this.store.on(() => this.render());
     model.on((change) => {
       if (change === "connections") {
@@ -230,6 +243,10 @@ export class HomePage {
     }
     const body = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL, spacing: 2 });
     column.append(body);
+    const slot = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL });
+    column.append(slot);
+    const tail = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL });
+    column.append(tail);
     const clamp = new Adw.Clamp({ maximum_size: 1120, tightening_threshold: 700, margin_start: 16, margin_end: 16, margin_top: 10, margin_bottom: 24, child: column });
     const scroller = new Gtk.ScrolledWindow({ hscrollbar_policy: Gtk.PolicyType.NEVER, vexpand: true, hexpand: true, child: clamp });
     if (id !== LIBRARY) {
@@ -238,7 +255,7 @@ export class HomePage {
       click.connect("pressed", (g: any, _n: number, x: number, y: number) => this.screenMenu(g.get_widget(), { x, y }));
       scroller.add_controller(click);
     }
-    return { id, widget: scroller, body, entry, ...(voice ? { voice } : {}) };
+    return { id, widget: scroller, body, slot, tail, entry, ...(voice ? { voice } : {}) };
   }
 
   /** One page per screen after the library; rebuilt only when the screens themselves change. */
@@ -246,7 +263,10 @@ export class HomePage {
     const ids = pagesOf(screens);
     if (ids.join("\n") === this.pages.map((p) => p.id).join("\n")) return;
     const keep = new Map(this.pages.map((p) => [p.id, p]));
-    for (const p of this.pages) this.carousel.remove(p.widget);
+    for (const p of this.pages) {
+      this.carousel.remove(p.widget);
+      if (!ids.includes(p.id)) this.dropArea(p);
+    }
     this.pages = ids.map((id) => keep.get(id) ?? this.makePage(id));
     for (const p of this.pages) this.carousel.append(p.widget);
     this.shownId = pageAfter(this.shownId, screens);
@@ -412,7 +432,10 @@ export class HomePage {
     const space = this.space;
     const c = space?.catalogue;
     if (!space || !c) {
-      for (const p of this.pages) this.empty(p);
+      for (const p of this.pages) {
+        this.empty(p);
+        this.dropArea(p);
+      }
       this.renderDots();
       collectSoon();
       return;
@@ -435,11 +458,13 @@ export class HomePage {
         if (q) this.results(space, page.body, q);
         else this.library(space, page.body);
       } else if (page.id === HOME && q) this.results(space, page.body, q);
-      else this.screen(space, page.body, screens, index);
+      else this.screen(space, page, screens, index);
+      // The widget area is the screen's alone: the library, the matches and a screen without widgets have none.
+      if (!page.areaUsed) this.dropArea(page);
       if (space.stale && space.catalogueAt) {
         page.note = new Gtk.Label({ label: t("lastKnown", { when: relativeTime(space.catalogueAt, lang) }), xalign: 0, margin_top: 18 });
         page.note.add_css_class("dim-label");
-        page.body.append(page.note);
+        page.tail.append(page.note);
       }
     }
     if (drawn) {
@@ -454,8 +479,71 @@ export class HomePage {
   private empty(page: Page): void {
     this.cards.release(page.id);
     clear(page.body);
+    clear(page.tail);
+    // The area stays in its slot (and the focus in it) until the page's new drawing says whether it still has one.
+    page.areaUsed = false;
     page.key = undefined;
     page.note = undefined;
+  }
+
+  /** The page's widget area goes, with its cards, their handlers and web views. */
+  private dropArea(page: Page): void {
+    if (!page.area) return;
+    if (this.editing === page.id) this.editing = undefined;
+    page.area.dispose();
+    page.area = undefined;
+    collectSoon();
+  }
+
+  /** A widget's own page, or one of its links. */
+  private openWidget(w: Widget, link?: string): void {
+    const space = this.space;
+    if (!space) return;
+    if (link) this.actions.openLink(space, link);
+    else this.actions.open(space, widgetEntry(w));
+  }
+
+  /** The stepless area of a screen page on this Space, made when the page first shows widgets. */
+  private areaFor(space: Space, page: Page): WidgetArea {
+    if (page.area && page.area.space !== space) this.dropArea(page);
+    if (!page.area) {
+      const pageId = page.id;
+      page.area = new WidgetArea(space, {
+        open: (w, link) => this.openWidget(w, link),
+        post: (w, what, body) => this.model.widgetPost(space, w, what, body),
+        replace: (w) => this.model.replaceWidget(space, w),
+        embed: (w) => newEmbedView(space, w, (uri) => this.actions.openLink(space, uri)),
+        releaseEmbed: (view) => {
+          view.get_parent()?.remove?.(view);
+          // Ends its page now rather than whenever the collector finds the view.
+          view.run_dispose();
+        },
+        // The handler is handed the card and finds the widget by id, so it holds neither (onRightClick).
+        decorate: (root, id) =>
+          this.onRightClick(root, (anchor, x, y) => {
+            const w = this.space === space ? space.catalogue?.widgets.find((x) => x.id === id) : undefined;
+            if (w) this.entryMenu(anchor, space, widgetEntry(w), pageId, { x, y });
+          }),
+        apply: (write) => this.model.applyLayout(space, write),
+        save: (write) => this.model.saveLayout(space, write, (text) => this.toasts.add_toast(new Adw.Toast({ title: text, timeout: 6 }))),
+        leave: () => this.setEditing(undefined),
+      });
+    }
+    if (page.area.widget.get_parent() !== page.slot) {
+      page.area.widget.get_parent()?.remove?.(page.area.widget);
+      page.slot.append(page.area.widget);
+    }
+    page.areaUsed = true;
+    return page.area;
+  }
+
+  /** Edit Layout on a screen, or (undefined) back to using the cards. */
+  private setEditing(id: string | undefined): void {
+    if (id === this.editing) return;
+    const before = this.editing ? this.pageOf(this.editing) : undefined;
+    this.editing = id;
+    before?.area?.setEditing(false);
+    if (id) this.pageOf(id)?.area?.setEditing(true);
   }
 
   /**
@@ -469,6 +557,8 @@ export class HomePage {
     if (ages === this.ages) return;
     this.ages = ages;
     this.render();
+    // The widget areas stay through a drawing of their page: their cards' ages are moved on here.
+    for (const p of this.pages) p.area?.tick();
   }
 
   /** Everything the Space has, pinned or not: apps with the panel's own tiles, agents, widgets. */
@@ -482,7 +572,7 @@ export class HomePage {
     }
     if (c.widgets.length) {
       body.append(sectionTitle(t("widgets")));
-      body.append(this.widgetGrid(space, c.widgets, undefined));
+      body.append(this.widgetGrid(space, c.widgets, undefined, "preview"));
     }
   }
 
@@ -536,11 +626,16 @@ export class HomePage {
       return;
     }
     if (tiles.length) body.append(this.grid(space, tiles, undefined));
-    if (widgets.length) body.append(this.widgetGrid(space, widgets, undefined));
+    if (widgets.length) body.append(this.widgetGrid(space, widgets, undefined, "preview"));
   }
 
-  /** One screen: its tiles in one grid, its widget cards below, in the screen's order. */
-  private screen(space: Space, body: any, screens: Screen[], index: number): void {
+  /**
+   * One screen: its tiles in one grid, its widget cards below, in the screen's order. A Space that
+   * keeps frames gets the stepless area (docs/panel.md#resize-a-widget); an older one the cards as
+   * they were drawn before it.
+   */
+  private screen(space: Space, page: Page, screens: Screen[], index: number): void {
+    const body = page.body;
     const screen = screens[index];
     if (!screen) return;
     const c = space.catalogue!;
@@ -563,8 +658,13 @@ export class HomePage {
     }
     if (screen.name) body.append(sectionTitle(screen.name));
     if (tiles.length) body.append(this.grid(space, tiles, screen.id));
-    if (widgets.length) {
-      const grid = this.widgetGrid(space, widgets, screen.id);
+    if (widgets.length && c.stepless) {
+      const area = this.areaFor(space, page);
+      area.widget.set_margin_top(14);
+      area.update(widgets, c.widgetAlign);
+      if (this.editing === page.id) area.setEditing(true);
+    } else if (widgets.length) {
+      const grid = this.widgetGrid(space, widgets, screen.id, "live");
       grid.set_margin_top(14);
       body.append(grid);
     }
@@ -583,11 +683,12 @@ export class HomePage {
     return box;
   }
 
-  private widgetGrid(space: Space, widgets: Widget[], screen: string | undefined): any {
+  /** Cards in a grid: the library's and the matches' (previews: drawn, inert), and an older Space's screens. */
+  private widgetGrid(space: Space, widgets: Widget[], screen: string | undefined, mode: "live" | "preview"): any {
     // Each row of cards as tall as its tallest card, not the tallest card of all.
     const box = flow(1, 3, 12, false);
     for (const w of widgets) {
-      const card = this.cards.card(space, w);
+      const card = this.cards.card(space, w, mode);
       this.onRightClick(card, (anchor, x, y) => this.entryMenu(anchor, space, widgetEntry(w), screen, { x, y }));
       box.append(card);
     }
@@ -746,6 +847,9 @@ export class HomePage {
     });
     m.item(t("renameScreen"), () => this.renameScreen(space, id));
     m.item(t("editScreen"), () => this.editScreen(space, id));
+    // The widgets' stepless layout, on a Space that keeps it and a screen that shows widgets.
+    const page = this.pageOf(id);
+    if (space.catalogue.stepless && page?.area) m.item(this.editing === id ? tw("screens.done") : tw("layout.edit"), () => this.setEditing(this.editing === id ? undefined : id));
     m.item(t("copyPanelLayout"), () => this.confirm(t("copyPanelLayoutTitle"), t("copyPanelLayoutBody"), t("replace"), () => this.store.reset(conn, panelScreens(space.catalogue!))));
     if (id !== HOME) {
       m.separator();

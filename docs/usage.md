@@ -188,13 +188,14 @@ uptime_segments(id, started_at, last_at, version, edition)
 ```
 
 ```
-GET /api/space/uptime    owner
+GET /api/space/uptime    owner, or an app with its SPACE_APP_TOKEN
      → { ok, uptime: { startedAt, currentMs, totalMs, firstStartedAt, restarts } }
 ```
 
 `startedAt` and `firstStartedAt` are UTC ISO instants, the durations are milliseconds. `totalMs` includes the current run, and `restarts` counts the recorded starts after the first. Before the current run has opened its segment the route answers `503`. `GET /api/space` also carries `uptime: { startedAt, totalMs }` for the operator ([editions.md](editions.md#service-identity)), so a client that just connected can show it without a second request.
 
 - `space status` prints `uptime    3h this run · 17d 4h in all since 2026-10-01 · 1 restart` (the date is the UTC day of the first recorded start).
+- An app may read the route with its own `SPACE_APP_TOKEN` (an `app-read` route, [auth.md](auth.md#access-policy)): Space Ops shows each machine's figures next to its host resources.
 - **Settings → Status** shows one line above the status summary: "Running for 3 h · 17 d 4 h in all since 10/1/2026".
 
 A Space upgraded to this version starts counting from that upgrade; earlier running time was never recorded.

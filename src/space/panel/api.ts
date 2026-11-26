@@ -4,7 +4,7 @@ import { dropSameLink, dropSameUrl } from "../peers/merge.ts";
 import type { Workspace } from "../workspace.ts";
 import type { HealthProbe } from "./health.ts";
 import { ICON_HEADERS, type IconPacks, MAX_ICON_BYTES, type Overrides, NotFound as IconNotFound, applyToApp, applyToService, applyToWidget, builtinIcons, isIconKind } from "./icons.ts";
-import { type LayoutStore, orderBy } from "./layout.ts";
+import { type LayoutStore, orderBy, withLayout } from "./layout.ts";
 import { createLinkApp, parseLinkApp, resolveLinkWithAgent } from "./links.ts";
 import type { AppRegistry, RegisteredApp } from "./registry.ts";
 import { type AppView, type ServiceView, appView, serviceView } from "./view.ts";
@@ -39,7 +39,7 @@ import type { SpaceMood } from "./mood.ts";
  *   GET    /api/pets/:app/:name/sheet    a pet's sprite sheet, proxied from its source
  *   GET    /api/pets/:app/:name/mood     what the pet does now, from its mood source
  *   GET    /api/panel/layout             order + hidden
- *   PUT    /api/panel/layout             { order?: { apps?, agents?, widgets? }, hidden?, sizes?, hiddenWidgets? }
+ *   PUT    /api/panel/layout             { order?: { apps?, agents?, widgets? }, hidden?, sizes?, hiddenWidgets?, screens?, frames?, widgetAlign? }
  *   GET    /api/panel/appcolor?app=      <meta name="theme-color"> of the app's entry page
  *   GET    /api/panel/icons              { active, packs: [{ name, icons }] } (docs/panel.md#icon-packs)
  *   PUT    /api/panel/icons              { active: "<pack>" | null }
@@ -186,12 +186,11 @@ export function createPanelRoutes(opts: PanelApiOptions): Routes {
     return orderBy([...views, ...remote, ...shared], lay.order.apps, (v) => v.id, tier);
   };
 
-  // A card the panel replaces in place: the operator's size and the active icon pack apply as in GET /api/widgets.
+  // A card the panel replaces in place: the operator's size and frame and the active icon pack apply as in GET /api/widgets.
   const widgetAnswer = async (req: Request, r: WidgetActResult): Promise<Response> => {
     if (!r.ok) return error(r.status, r.error);
     const o = await overridesFor(req);
-    const size = layout.read().sizes[r.widget.id];
-    const w = applyToWidget(o, size ? { ...r.widget, size } : r.widget);
+    const w = applyToWidget(o, withLayout(layout.read(), r.widget));
     return json({ ok: true, widget: w, ...(r.message !== undefined ? { message: r.message } : {}) });
   };
 
@@ -326,7 +325,7 @@ export function createPanelRoutes(opts: PanelApiOptions): Routes {
         const removed = new Set(lay.hiddenWidgets);
         const all = [...local, ...dropSameLink(local, peers?.widgets(hidden) ?? [])]
           .filter((w) => !removed.has(w.id))
-          .map((w) => (lay.sizes[w.id] ? { ...w, size: lay.sizes[w.id] } : w));
+          .map((w) => withLayout(lay, w));
         // `hidden` lists the widgets removed from the panel, so the settings can show them again.
         return json({ ok: true, widgets: orderBy(all, lay.order.widgets, (w) => w.id, tier).map((w) => applyToWidget(o, w)), hidden: lay.hiddenWidgets, asOf: new Date().toISOString() });
       }),
