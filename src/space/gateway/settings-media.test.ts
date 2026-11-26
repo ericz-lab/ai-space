@@ -305,6 +305,23 @@ describe("the speech orders in providers.yaml (docs/speech.md#from-settings)", (
     expect(chainOf(added.after, "tts")).toEqual(["gpu", "gateway-oa"]);
   });
 
+  test("a file's terms survive every order change: their lines and comments stay", () => {
+    const hand = "speech:\n  terms:   # the words dictation gets wrong\n    - skill\n    - ai-space   # not ABS\n  default: { asr: gpu, tts: gpu }\n  providers:\n    gpu: { kind: voice-studio }\n    openai:\n      kind: openai-compatible\n      apiKeyEnv: OPENAI_API_KEY\n  fallback:\n    asr: [openai]\n";
+    const env = { OPENAI_API_KEY: "sk-x" };
+    const block = "  terms:   # the words dictation gets wrong\n    - skill\n    - ai-space   # not ABS\n";
+    // default: and fallback: rewritten, a gateway provider added at the end of providers:.
+    const moved = setSpeechText(hand, { asr: [{ provider: "openai" }, { provider: "gpu" }], tts: [{ provider: "gpu" }, gw("tts", "tts-1")] }, env, "present");
+    expect(moved.text).toContain(block);
+    expect(moved.after.terms).toEqual(["skill", "ai-space"]);
+    expect(chainOf(moved.after, "asr")).toEqual(["openai", "gpu"]);
+    // A flow list after the last block, with the page's provider removed again.
+    const flow = `${moved.text.replace(block, "")}  terms: [skill, Claude Code]\n`;
+    const back = setSpeechText(flow, { asr: [{ provider: "gpu" }], tts: [{ provider: "gpu" }] }, env, "present");
+    expect(back.text).toContain("  terms: [skill, Claude Code]\n");
+    expect(back.after.terms).toEqual(["skill", "Claude Code"]);
+    expect(back.after.providers.map((p) => p.name)).toEqual(["gpu", "openai"]);
+  });
+
   test("a page provider keeps what the owner did not touch; one no order uses goes", () => {
     const first = setSpeechText(undefined, { asr: [vs, gw("asr", "gpt-4o-transcribe")], tts: [vs, gw("tts", "tts-1-hd", "onyx")] }, {}, "present");
     // Out of ASR only: its TTS model and voice stay.

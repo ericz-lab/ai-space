@@ -132,7 +132,56 @@ export type SpeechConfig = {
   voices: Record<string, Record<string, string>>;
   /** Providers kept in the file but off, with the reason (a missing key, a kind not built yet). */
   off: Record<string, string>;
+  /** The person's own words a recognizer gets wrong (`terms:`), added to their dictation's context; absent: none. */
+  terms?: string[];
 };
+
+/** The longest `context` a request or a live `start` carries: what voice-studio's Qwen3-ASR takes. */
+export const MAX_CONTEXT_CHARS = 300;
+
+/**
+ * The context a person's dictation is sent with (docs/speech.md#terms): the Space's terms whole,
+ * then the client's own context without the terms it repeats (case-insensitively), never longer than
+ * `MAX_CONTEXT_CHARS`. When it does not fit, the client's part is cut at a separator (a comma, else a
+ * space), never inside a word: a word cut in two would bias the recognizer towards a word nobody said.
+ * "" when there is nothing, so the caller can leave the field out.
+ */
+export function speechContext(terms: readonly string[], context: string, max = MAX_CONTEXT_CHARS): string {
+  // providers.yaml keeps the terms within the limit; should a caller pass more, they are cut the same way.
+  const base = cut([...terms], max);
+  const own = context.trim();
+  const parts = own.split(/\s*[,，]\s*/).filter(Boolean);
+  if (!base) return own.length <= max ? own : cut(parts, max);
+  const known = new Set(terms.map((t) => t.toLowerCase()));
+  const rest = parts.filter((p) => !known.has(p.toLowerCase()));
+  // Nothing repeated: the client's text as it wrote it; else its other parts.
+  const text = rest.length === parts.length ? own : rest.join(", ");
+  if (!text) return base;
+  const room = max - base.length - 2;
+  if (text.length <= room) return `${base}, ${text}`;
+  const tail = room > 0 ? cut(rest, room) : "";
+  return tail ? `${base}, ${tail}` : base;
+}
+
+/** The leading parts that fit in `room` (joined by `, `), then as many whole words of the first one that does not fit. */
+function cut(parts: string[], room: number): string {
+  let out = "";
+  for (const part of parts) {
+    const next = out ? `${out}, ${part}` : part;
+    if (next.length <= room) {
+      out = next;
+      continue;
+    }
+    let words = "";
+    for (const word of part.split(/\s+/)) {
+      const longer = words ? `${words} ${word}` : word;
+      if ((out ? out.length + 2 : 0) + longer.length > room) break;
+      words = longer;
+    }
+    return words ? (out ? `${out}, ${words}` : words) : out;
+  }
+  return out;
+}
 
 /** Who is calling, for the ledger and the bus record: an app, or `space` for the operator and the panel. */
 export type SpeechCaller = { app: string; tag: string };

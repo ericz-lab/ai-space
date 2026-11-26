@@ -252,6 +252,8 @@ export type SpeechStatus = {
   warnings: string[];
   default: Partial<Record<"asr" | "tts" | "live", string>>;
   fallback: Partial<Record<"asr" | "tts" | "live", string[]>>;
+  /** The person's terms dictation is biased with (`terms:` in providers.yaml); absent from an older Space. */
+  terms?: string[];
   providers: SpeechCell[];
   usage24h: { calls: number; errors: number; audioSeconds: number; chars: number; costUsd: number };
 };

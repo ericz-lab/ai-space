@@ -14,8 +14,8 @@ Now callers use `/api/speech/*`. Which provider answers, where it runs, what hap
 
 | Route | Body | Answer |
 | --- | --- | --- |
-| `GET /api/speech` | | `{ ok, configured, source, configError?, warnings, default: { asr, tts, live }, fallback, voices, providers: [cell], usage24h }`: what this space can do, and each provider's [status cell](#status). |
-| `POST /api/speech/transcribe` | multipart: `file` (required, at most 25 MB), `language` (`zh`, `en`, …; empty lets the provider detect it; see [Languages](#languages)), `context` (at most 300 characters: terms the speech may contain), `tag`, `provider` | `200 { ok: true, text, language, segments: [{ start, end, text }], provider, call }`. `segments` is empty when the provider gives no timing. |
+| `GET /api/speech` | | `{ ok, configured, source, configError?, warnings, default: { asr, tts, live }, fallback, voices, terms, providers: [cell], usage24h }`: what this space can do, and each provider's [status cell](#status). |
+| `POST /api/speech/transcribe` | multipart: `file` (required, at most 25 MB), `language` (`zh`, `en`, …; empty lets the provider detect it; see [Languages](#languages)), `context` (at most 300 characters: terms the speech may contain; sent as given, without the Space's [terms](#terms)), `tag`, `provider` | `200 { ok: true, text, language, segments: [{ start, end, text }], provider, call }`. `segments` is empty when the provider gives no timing. |
 | `POST /api/speech/speak` | JSON: `text` (required, at most 20,000 characters), `voice` or `voices` (a list, for a provider that reads `Speaker N:` scripts), `tag`, `provider` | `200 audio/wav`, with `x-speech-provider`, `x-speech-voice` and `x-speech-call-id`. |
 | `GET /api/speech/voices` | | `{ ok, providers: [{ provider, voices?, error? }], mapped }`: each provider's own voices (`voice-studio` from its `/api/voices`, an API provider from its configuration) and the [voice table](#voices). |
 | `WS /api/speech/live` | the [live protocol](#live-protocol) | the same |
@@ -37,7 +37,7 @@ The panel's older routes stay and now go through the same layer, so the native c
 | Older route | Now |
 | --- | --- |
 | `GET /api/voice` | `{ ok, transcribe }`: whether the default ASR provider (or one of its fallbacks) can be reached |
-| `POST /api/voice/transcribe` | `POST /api/speech/transcribe` with the tag `voice-input` |
+| `POST /api/voice/transcribe` | `POST /api/speech/transcribe` with the tag `voice-input`, and the Space's [terms](#terms) before the client's `context` |
 | `WS /api/voice/realtime` | `WS /api/speech/live` with the tag `voice-input` |
 
 `voice-studio` keeps its `provides:` (`transcribe`, `speak`) for the apps that still call it through the bus; they move to `/api/speech/*` one by one ([Migration](#migration)).
@@ -69,6 +69,7 @@ speech:
     tts: [openai]
   voices:
     narrator: { gpu: en-Frank_man, openai: onyx }      # one name, each provider's own voice
+  terms: [skill, ai-space, agent, Claude Code]         # the person's words a recognizer gets wrong (see Terms)
 ```
 
 Without the file, or without its `speech:` section, the space has the one provider every space had before: `voice-studio` of kind `voice-studio`, the default for all three, no fallback. Nothing changes for a space that writes no file.
@@ -78,6 +79,16 @@ Without the file, or without its `speech:` section, the space has the one provid
 - **Keys** stay in the environment (the workspace `.env` is loaded into it). A provider whose `apiKeyEnv` is empty is kept but off, with a warning at boot; a call to it says so, and a fallback list skips it.
 - **`live`** uses `default.live` and `fallback.live` when given, else `asr`'s.
 
+### Terms
+
+`terms:` lists the names and words the person says that a recognizer would otherwise get wrong: live dictation heard "skill" as "scale" and "ai-space" as "ABS". The Space sends them, joined with `, `, as the recognizer's `context`, the short text Qwen3-ASR (behind `voice-studio` and `speech-server`) is biased with; an `openai-compatible` provider gets it as Whisper's `prompt`, and `minimax` has no prompt and gets nothing.
+
+- **Shape**: a list of strings, each trimmed and non-empty, with no comma or line break inside one (a term with one is two terms: give each its own entry), none twice (case-insensitively), and at most 300 characters joined, the recognizer's limit. A word YAML reads as a number or a boolean (`3090`, `yes`) is quoted. A missing key, `null` or `[]` is no terms; the built-in default (no file) has none, so terms need a `speech:` section with its `providers:`.
+- **Keep it short**: a recognizer biased with a long list hears its words where they were not said. List the words that actually go wrong, not every name the person knows.
+- **Where they go**: only to the person's own dictation: [live](#live-protocol) sessions (`/api/speech/live` and `/api/voice/realtime`) and voice input's clip route `POST /api/voice/transcribe`, the clients' fallback when the live route does not answer. `POST /api/speech/transcribe` is for files an app transcribes, which are not what the person said: it sends only the caller's own `context`.
+- **With the client's context**: the terms come first and whole, then the client's `context` without the terms it repeats; when the two exceed 300 characters, the client's part is cut at a comma (or, inside its first part that does not fit, between words), never inside a word (`speechContext` in `types.ts`).
+- `GET /api/speech` shows them as `terms`. A save from Settings keeps them; the running service reads them again when the file is reloaded (a save from Settings, a change of the model gateway), so a hand edit applies at the next of those or a restart, as for the rest of the file. Settings has no editor for them yet.
+
 ### From Settings
 
 Settings → Gateway → **Speech** ([model-gateway.md](model-gateway.md#speech-group)) shows every speech provider in one list: the built-in model gateway's providers that can transcribe or speak, and every other provider of this file, marked **custom** with what it serves (ASR, TTS, live) and where it is: for a `voice-studio` one this machine, a peer, or not found; for a `speech-server` one the host of its address in use, or of its first address before a call chose one. For ASR and for TTS it edits an order: the first answers (`default`), the rest are its `fallback`, in order. A gateway provider joins an order with its model and, for TTS, a default voice; a custom one can be moved within an order or taken out of it, and its own definition is never rewritten. Live is shown read-only, only when a provider can do it, and never changes here. The running service reloads the file at once, no restart. Each provider has a TTS test that plays in the page and an ASR test that transcribes that clip, on click only.
@@ -86,7 +97,7 @@ Settings → Gateway → **Speech** ([model-gateway.md](model-gateway.md#speech-
 
 **Without this file** the built-in default is `voice-studio` for everything, and it counts only while it is really there: the voice-studio app on this machine, or its capability on a peer, as the speech service locates it for its status (no probe on page load). Then it is listed as custom and first, and a save writes it out with the built-in defaults, live included, before the gateway's providers (so writing the file never drops it). When it is not there the space has no speech provider: a call answers 503 `no_provider` ("no speech provider is set up on this space"), status lists none, and the default is back by itself once the app is installed or a peer lists it. The page then names none of it, shows "nothing answers speech yet", and a save writes a file with only the providers chosen.
 
-The entries the page writes are named `gateway-<provider>` with `kind: openai-compatible`, `gateway: space`, `provider:` and the models (as `kind: minimax` with MiniMax's own model ids for a provider of the `minimax` preset, see [Kinds](#kinds)); one no order uses is removed, unless `voices:` names it. A hand-written file keeps its comments, other providers and `voices:`; a file the page cannot edit is shown read-only. These entries are cloud providers, so a [local-only](#privacy) app never reaches them.
+The entries the page writes are named `gateway-<provider>` with `kind: openai-compatible`, `gateway: space`, `provider:` and the models (as `kind: minimax` with MiniMax's own model ids for a provider of the `minimax` preset, see [Kinds](#kinds)); one no order uses is removed, unless `voices:` names it. A hand-written file keeps its comments, other providers, `voices:` and `terms:`; a file the page cannot edit is shown read-only. These entries are cloud providers, so a [local-only](#privacy) app never reaches them.
 
 ## Kinds
 
@@ -167,7 +178,7 @@ What a server implements to be a speech server, under its base URL `B`:
 | `POST B/api/asr` | multipart: `file` (the audio), optional `language` (`zh`, `en`; empty or absent: detect it), optional `context` (terms the speech may contain) | `200 { "text", "language", "segments": [{ "start", "end", "text" }] }`, times in seconds; `segments` may be empty |
 | `POST B/api/tts` | JSON `{ "text", "voices": [names] }`; `voices` empty means the server's default; several voices read a `Speaker N:` script (the Space sends at most 4) | `200` a WAV (`audio/wav`) |
 | `GET B/api/voices` | | `200 { "voices": [names] }` |
-| `WS B/api/asr/realtime` | the [live protocol](#live-protocol), version 1, from the client's `start` on | the same; the Space passes the frames through untouched |
+| `WS B/api/asr/realtime` | the [live protocol](#live-protocol), version 1, from the client's `start` on; the `start` may carry `context` (at most 300 characters: the [terms](#terms) and the client's words, to bias the recognizer with), which a server that cannot use it ignores | the same; the Space passes the frames through untouched |
 
 - **Auth**: every route but the identity probe requires `Authorization: Bearer <token>`, the WebSocket handshake too, and answers 401 or 403 without it. The `app` field names the implementation (voice-studio answers `"voice-studio"`); the Space does not check it: the proof is what authenticates. The message prefix `voice-studio-identity:` is part of the interface whatever the server is called.
 - **Errors**: a refusal of the request is a 400, 413 or 422 with `{ "detail" }` or `{ "error" }`, and the Space answers the caller with that status; a busy GPU is a 503 (the call moves to a fallback provider), any other failure a 5xx. A live session reports `{"type":"error","code":"busy"}` and closes with 1013 when it cannot take one now.
@@ -206,7 +217,7 @@ Before a call, the voice is checked against the provider's list: `voice-studio`'
 
 `WS /api/speech/live` speaks the Space's own stream protocol. Version 1 is the protocol `voice-studio` defined for `/api/asr/realtime`, so the self-hosted adapter passes it through and an API adapter translates its vendor's frames into it.
 
-1. The client sends `{"type":"start","format":"pcm_s16le","sample_rate":16000,"channels":1,"language":"zh"}`, optionally with `tag` and `provider`. Format, rate and channels are fixed in version 1; `language` empty lets the provider detect it ([Languages](#languages)).
+1. The client sends `{"type":"start","format":"pcm_s16le","sample_rate":16000,"channels":1,"language":"zh"}`, optionally with `tag`, `provider` and `context` (at most 300 characters: words the speech may contain). Format, rate and channels are fixed in version 1; `language` empty lets the provider detect it ([Languages](#languages)). The `start` the provider gets carries `context`: the Space's [terms](#terms), then the client's `context`, within 300 characters; with neither it has no `context` key, as before.
 2. The Space picks the provider ([Choosing a provider](#choosing-a-provider)) and opens its stream. A provider whose socket cannot be opened (the machine is off, the peer is down) is a link failure: the next candidate is tried before anything reached the client. Once a provider answered, the session stays with it.
 3. The provider answers `loading` while its model loads, then `ready` (`sample_rate`, `max_seconds`, `max_frame_bytes`), to which the Space adds `provider`. The client may record from the start and send what it held after `ready`.
 4. The client sends **binary** signed 16-bit little-endian mono PCM at 16 kHz, at most 100 ms (3,200 bytes) per frame.
@@ -290,4 +301,4 @@ Callers in apps, each in its own repository and deployed on its own: an app that
 
 ## Code
 
-`src/space/speech/`: `types.ts` (capabilities, requests and answers, the adapter interface, `SpeechError`), `config.ts` (`providers.yaml`'s `speech:` section and the built-in default), `spec.ts` (the manifest's `speech:` section), `voice-studio.ts`, `speech-server.ts` (the identity probe, the choice of address), `openai.ts` and `minimax.ts` (the adapters), `wav.ts` (a WAV's length, cutting and wrapping one), `prices.ts` with `prices.json`, `store.ts` (the `speech_calls` ledger), `service.ts` (choosing, fallback, voices, local-only, status cells, rows), `live.ts` (the live session between the client and the provider's socket), `api.ts` (the routes, the compatibility routes).
+`src/space/speech/`: `types.ts` (capabilities, requests and answers, the adapter interface, `SpeechError`, `speechContext`), `config.ts` (`providers.yaml`'s `speech:` section, its `terms:`, and the built-in default), `spec.ts` (the manifest's `speech:` section), `voice-studio.ts`, `speech-server.ts` (the identity probe, the choice of address), `openai.ts` and `minimax.ts` (the adapters), `wav.ts` (a WAV's length, cutting and wrapping one), `prices.ts` with `prices.json`, `store.ts` (the `speech_calls` ledger), `service.ts` (choosing, fallback, voices, local-only, status cells, rows), `live.ts` (the live session between the client and the provider's socket), `api.ts` (the routes, the compatibility routes).

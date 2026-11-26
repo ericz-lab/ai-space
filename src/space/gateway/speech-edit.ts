@@ -30,7 +30,7 @@ import { GATEWAY_MODEL_PATTERN, GATEWAY_NAME_PATTERN } from "./types.ts";
  *     voice: English_Graceful_Lady
  *
  * Every other provider (voice-studio, a hand-written openai-compatible, …) is custom: it can be
- * moved within an order or taken out of one, never rewritten. Live, `voices:` and the other
+ * moved within an order or taken out of one, never rewritten. Live, `voices:`, `terms:` and the other
  * providers stay as they are. A space without the file gets the built-in default written out only
  * when its provider is really there (`builtin: "present"`); otherwise the file names none of it.
  */
@@ -236,6 +236,8 @@ function freshSection(plan: Planned, base: SpeechConfig): string[] {
   }
   for (const [name, e] of Object.entries(plan.entries)) if (e) out.push(...entryLines(name, e, pad + pad, pad, []));
   out.push(...roleLines("fallback", withLiveFallback(plan.fallback, base) as Record<string, string[]>, pad, []));
+  // The built-in default has no terms; a base that has some keeps them, so writing the section whole never drops them.
+  if (base.terms?.length) out.push(`${pad}terms: [${base.terms.map(scalar).join(", ")}]`);
   return out;
 }
 
@@ -317,6 +319,7 @@ function verify(before: SpeechConfig, after: SpeechConfig, plan: Planned): void 
   const others = (c: SpeechConfig) => JSON.stringify(c.providers.filter((p) => !p.name.startsWith(MANAGED_PREFIX) || !isManaged(p)));
   if (others(before) !== others(after)) fail("other providers changed");
   if (JSON.stringify(before.voices) !== JSON.stringify(after.voices)) fail("named voices changed");
+  if (JSON.stringify(before.terms ?? []) !== JSON.stringify(after.terms ?? [])) fail("terms changed");
   // Live stays where it was; with none before, the file may give it to a new ASR default that can stream, as it always has.
   const liveChain = (c: SpeechConfig) => JSON.stringify(chainOf(c, "live"));
   if (chainOf(before, "live").length && liveChain(before) !== liveChain(after)) fail("live changed");

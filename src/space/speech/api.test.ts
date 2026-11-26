@@ -15,7 +15,7 @@ import type { StudioPeer } from "./voice-studio.ts";
  * (here, through one peer, nowhere), app tokens, voices, and live dictation end to end.
  */
 
-type Seen = { path: string; caller: string | null; body?: string };
+type Seen = { path: string; caller: string | null; body?: string; start?: string };
 const seen: Seen[] = [];
 let gpu: ReturnType<typeof Bun.serve>;
 
@@ -48,7 +48,7 @@ beforeAll(() => {
         if (typeof m !== "string") return void ws.send(JSON.stringify({ type: "partial", segment_id: 0, text: `got ${m.byteLength}`, language: "zh" }));
         const msg = JSON.parse(m) as { type: string; language?: string };
         if (msg.type === "start") {
-          seen.push({ path: "/api/asr/realtime", caller: null, body: msg.language ?? "" });
+          seen.push({ path: "/api/asr/realtime", caller: null, body: msg.language ?? "", start: m });
           ws.send(JSON.stringify({ type: "loading" }));
           ws.send(JSON.stringify({ type: "ready", sample_rate: 16000, max_seconds: 2700, max_frame_bytes: 3200 }));
         } else if (msg.type === "stop") {
@@ -378,6 +378,58 @@ speech:
       });
       expect(pinned.events).toEqual([{ type: "error", code: "no_provider", message: "no speech provider named nobody" }]);
       expect(s.store.recent()).toHaveLength(0);
+    } finally {
+      s.stop();
+    }
+  });
+
+  test("the provider's start carries the Space's terms and the client's context, merged; with neither it is unchanged", async () => {
+    const realtime = () => seen.filter((x) => x.path === "/api/asr/realtime").at(-1)!.start!;
+    const plain = space({ at: "local" });
+    try {
+      await session(`${plain.ws}/api/voice/realtime`, dictate());
+      // No terms, no context: the start voice-studio always got, byte for byte.
+      expect(realtime()).toBe('{"type":"start","format":"pcm_s16le","sample_rate":16000,"channels":1,"language":"zh"}');
+      await session(`${plain.ws}/api/speech/live`, dictate("zh", { context: "Claude Code" }));
+      expect(JSON.parse(realtime()).context).toBe("Claude Code");
+      expect((await fetch(`${plain.url}/api/speech`).then((x) => x.json())).terms).toEqual([]);
+    } finally {
+      plain.stop();
+    }
+    const { config } = parseProvidersYaml("speech:\n  providers:\n    voice-studio: { kind: voice-studio }\n  terms: [skill, ai-space]\n", {});
+    const s = space({ at: "local", config });
+    try {
+      await session(`${s.ws}/api/voice/realtime`, dictate());
+      expect(JSON.parse(realtime())).toEqual({ type: "start", format: "pcm_s16le", sample_rate: 16000, channels: 1, language: "zh", context: "skill, ai-space" });
+      await session(`${s.ws}/api/speech/live`, dictate("zh", { context: "AI-Space, Claude Code" }));
+      expect(JSON.parse(realtime()).context).toBe("skill, ai-space, Claude Code");
+      // A context that is not text of at most 300 characters is refused like the other fields.
+      for (const context of ["x".repeat(301), 42]) {
+        const bad = await session(`${s.ws}/api/speech/live`, (ws, ev) => {
+          if (!ev.length) ws.send(JSON.stringify({ type: "start", context }));
+        });
+        expect(bad.events).toEqual([{ type: "error", code: "invalid_request", message: "context must be text of at most 300 characters" }]);
+        expect(bad.code).toBe(4400);
+      }
+      // GET /api/speech shows what is applied.
+      expect((await fetch(`${s.url}/api/speech`).then((x) => x.json())).terms).toEqual(["skill", "ai-space"]);
+    } finally {
+      s.stop();
+    }
+  });
+
+  test("voice input's clip route gets the terms; an app's file through /api/speech/transcribe only its own context", async () => {
+    const { config } = parseProvidersYaml("speech:\n  providers:\n    voice-studio: { kind: voice-studio }\n  terms: [skill, ai-space]\n", {});
+    const s = space({ at: "local", config });
+    try {
+      await fetch(`${s.url}/api/voice/transcribe`, { method: "POST", body: audio("hi", { language: "zh", context: "Claude Code" }) });
+      expect(seen.at(-1)).toEqual({ path: "/api/asr", caller: "space", body: "zh|skill, ai-space, Claude Code" });
+      await fetch(`${s.url}/api/voice/transcribe`, { method: "POST", body: audio("hi", { language: "zh" }) });
+      expect(seen.at(-1)?.body).toBe("zh|skill, ai-space");
+      await fetch(`${s.url}/api/speech/transcribe`, { method: "POST", body: audio("hi", { language: "zh", context: "Claude Code" }) });
+      expect(seen.at(-1)?.body).toBe("zh|Claude Code");
+      await fetch(`${s.url}/api/speech/transcribe`, { method: "POST", body: audio("hi", { language: "zh" }) });
+      expect(seen.at(-1)?.body).toBe("zh|");
     } finally {
       s.stop();
     }

@@ -105,6 +105,11 @@ export class SpeechService {
     return this.opts.config;
   }
 
+  /** The person's terms (`terms:` in providers.yaml), as the config loaded now has them: a reload applies to the next session. */
+  get terms(): string[] {
+    return this.opts.config?.terms ?? [];
+  }
+
   /**
    * The config calls and status go by. Without a `speech:` section the built-in provider counts only
    * while it is somewhere (on this machine or a peer that lists it): a space that has none of it has
@@ -414,7 +419,7 @@ export class SpeechService {
 
   status(): {
     configured: boolean; source: string; configError?: string; warnings: string[];
-    default: SpeechConfig["default"]; fallback: SpeechConfig["fallback"]; voices: SpeechConfig["voices"]; providers: SpeechCell[]; usage24h: SpeechTotals;
+    default: SpeechConfig["default"]; fallback: SpeechConfig["fallback"]; voices: SpeechConfig["voices"]; terms: string[]; providers: SpeechCell[]; usage24h: SpeechTotals;
   } {
     const config = this.active();
     return {
@@ -425,6 +430,8 @@ export class SpeechService {
       default: config?.default ?? {},
       fallback: config?.fallback ?? {},
       voices: config?.voices ?? {},
+      // What dictation is biased with (docs/speech.md#terms), so a person can see it.
+      terms: this.terms,
       providers: this.cells(),
       usage24h: this.opts.store.usage("24h", { now: this.now() }).totals,
     };
