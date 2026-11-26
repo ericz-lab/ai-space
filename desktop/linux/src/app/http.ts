@@ -5,6 +5,9 @@ import { SpaceError, checkResponse } from "../core/check.ts";
 import { type SSEMessage, SSEParser } from "../core/sse.ts";
 import { origin, resolveUrl, sameOrigin } from "../core/url.ts";
 import type { ChatApi } from "../core/conversation.ts";
+import type { Widget } from "../core/catalogue.ts";
+import { type LayoutWrite, layoutSaved } from "../core/widget-area.ts";
+import { type WidgetAnswer, decodeWidgetAnswer, widgetPostPath } from "../core/widget-interact.ts";
 import { bytesToText, textToBytes } from "./env.ts";
 
 /**
@@ -94,6 +97,29 @@ export class SpaceClient implements ChatApi {
       return JSON.parse(a.body) as unknown;
     } catch {
       return {};
+    }
+  }
+
+  /**
+   * A widget card's action or refresh (`POST /api/widgets/:app/:name/action|refresh`), with the
+   * session's cookies and the Space's origin as every write here: the fresh card, or why not.
+   */
+  async postWidget(w: Pick<Widget, "app" | "name">, what: "action" | "refresh", body: { action: string; value?: string } | undefined, lang: string): Promise<WidgetAnswer> {
+    try {
+      const a = await this.answer("POST", widgetPostPath(w, what), { json: body ?? {} });
+      return decodeWidgetAnswer(a.status, a.body, lang);
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    }
+  }
+
+  /** `PUT /api/panel/layout` with a widget layout write: taken, or why not (`rejected`: the Space refused the patch itself). */
+  async putLayout(write: LayoutWrite): Promise<ReturnType<typeof layoutSaved>> {
+    try {
+      const a = await this.answer("PUT", "/api/panel/layout", { json: write });
+      return layoutSaved(a.status, a.body);
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e), rejected: false };
     }
   }
 

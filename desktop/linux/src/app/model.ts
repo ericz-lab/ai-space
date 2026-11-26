@@ -1,5 +1,7 @@
 import GLib from "gi://GLib";
-import { type Agent, type Catalogue, NotASpaceError, agentBase, decodeCatalogue } from "../core/catalogue.ts";
+import { type Agent, type Catalogue, NotASpaceError, type Widget, agentBase, decodeCatalogue } from "../core/catalogue.ts";
+import { type LayoutWrite, applyWrite, sizesOnly } from "../core/widget-area.ts";
+import type { WidgetAnswer } from "../core/widget-interact.ts";
 import { groupById, groupKeyOf, preferredMachine } from "../core/agents.ts";
 import { type Identity, type SpaceState, SpaceError, classifyIdentity, classifyLayout } from "../core/check.ts";
 import { ChangeGate } from "../core/change.ts";
@@ -7,7 +9,7 @@ import { type Connection, ConnectionList, decodeConnections, encodeConnections }
 import { Conversation, type RunInfo } from "../core/conversation.ts";
 import { type InboxItem, type InboxSummary, InboxSeen, decodeInbox } from "../core/desktop.ts";
 import { type SpaceMood, decodeMood } from "../core/pet.ts";
-import { dirs, exists, log, logError, newId, path, prefs, readText, readTextSync, savePrefs, sleep, t, tw, writeText } from "./env.ts";
+import { dirs, exists, lang, log, logError, newId, path, prefs, readText, readTextSync, savePrefs, sleep, t, tw, writeText } from "./env.ts";
 import { SpaceClient } from "./http.ts";
 import { collectSoon } from "./memory.ts";
 import { cookieHeader, forgetSession } from "./web.ts";
@@ -308,6 +310,55 @@ export class AppModel {
     }
     await this.loadInbox(space);
     return error;
+  }
+
+  // Widgets
+
+  /** A widget card's action or refresh on this Space (local widgets only; a peer's card never asks). */
+  widgetPost(space: Space, w: Widget, what: "action" | "refresh", body?: { action: string; value?: string }): Promise<WidgetAnswer> {
+    return space.client.postWidget(w, what, body, lang);
+  }
+
+  /** A fresh card (an action's or a refresh's answer) in place of the one shown; announced when it differs. */
+  replaceWidget(space: Space, w: Widget): void {
+    const c = space.catalogue;
+    const i = c?.widgets.findIndex((x) => x.id === w.id) ?? -1;
+    if (!c || i < 0) return;
+    // The card keeps its place on this panel: the answer carries the frame and size the Space has.
+    c.widgets = c.widgets.map((x, j) => (j === i ? w : x));
+    if (space.catalogueChanged()) this.emit("catalogue", space);
+  }
+
+  /** A layout write drawn at once (frames, sizes, the alignment), as the Space will store it. */
+  applyLayout(space: Space, write: LayoutWrite): void {
+    const c = space.catalogue;
+    if (!c) return;
+    c.widgets = applyWrite(c.widgets.map((w) => ({ ...w, size: w.size ?? "1x1" })), write);
+    if (write.widgetAlign) c.widgetAlign = write.widgetAlign;
+    if (space.catalogueChanged()) this.emit("catalogue", space);
+  }
+
+  /** Whether the Space said once that it keeps sizes only, so it is said once. */
+  private sizesOnlySaid = new Set<string>();
+
+  /**
+   * Stores a layout write (`PUT /api/panel/layout`); false when it was not saved. A Space that turns
+   * `frames` down (an older one rejects keys it does not know) gets the sizes alone, and the
+   * person is told once (`onNote`).
+   */
+  async saveLayout(space: Space, write: LayoutWrite, onNote: (text: string) => void): Promise<boolean> {
+    const r = await space.client.putLayout(write);
+    if (r.ok) return true;
+    logError(r.error, "layout");
+    const fallback = r.rejected && write.frames ? sizesOnly(write) : null;
+    if (!fallback) return false;
+    const again = await space.client.putLayout(fallback);
+    if (!again.ok) return false;
+    if (!this.sizesOnlySaid.has(space.conn.id)) {
+      this.sizesOnlySaid.add(space.conn.id);
+      onNote(t("layoutSizesOnly"));
+    }
+    return true;
   }
 
   /** Picks up turns still running on the Space (started here before a restart, or on another client). */
