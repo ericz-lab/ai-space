@@ -71,6 +71,13 @@ struct CatalogWidget: Decodable, Hashable, Identifiable {
     var asOf: String?
     var staleAfterMs: Double?
     var error: String?
+    /// The read-only switches inside the card; read leniently (Core/WidgetInteract.swift), so an
+    /// older Space without them, or a malformed one, leaves the card as it was.
+    var views: Lenient<Lossy<WidgetViewDef>>?
+    /// The card's own write-back controls.
+    var actions: Lenient<Lossy<WidgetAction>>?
+    /// The frame the stepless layout keeps for the card (Core/WidgetLayout.swift); nil without one.
+    var frame: Lenient<WidgetFrame>?
 }
 
 struct PeerStatus: Decodable, Hashable, Identifiable {
@@ -177,7 +184,13 @@ struct Catalogue: Equatable {
     var domain: String?
     /// The icons of the panel's own tiles by name (`builtins` of `/api/apps`: inbox, terminal, settings, …).
     var builtinIcons: [String: String] = [:]
+    /// Where a short row of widget cards puts its free space; nil from a Space older than the
+    /// stepless layout, which then lays the cards out by their sizes as before.
+    var widgetAlign: WidgetAlign?
     var fetchedAt = Date.distantPast
+
+    /// The Space keeps frames and answers widget actions and refreshes (it sends `widgetAlign`).
+    var hasStepless: Bool { widgetAlign != nil }
 
     var entries: [CatalogueEntry] { apps + agents + widgets.map(Self.entry) }
 
@@ -213,7 +226,10 @@ struct Catalogue: Equatable {
     private struct WidgetsBody: Decodable { var widgets: Lossy<CatalogWidget> }
     private struct PeersBody: Decodable { var peers: Lossy<PeerStatus> }
     private struct LayoutBody: Decodable {
-        struct Layout: Decodable { var screens: Lossy<PanelScreen>? }
+        struct Layout: Decodable {
+            var screens: Lossy<PanelScreen>?
+            var widgetAlign: Lenient<WidgetAlign>?
+        }
         var layout: Layout
     }
     private struct RouterBody: Decodable { var domain: String? }
@@ -242,6 +258,7 @@ struct Catalogue: Equatable {
         out.widgets = widgetsBody.widgets.elements
         if let data = payload.layout, let body = try? decoder.decode(LayoutBody.self, from: data) {
             out.screens = body.layout.screens?.elements
+            out.widgetAlign = body.layout.widgetAlign?.value
         }
         if let data = payload.router, let domain = (try? decoder.decode(RouterBody.self, from: data))?.domain, !domain.isEmpty {
             out.domain = domain.lowercased()

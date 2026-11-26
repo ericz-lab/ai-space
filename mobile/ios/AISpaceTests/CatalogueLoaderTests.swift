@@ -227,3 +227,27 @@ struct CatalogueLoaderTests {
         #expect(!l.isLastKnown)
     }
 }
+
+/// A widget card changed in place: a layout write before the Space has stored it, a card the Space
+/// answered after an action (Core/WidgetLayout.swift, Core/WidgetInteract.swift).
+struct WidgetUpdateTests {
+    @MainActor @Test func aLayoutWriteAndAnAnsweredCardAreDrawnAtOnce() async throws {
+        let space = FakeSpace()
+        let loader = CatalogueLoader(connection: Connection(name: "S", url: URL(string: "https://s.example.com/")!),
+                                     cache: CatalogueCache(directory: FileManager.default.temporaryDirectory.appendingPathComponent("aispace-wi-\(UUID().uuidString)")),
+                                     cookies: { [] }, fetch: { try await space.fetch($0) })
+        await loader.refresh()
+        let id = try #require(loader.catalogue?.widgets.first?.id)
+        loader.apply(LayoutWrite(frames: [id: WidgetFrame(w: 0.5, h: 400)], sizes: [id: "1x1"], widgetAlign: .center))
+        #expect(loader.catalogue?.widgets.first?.storedFrame == WidgetFrame(w: 0.5, h: 400))
+        #expect(loader.catalogue?.widgetAlign == .center)
+        // A size alone drops the frame, as the Space does.
+        loader.apply(LayoutWrite(sizes: [id: "2x2"]))
+        #expect(loader.catalogue?.widgets.first?.storedFrame == nil)
+        #expect(loader.catalogue?.widgets.first?.size == "2x2")
+        var fresh = try #require(loader.catalogue?.widgets.first)
+        fresh.title = "Fresh"
+        loader.replace(fresh)
+        #expect(loader.catalogue?.widgets.first?.title == "Fresh")
+    }
+}
