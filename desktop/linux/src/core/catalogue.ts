@@ -1,5 +1,6 @@
 import { rank, opensByDefault, type Candidate } from "../../../../src/space/shortcuts/ranking.ts";
-import type { WidgetBlock } from "../../../../src/space/panel/blocks.ts";
+import { type CardAction, type WidgetBlock, type WidgetViewDef, dedupeActionIds, sanitizeActions, sanitizeBlocks, sanitizeViews } from "../../../../src/space/panel/blocks.ts";
+import type { Align, Frame } from "../../../../src/web/widget-layout.ts";
 import type { Screen } from "../../../../src/space/panel/layout.ts";
 import { seedScreens } from "../../../../src/web/screens.ts";
 import { type AgentGroup, groupAgents, primaryIds } from "./agents.ts";
@@ -47,6 +48,12 @@ export type Widget = {
   ok?: boolean;
   items?: { text: string; url?: string; time?: string }[];
   blocks?: WidgetBlock[];
+  /** Read-only switches inside the card (docs/app-spec.md#views-copy-and-actions), 2 to 4. */
+  views?: WidgetViewDef[];
+  /** The card's own controls (an input, buttons); drawn for a local widget only. */
+  actions?: CardAction[];
+  /** Its place in the stepless layout (docs/panel.md#resize-a-widget); absent: drawn from `size`. */
+  frame?: Frame;
   asOf?: string;
   staleAfterMs?: number;
   error?: string;
@@ -94,6 +101,13 @@ export type Catalogue = {
   domain?: string;
   /** Icons of the panel's own tiles (inbox, terminal, settings, ...). */
   builtinIcons: Record<string, string>;
+  /**
+   * The Space keeps widget frames (its layout has `frames`): Home lays the cards out stepless and
+   * offers Edit Layout. An older Space has no such field, and Home draws its cards as before.
+   */
+  stepless: boolean;
+  /** Where a short row's free space goes (`widgetAlign`); start when the Space says nothing. */
+  widgetAlign: Align;
 };
 
 export class NotASpaceError extends Error {
@@ -159,11 +173,8 @@ export function decodeCatalogue(raw: { apps: unknown; agents: unknown; widgets: 
 
   const widgets: Widget[] = [];
   for (const w of rows(raw.widgets, "widgets", "/api/widgets")) {
-    const id = str(w.id), app = str(w.app), name = str(w.name), title = str(w.title);
-    if (!id || !app || !name || title === undefined) continue;
-    const items = Array.isArray(w.items) ? w.items.filter(isObj).filter((i) => typeof i.text === "string").map((i) => ({ text: i.text as string, url: str(i.url), time: str(i.time) })) : undefined;
-    const blocks = Array.isArray(w.blocks) ? (w.blocks.filter((b) => isObj(b) && typeof b.type === "string") as WidgetBlock[]) : undefined;
-    widgets.push({ id, app, name, title, i18n: i18nOf(w.i18n), icon: str(w.icon), link: str(w.link), peer: str(w.peer), stale: w.stale === true, size: str(w.size), ...(w.kind === "embed" || w.kind === "items" ? { kind: w.kind } : {}), ...(typeof w.staleAfterMs === "number" ? { staleAfterMs: w.staleAfterMs } : {}), ok: typeof w.ok === "boolean" ? w.ok : undefined, items, blocks, asOf: str(w.asOf), error: str(w.error) });
+    const widget = decodeWidget(w);
+    if (widget) widgets.push(widget);
   }
 
   let screens: Screen[] | undefined;
@@ -174,7 +185,57 @@ export function decodeCatalogue(raw: { apps: unknown; agents: unknown; widgets: 
   const builtinIcons: Record<string, string> = {};
   if (isObj(raw.apps) && isObj(raw.apps.builtins)) for (const [k, v] of Object.entries(raw.apps.builtins)) if (typeof v === "string") builtinIcons[k] = v;
 
-  return { apps, agents, widgets, agentInfo, agentGroups, peers, ...(screens ? { screens } : {}), ...(domain ? { domain } : {}), builtinIcons };
+  const lay = isObj(raw.layout) && isObj(raw.layout.layout) ? raw.layout.layout : undefined;
+  const stepless = !!lay && isObj(lay.frames);
+  const widgetAlign: Align = lay?.widgetAlign === "center" ? "center" : "start";
+
+  return { apps, agents, widgets, agentInfo, agentGroups, peers, ...(screens ? { screens } : {}), ...(domain ? { domain } : {}), builtinIcons, stepless, widgetAlign };
+}
+
+/** A frame as the Space stores it: finite `w` and `h`; anything else is no frame. */
+function frameOf(v: unknown): Frame | undefined {
+  if (!isObj(v) || typeof v.w !== "number" || typeof v.h !== "number" || !Number.isFinite(v.w) || !Number.isFinite(v.h) || v.w <= 0 || v.h <= 0) return undefined;
+  return { w: v.w, h: v.h };
+}
+
+/**
+ * One widget of `GET /api/widgets` (or of an action's answer). Its blocks, views and actions go
+ * through the server's own sanitizers (src/space/panel/blocks.ts), so an unknown block type, an
+ * unknown action kind or a malformed field is dropped here whatever the Space sent.
+ */
+export function decodeWidget(w: unknown): Widget | undefined {
+  if (!isObj(w)) return undefined;
+  const id = str(w.id), app = str(w.app), name = str(w.name), title = str(w.title);
+  if (!id || !app || !name || title === undefined) return undefined;
+  const items = Array.isArray(w.items) ? w.items.filter(isObj).filter((i) => typeof i.text === "string").map((i) => ({ text: i.text as string, url: str(i.url), time: str(i.time) })) : undefined;
+  const blocks = sanitizeBlocks(w.blocks);
+  const views = sanitizeViews(w.views);
+  const actions = sanitizeActions(w.actions);
+  const payload = { blocks, views, actions };
+  dedupeActionIds(payload);
+  const frame = frameOf(w.frame);
+  return {
+    id,
+    app,
+    name,
+    title,
+    i18n: i18nOf(w.i18n),
+    icon: str(w.icon),
+    link: str(w.link),
+    peer: str(w.peer),
+    stale: w.stale === true,
+    size: str(w.size),
+    ...(w.kind === "embed" || w.kind === "items" ? { kind: w.kind } : {}),
+    ...(typeof w.staleAfterMs === "number" ? { staleAfterMs: w.staleAfterMs } : {}),
+    ok: typeof w.ok === "boolean" ? w.ok : undefined,
+    items,
+    blocks: payload.blocks,
+    ...(payload.views ? { views: payload.views } : {}),
+    ...(payload.actions ? { actions: payload.actions } : {}),
+    ...(frame ? { frame } : {}),
+    asOf: str(w.asOf),
+    error: str(w.error),
+  };
 }
 
 export function widgetEntry(w: Widget): Entry {

@@ -10,7 +10,7 @@ below where it does less.
 
 | Part | What it does |
 | --- | --- |
-| Home | Pages side by side, as on the Mac ([macos-desktop.md](macos-desktop.md)): a sideways swipe on the touchpad, the dots above them, or Ctrl+Page Up and Ctrl+Page Down. The first page is the **Library**: every app (with the panel's own tiles, `builtin:<name>`: App Store, Inbox, Shortcuts, Terminal and Settings, and this client's Panel tile; [below](#built-in-tiles)), agent and widget under the command box ([panel.md](panel.md#omnibox)). Then the **screens**, one page each; the window opens on the first, the **home screen** (主屏幕, "Main" in the app), which carries the command box too ([below](#the-home-screen-at-first)). Typing filters every app, agent and widget, best names first (the web panel's ranking, `src/space/shortcuts/ranking.ts`), and while the box holds a query that page shows the matches. When the Space reads the text as a shortcut it can run (`POST /api/shortcuts/resolve`: arithmetic, a conversion, an action named at its start such as `待办 明天下午3点 写周报`), a row above Ask Space Assistant shows it with what the text filled, and Return opens the panel's Shortcuts page on it, its form filled from the text (`/?page=shortcuts&run=<text>`, `core/shortcuts.ts`); otherwise Return opens the best match when its name holds the whole query, else asks Space Assistant in a new conversation; Ctrl+Return always asks: in a new conversation, sent at once, as on the Mac; a draft in the chat field stays as it was, and while Space Assistant is still answering, the question waits for that turn to end and then starts its new conversation (the chat field says so; `ask` in `core/conversation.ts`). An agent the Space lists once per machine (the same `app/name` on this machine and on peers) is one tile, standing for the local variant, else the first peer that answers; a screen pinned with one machine's variant shows that tile (`core/agents.ts`, the web's `agent-groups.ts`). A screen shows its tiles, then its **widget cards**, drawn as the panel draws them (`core/widgets.ts`, from `src/web/WidgetBlocks.tsx`): the first block large (value, change, line or bar chart, progress bar, gauge), the next ones as rows, as many as the card's size holds; a list widget its items with their age; an `embed` widget the app's own page in a web view. The screens are this computer's (`~/.config/ai-space/screens.json`, `core/screens.ts`): copied from the panel's once, then changed here and never written to the Space; the one thing that still follows the panel is an app installed from the App Store, which lands on the home screen here as it does there ([below](#apps-installed-from-the-app-store)). Right-click a tile or a card for Open, the screens it is on, Remove from This Screen, Open in Browser and Copy Link; the ⋯ button, or a right-click on a screen's empty part, for New Screen, Rename, Edit (reorder and remove), Copy the Panel's Layout and Delete |
+| Home | Pages side by side, as on the Mac ([macos-desktop.md](macos-desktop.md)): a sideways swipe on the touchpad, the dots above them, or Ctrl+Page Up and Ctrl+Page Down. The first page is the **Library**: every app (with the panel's own tiles, `builtin:<name>`: App Store, Inbox, Shortcuts, Terminal and Settings, and this client's Panel tile; [below](#built-in-tiles)), agent and widget under the command box ([panel.md](panel.md#omnibox)). Then the **screens**, one page each; the window opens on the first, the **home screen** (主屏幕, "Main" in the app), which carries the command box too ([below](#the-home-screen-at-first)). Typing filters every app, agent and widget, best names first (the web panel's ranking, `src/space/shortcuts/ranking.ts`), and while the box holds a query that page shows the matches. When the Space reads the text as a shortcut it can run (`POST /api/shortcuts/resolve`: arithmetic, a conversion, an action named at its start such as `待办 明天下午3点 写周报`), a row above Ask Space Assistant shows it with what the text filled, and Return opens the panel's Shortcuts page on it, its form filled from the text (`/?page=shortcuts&run=<text>`, `core/shortcuts.ts`); otherwise Return opens the best match when its name holds the whole query, else asks Space Assistant in a new conversation; Ctrl+Return always asks: in a new conversation, sent at once, as on the Mac; a draft in the chat field stays as it was, and while Space Assistant is still answering, the question waits for that turn to end and then starts its new conversation (the chat field says so; `ask` in `core/conversation.ts`). An agent the Space lists once per machine (the same `app/name` on this machine and on peers) is one tile, standing for the local variant, else the first peer that answers; a screen pinned with one machine's variant shows that tile (`core/agents.ts`, the web's `agent-groups.ts`). A screen shows its tiles, then its **widget cards**, drawn as the panel draws them (`core/widgets.ts`, from `src/web/WidgetBlocks.tsx`): the first block large (value, change, line or bar chart, progress bar, gauge), the next ones as rows, paged with dots when they do not fit; a list widget its items with their age; an `embed` widget the app's own page in a web view. A card is touched as the panel's is ([below](#widget-cards)): views, copy, a local card's actions, the trend readout, a refresh from its time. On a Space that keeps widget frames the cards are laid out stepless, as the panel's widget area ([panel.md](panel.md#resize-a-widget)), and **Edit Layout** in the screen's ⋯ menu resizes them ([below](#widget-layout)); an older Space's cards are drawn in a grid as before. The screens are this computer's (`~/.config/ai-space/screens.json`, `core/screens.ts`): copied from the panel's once, then changed here and never written to the Space; the one thing that still follows the panel is an app installed from the App Store, which lands on the home screen here as it does there ([below](#apps-installed-from-the-app-store)). Right-click a tile or a card for Open, the screens it is on, Remove from This Screen, Open in Browser and Copy Link; the ⋯ button, or a right-click on a screen's empty part, for New Screen, Rename, Edit (reorder and remove), Edit Layout (the widgets' sizes, on a Space that keeps them), Copy the Panel's Layout and Delete |
 | Chat | Native conversations with the Space's agents: the agents and recent conversations in a sidebar, messages drawn natively (Markdown, one quiet row per tool call that opens to its input and output, approval and question cards, a failed turn with its reason and Try Again, Grant and retry after a refusal for lack of permission), the permission picker, and, for an agent on several machines, a machine menu naming each machine's agent CLIs (`GET /api/model/inventory`): each machine keeps its own conversations, an offline one is listed but cannot be picked or sent to, and the choice is remembered per agent and opened next time from its tile; pictures attached by button, paste or drop, Stop. A message sent while a turn runs joins it (steering) or waits its turn. A turn survives a dropped connection (it reattaches from the last event) and an app restart (running turns are picked up again). The logic is the Mac's `ChatController`, ported to `core/conversation.ts`. What an app agent's tools did shows as chat cards under the reply ([below](#chat-cards)) |
 | Inbox | The Space's open threads; opening one marks it read and goes to its page, and a thread with no page unfolds to its whole text instead (a second click folds it); Mark as Read, Done (with Undo in a toast, which opens the thread again), Mark All as Read. A change the Space did not take says so in a toast ("The change was not saved: …"), and an inbox that could not be read says why, with Try Again, instead of "Nothing new" (`inboxShown`, `inboxClick` in `core/desktop.ts`). New unread threads arrive as desktop notifications with Mark as Read and Done, from every saved Space |
 | Terminal | Shells on the Space's machine and its peers, one tab each: xterm.js in a web view whose page counts as the Space's origin, speaking the panel's protocol ([terminal.md](terminal.md)); a passphrase is asked natively and kept in memory |
@@ -149,8 +149,9 @@ desktop/linux/
   src/core/       runtime-neutral logic, typed and tested with bun test: URLs, connections,
                   the catalogue and search, Space checks, SSE, chat turns and conversations,
                   chat cards (`cards.ts`),
-                  the inbox, deep links, Markdown to Pango markup, navigation rules, Home's screens
-                  and widget cards, the first launch (the look for a Space here, the installer's
+                  the inbox, deep links, Markdown to Pango markup, navigation rules, Home's screens,
+                  widget cards and their interactions (`widget-interact.ts`) and the stepless widget
+                  area (`widget-area.ts`), the first launch (the look for a Space here, the installer's
                   address and command), strings (en, zh)
   src/app/        GTK glue (GJS only): window, views, chat cards (`chat-cards.ts`), HTTP
                   (libsoup), web views (WebKit), notifications
@@ -167,7 +168,9 @@ desktop/linux/
 
 `core/` imports only what both Bun and GJS have; a test fails if it reaches for `fetch`, `URL`,
 `AbortController` or another global GJS lacks. It reuses `src/web/chat-steps.ts` (the ordered
-work of a turn, the same rows the panel draws), `src/web/screens.ts` and the ranking above, and
+work of a turn, the same rows the panel draws), `src/web/screens.ts`, the widget area's
+arithmetic (`src/web/widget-layout.ts`) and a card's interaction rules (`src/web/widget-rules.ts`)
+and the ranking above, and
 takes its types from the server's own modules. The app layer types GObject libraries loosely
 (`src/gi.d.ts`): it is glue, and the logic it drives lives in `core/`.
 
@@ -224,6 +227,65 @@ What the app keeps:
 | `~/.cache/ai-space/catalogue-<connection>.json` | the last catalogue, shown marked as such while the Space cannot be reached |
 | `~/.config/autostart/dev.ai_space.Desktop.desktop` | Start at login (`ai-space --background`) |
 | `~/.config/systemd/user/ai-space-peer-tunnel.service` | the peer tunnel, when one was started in Settings › Peer (remove it there) |
+
+## Widget cards
+
+A card does what the panel's does ([app-spec.md](app-spec.md#views-copy-and-actions);
+`core/widget-interact.ts`, with the rules shared with the panel in `src/web/widget-rules.ts`, drawn
+by `app/widget-card.ts`):
+
+- **Views**: a segmented control (linked toggles) under the head when the payload has `views`;
+  the first is the default, the choice is kept per widget in `preferences.json` (`widgetViews`).
+  Left and Right move between them.
+- **Copy**: a copy button on a block with `copy` puts the text on the clipboard (`Gdk.Clipboard`)
+  and shows Copied for 1.5 s; a block with controls is not a button, so the copy never opens its link.
+- **Actions**, on a local card only (a peer's card draws none, whatever its payload carries): a
+  round check in place of a status dot, a pill on a block, an input and buttons in the footer. An
+  action with `confirm` asks inside the card (Escape cancels). `POST /api/widgets/:app/:name/action`
+  goes with the session's cookies and the Space's origin, as every write here; the fresh card
+  replaces this one and its message shows for 4 s; a failure unticks the check, keeps the typed
+  text and shows the error in the card for 6 s.
+- **Paging**: the rows that do not fit are paged with dots (a click, or Left and Right on them);
+  every page is in one stack, so the card's height does not change between pages. A horizontal
+  swipe is left to Home's pages, which it already moves.
+- **Trend readout**: the pointer over a chart shows the nearest point's value and date in place of
+  the latest; leaving puts them back.
+- **Refresh**: on a Space with the route (one that keeps frames), a local card's time in its head is
+  a button: `POST /api/widgets/:app/:name/refresh`, and the fresh card replaces it.
+- **Motion**: a value that changed between two payloads of the same view is coloured for a moment;
+  bars, a gauge's marker, tanks, a progress bar and a metric's number move in when the card first
+  appears and on a view or page change, not on a refresh. None of it when GTK's animations are off
+  (`gtk-enable-animations`, the desktop's reduced motion).
+- In Edit Layout and in the Library's cards the controls are drawn and do not respond.
+
+Unknown block types, unknown action kinds and malformed fields are dropped when the payload is
+read (the server's own sanitizers in `src/space/panel/blocks.ts`), so a newer app cannot break a card.
+
+## Widget layout
+
+On a Space whose layout has `frames`, a screen's cards are placed as the panel's widget area places
+them ([panel.md](panel.md#resize-a-widget)): the arithmetic is the panel's own module,
+`src/web/widget-layout.ts`, imported as it is (it uses no browser global, and a test bundles what
+the client takes from it and checks so); `core/widget-area.ts` adds where the handles are, the
+toolbar's writes and the save's fallback; `app/widget-area.ts` is a `Gtk.LayoutManager` subclass
+that allocates each card at its box (a card taller than its box is clipped). Cards flow in rows by
+their frames, a card without one gets the default of its size, `widgetAlign` centres short rows,
+and below the panel's breakpoint the cards make one column sized by their content. A card's inner
+layout follows its drawn box: the size class with its hysteresis, and as many rows per page as fit
+under its hero.
+
+**Edit Layout** (the screen's ⋯ menu; Done or Escape ends it, as does going to another page) gives
+every card three handles: the right edge (the boundary with the next card moves; the last card of a
+row grows into its free space; Shift changes only this card and lets the next ones re-flow), the
+bottom edge (the row's height), the corner (both), with the resize cursors. An edge snaps within
+8 px to other rows' edges, the area's halves, thirds and quarters and other rows' heights, with an
+accent line where it matched; Alt held, it does not snap. The head shows the card's size while the
+layout is edited. The handles take the focus: the arrow keys move them 8 px, 1 px with Shift, saved
+when the keys rest. A toolbar offers Align, Center, Split evenly, Reset (asked in the toolbar) and,
+for eight seconds after a change, Undo. Each gesture or button is one
+`PUT /api/panel/layout { frames, sizes, widgetAlign }`, drawn at once and put back with a message
+when it fails. A Space that refuses `frames` gets the sizes alone, and the app says so once.
+Reordering cards by dragging is not here: Edit This Screen moves them.
 
 ## Chat cards
 
@@ -528,12 +590,17 @@ from growing the process:
 - **Redraw only on a change.** The model announces a catalogue or an inbox only when it differs
   from the last one announced (`core/change.ts`); Home draws a page again only when what that page
   shows changed, and the Space menu is made once and refilled only when its rows change. Almost
-  every look at a Space returns what is already on screen and draws nothing.
+  every look at a Space returns what is already on screen and draws nothing. A screen's widget
+  area stays through a drawing of its page, and a card in it is drawn again only when its own
+  payload changes (a resize alone draws nothing again).
 - **A handler never holds its own widget.** GJS keeps the handler of an object that something
   else still holds (a gesture held by its widget, a button held by its box), and with it whatever
   the handler holds. A right-click handler that held its tile kept the tile, its gesture and the
   handler alive after the tile left the screen: every dropped Home page stayed in memory. Handlers
-  take the widget from the signal (`gesture.get_widget()`, the button passed in) instead.
+  take the widget from the signal (`gesture.get_widget()`, the button passed in) instead. A widget
+  card's handlers do reach into it, so each part of a card keeps them in a `Bag` (signals, timers,
+  tick callbacks) that is let go of when the part is drawn again or the card goes; its drawing
+  functions read plain objects, never a widget.
 - **Collect after dropping widgets or reading the Space.** The collector only sees its own heap,
   not the widgets, layouts, textures and answer bytes behind it, so `memory.ts` asks for a
   collection a moment after a redraw or a look. Web views of widgets no page shows are closed, and
@@ -549,7 +616,7 @@ build it runs. `AISPACE_MEMSTAT=<seconds>` makes any run print its RSS and threa
 ## What the Mac client has and this one does not (yet)
 
 - Voice input typed straight into another app, and a key held to talk: the text of `--dictate` goes onto the clipboard, and the key presses it once to start and once to stop ([Voice input](#voice-input) says why).
-- Dragging tiles and cards into order (Edit This Screen moves them with buttons), and a card two columns wide.
+- Dragging tiles and cards into order (Edit This Screen moves them with buttons). An older Space's cards (no stored frames) are not two columns wide.
 - The web panel's theme presets and colour adjustments in Settings › Appearance (the Panel page's own Settings has them), the hover-details switch and the panel's own desk-pet switch, which only the panel draws (the app's desk pet is set in General), and the panel's 30-second refresh of the Settings pages (here, Reload).
 - Updating the app itself. AI Space installed from the welcome screen is updated with `space upgrade`, not by the app.
 - A global shortcut of its own (see Quick Chat above).

@@ -57,6 +57,10 @@ targets:
         group: Shared
       - path: ../../mobile/ios/AISpace/Core/WidgetBlocks.swift
         group: Shared
+      - path: ../../mobile/ios/AISpace/Core/WidgetLayout.swift
+        group: Shared
+      - path: ../../mobile/ios/AISpace/Core/WidgetInteract.swift
+        group: Shared
       - path: ../../mobile/ios/AISpace/Live/CatalogueLoader.swift
         group: Shared
       - path: ../../mobile/ios/AISpace/Live/SettingsLoader.swift
@@ -166,6 +170,8 @@ targets:
       - path: AISpaceTests
       - path: ../../mobile/ios/AISpaceTests/SharedCaptureStoreTests.swift
       - path: ../../mobile/ios/AISpaceTests/SharedCaptureModelTests.swift
+      - path: ../../mobile/ios/AISpaceTests/WidgetLayoutTests.swift
+      - path: ../../mobile/ios/AISpaceTests/WidgetInteractTests.swift
     dependencies:
       - target: AISpace
     settings:

@@ -5,24 +5,21 @@ import { type DragProps, Widget } from "./Tiles.tsx";
 import {
   type Align,
   type Box,
+  type Edge,
   type Frame,
+  type Guides,
   type LayoutWrite,
-  GAP,
   ONE_COLUMN_BELOW,
-  SNAP_PX,
   alignTwelfths,
-  edgeCandidates,
   framesWrite,
-  heightCandidates,
+  keyStep,
+  nudge,
   place,
-  pxOf,
+  resizeTo,
   resolveFrames,
-  rowWidth,
-  setRowHeight,
-  setWidth,
   sizeClass,
-  snapTo,
   splitEvenly,
+  startResize as startDrag,
 } from "./widget-layout.ts";
 
 // A screen's widget area (docs/panel.md#resize-a-widget), shared by the panel (App.tsx) and the
@@ -33,8 +30,6 @@ import {
 // column of cards sized by their content, as before; the frames are kept and not applied.
 
 export type AreaCard = { key: string; w: WidgetInfo };
-type Edge = "x" | "y" | "xy";
-type Guides = { x: number[]; y: number[] };
 
 const TWEEN = { duration: 240, easing: "cubic-bezier(0.2, 0.8, 0.2, 1)" };
 const UNDO_MS = 8000;
@@ -185,74 +180,12 @@ export function WidgetArea({
     e.stopPropagation();
     resizing.current = true;
     const base = frames;
-    const p0 = placed;
-    const b0 = p0.boxes[i]!;
-    const row = p0.rows[b0.row]!;
-    const off0 = p0.boxes[row[0]!]!.x;
-    const last = row.at(-1) === i;
-    const used0 = rowWidth(base, row, width);
-    const relEdges = edgeCandidates(p0, width, i);
-    // A centred row whose width changes keeps its middle: its right end moves half as far as the
-    // card grows, so the card grows twice the pointer's travel and snaps on the area's own lines.
-    const absEdges = p0.boxes.flatMap((b, j) => (b.row === b0.row || j === i ? [] : [b.x + b.width, b.x - GAP]));
-    const heights = heightCandidates(p0, i);
+    const start = startDrag(base, width, align, i, edge);
     const x0 = e.clientX;
     const y0 = e.clientY;
     const at = (ev: PointerEvent) => {
-      let f = base;
-      let snappedX = false;
-      let snappedH: number | null = null;
-      if (edge !== "y") {
-        const reflow = ev.shiftKey;
-        const dx = ev.clientX - x0;
-        let want: number;
-        if ((last || reflow) && align === "center") {
-          want = b0.width + 2 * dx;
-          if (!ev.altKey) {
-            const used = used0 + 2 * dx;
-            const options = [...absEdges.map((x) => 2 * x - width), ...[1 / 4, 1 / 3, 1 / 2, 2 / 3, 3 / 4, 1].map((d) => pxOf(d, width))];
-            const s = snapTo(used, options, 2 * SNAP_PX);
-            if (s) {
-              want = b0.width + (s.value - used0);
-              snappedX = true;
-            }
-          }
-        } else {
-          want = b0.width + dx;
-          if (!ev.altKey) {
-            const left = b0.x - off0;
-            const s = snapTo(left + want, relEdges);
-            if (s) {
-              want = s.value - left;
-              snappedX = true;
-            }
-          }
-        }
-        f = setWidth(f, width, i, want, reflow);
-      }
-      if (edge !== "x") {
-        let h = b0.height + (ev.clientY - y0);
-        if (!ev.altKey) {
-          const s = snapTo(h, heights);
-          if (s) {
-            h = s.value;
-            snappedH = h;
-          }
-        }
-        f = setRowHeight(f, i, h);
-      }
-      const p = place(f, width, align);
-      const b = p.boxes[i]!;
-      const g: Guides = { x: [], y: [] };
-      if (snappedX) g.x.push(b.x + b.width);
-      if (snappedH !== null) {
-        g.y.push(b.y + b.height);
-        for (const r of p.rows) {
-          const rb = p.boxes[r[0]!]!;
-          if (rb.row !== b.row && rb.height === snappedH) g.y.push(rb.y + rb.height);
-        }
-      }
-      return { f, g };
+      const r = resizeTo(start, ev.clientX - x0, ev.clientY - y0, { reflow: ev.shiftKey, free: ev.altKey });
+      return { f: r.frames, g: r.guides };
     };
     setActive({ i, edge });
     const move = (ev: PointerEvent) => {
@@ -296,19 +229,13 @@ export function WidgetArea({
     commit(k.base, k.f);
   };
   const onKey = (i: number, edge: Edge) => (e: KeyboardEvent) => {
-    const step = e.shiftKey ? 1 : 8;
-    let dx = 0;
-    let dy = 0;
-    if (edge !== "y" && (e.key === "ArrowRight" || e.key === "ArrowLeft")) dx = e.key === "ArrowRight" ? step : -step;
-    else if (edge !== "x" && (e.key === "ArrowDown" || e.key === "ArrowUp")) dy = e.key === "ArrowDown" ? step : -step;
-    else return;
+    const arrow = ({ ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down" } as const)[e.key as "ArrowLeft"];
+    const { dx, dy } = arrow ? keyStep(edge, arrow, e.shiftKey) : { dx: 0, dy: 0 };
+    if (!dx && !dy) return;
     e.preventDefault();
     e.stopPropagation();
     const k = keys.current ?? (keys.current = { base: frames, f: frames });
-    const b = place(k.f, width, align).boxes[i]!;
-    let f = k.f;
-    if (dx) f = setWidth(f, width, i, b.width + dx);
-    if (dy) f = setRowHeight(f, i, b.height + dy);
+    const f = nudge(k.f, width, align, i, dx, dy);
     k.f = f;
     setLive(f);
     setActive({ i, edge });
