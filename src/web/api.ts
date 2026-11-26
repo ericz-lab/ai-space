@@ -174,8 +174,8 @@ export type ServiceInfo = {
   supervision?: { action: string; error?: string; health?: string };
 };
 
-export type { WidgetBlock } from "../space/panel/blocks.ts";
-import type { WidgetBlock } from "../space/panel/blocks.ts";
+export type { BlockAction, CardAction, WidgetBlock, WidgetViewDef } from "../space/panel/blocks.ts";
+import type { CardAction, WidgetBlock, WidgetViewDef } from "../space/panel/blocks.ts";
 export type WidgetItem = { text: string; url: string; time: string };
 export type WidgetInfo = {
   id: string;
@@ -189,7 +189,7 @@ export type WidgetInfo = {
   link: string;
   kind: "items" | "embed";
   size: string;
-} & ({ ok: true; items: WidgetItem[]; blocks?: WidgetBlock[]; asOf?: string; staleAfterMs?: number } | { ok: false; error: string });
+} & ({ ok: true; items: WidgetItem[]; blocks?: WidgetBlock[]; views?: WidgetViewDef[]; actions?: CardAction[]; asOf?: string; staleAfterMs?: number } | { ok: false; error: string });
 
 /** One peer machine as `GET /api/services` and `GET /api/peers` report it. */
 /** One cell of the model status table (docs/model-machines.md#status): a runtime on a machine ("" = this one). */

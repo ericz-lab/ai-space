@@ -1,12 +1,61 @@
-import type { BlockText, Format, GaugeBlock, MetricBlock, ProgressBlock, StatusBlock, Tank, TanksBlock, Tone, TrendBlock, WidgetBlock } from "../space/panel/blocks.ts";
+import { type ReactNode, useEffect, useRef, useState } from "react";
+import type { BlockAction, BlockText, Format, GaugeBlock, MetricBlock, ProgressBlock, StatusBlock, Tank, TanksBlock, Tone, TrendBlock, WidgetBlock } from "../space/panel/blocks.ts";
 import { relTime } from "./api.ts";
 import { LOCALE, type Lang, useLang } from "./i18n.ts";
+import { type Change, copyText, nearestIndex, pagesOf, swipePage } from "./widget-interact.ts";
 
 // A widget's blocks as a state card (docs/app-spec.md#blocks-a-state-card-instead-of-a-list): the
 // first block is the hero, the rest compact rows, as many as the card's size holds. The layout
 // changes with the size instead of stretching the same rows.
 
 export type { WidgetBlock };
+
+/**
+ * What a card lets its blocks do. `live`: the controls respond (not in edit mode, not a library
+ * preview). `acts`: the write-back controls are drawn (a local widget); `actLive`: they respond.
+ */
+export type BlockCtx = {
+  live: boolean;
+  acts: boolean;
+  actLive: boolean;
+  /** The action being sent, if any: the others wait. */
+  busy: string | null;
+  /** Checks ticked while their action is on the way. */
+  ticked: ReadonlySet<string>;
+  onAction: (a: BlockAction) => void;
+};
+const INERT: BlockCtx = { live: false, acts: false, actLive: false, busy: null, ticked: new Set(), onAction: () => {} };
+
+/** A value that changed since the last payload: flashes once (`n` restarts it). */
+export type Flash = { n: number; marks: (Change | undefined)[] };
+
+const reducedMotion = () => typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+/** A number counting up from 0 over about 600 ms when the block first mounts; later values show at once. */
+function useCountUp(target: number | null): number | null {
+  const [v, setV] = useState<number | null>(() => (target !== null && typeof window !== "undefined" && !reducedMotion() ? 0 : target));
+  const first = useRef(true);
+  useEffect(() => {
+    if (!first.current || target === null || reducedMotion()) {
+      first.current = false;
+      setV(target);
+      return;
+    }
+    first.current = false;
+    const t0 = performance.now();
+    const whole = Number.isInteger(target);
+    let raf = 0;
+    const step = (now: number) => {
+      const k = Math.min(1, (now - t0) / 600);
+      const x = target * (1 - (1 - k) ** 3);
+      setV(k >= 1 ? target : whole ? Math.round(x) : x);
+      if (k < 1) raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [target]);
+  return v;
+}
 
 /** Compact rows beside the hero, per card size. */
 const ROWS: Record<string, number> = { "1x1": 2, "2x1": 4, "1x2": 6, "2x2": 10 };
@@ -88,7 +137,7 @@ function TankSvg({ k, label }: { k: Tank; label: string }) {
       <ellipse cx={cx} cy={bottom + ry + 3} rx={rx + 4} ry={3} className="wb-tank-shadow" />
       <path d={side(l, r, top)} className="wb-tank-body" />
       {k.value !== null && f > 0.002 && (
-        <g>
+        <g className="wb-tank-fill">
           <path d={side(l + 1.5, r - 1.5, y)} fill={color} />
           <path d={side(cx + 8, r - 1.5, y)} fill="#000" opacity={0.14} />
           <ellipse cx={cx} cy={y} rx={rx - 1.5} ry={ry - 0.8} fill={color} />
@@ -127,17 +176,140 @@ function Tanks({ b, lang, small }: { b: TanksBlock; lang: Lang; small?: boolean 
   );
 }
 
-/** A link wrapper when the block has a target, a plain element otherwise. */
-function Box({ url, className, tone, children }: { url?: string; className: string; tone?: Tone; children: React.ReactNode }) {
-  return url ? (
-    <a className={className} data-tone={tone} href={url} target="_blank" rel="noopener noreferrer">
-      {children}
-    </a>
-  ) : (
-    <div className={className} data-tone={tone}>
+/**
+ * A link wrapper when the block has a target, a plain element otherwise. A block with its own
+ * controls is never an anchor (a button inside a link would follow it): the link is a sibling that
+ * covers the block, and the controls sit above it.
+ */
+function Box({ url, className, tone, label, cover, children }: { url?: string; className: string; tone?: Tone; label: string; cover: boolean; children: ReactNode }) {
+  if (url && !cover)
+    return (
+      <a className={className} data-tone={tone} href={url} target="_blank" rel="noopener noreferrer">
+        {children}
+      </a>
+    );
+  return (
+    <div className={`${className}${url ? " wb-linked" : cover ? " wb-live" : ""}`} data-tone={tone}>
+      {url && <a className="wb-cover" href={url} target="_blank" rel="noopener noreferrer" aria-label={label} />}
       {children}
     </div>
   );
+}
+
+const stop = (e: React.SyntheticEvent) => {
+  e.preventDefault();
+  e.stopPropagation();
+};
+
+const CheckMark = () => (
+  <svg viewBox="0 0 16 16" aria-hidden="true">
+    <path d="M3.5 8.5l3 3 6-7" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
+/** A round checkbox in place of the status dot; ticked at once, rolled back by the card when the action fails. */
+function Check({ a, ctx, lang }: { a: BlockAction; ctx: BlockCtx; lang: Lang }) {
+  const on = ctx.ticked.has(a.id);
+  const label = txt(a.label, lang);
+  return (
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={on}
+      aria-label={label}
+      title={label}
+      className={`wb-check wb-ctl${on ? " on" : ""}`}
+      disabled={!ctx.actLive || (ctx.busy !== null && !on)}
+      onClick={(e) => {
+        stop(e);
+        if (!on) ctx.onAction(a);
+      }}
+    >
+      {on && <CheckMark />}
+    </button>
+  );
+}
+
+/** A small pill at the end of the block. */
+function ActButton({ a, ctx, lang }: { a: BlockAction; ctx: BlockCtx; lang: Lang }) {
+  return (
+    <button
+      type="button"
+      className={`wb-btn wb-ctl${ctx.busy === a.id ? " busy" : ""}`}
+      disabled={!ctx.actLive || ctx.busy !== null}
+      onClick={(e) => {
+        stop(e);
+        ctx.onAction(a);
+      }}
+    >
+      {txt(a.label, lang)}
+    </button>
+  );
+}
+
+/** Copies the block's `copy` text and says so in place for 1.5 s. */
+function Copy({ text, live }: { text: string; live: boolean }) {
+  const { t } = useLang();
+  const [done, setDone] = useState(false);
+  useEffect(() => {
+    if (!done) return;
+    const h = setTimeout(() => setDone(false), 1500);
+    return () => clearTimeout(h);
+  }, [done]);
+  const label = done ? t("widget.copied") : t("widget.copy");
+  return (
+    <button
+      type="button"
+      className={`wb-copy wb-ctl${done ? " done" : ""}`}
+      aria-label={label}
+      title={label}
+      disabled={!live}
+      onClick={(e) => {
+        stop(e);
+        void copyText(text).then((ok) => ok && setDone(true));
+      }}
+    >
+      {done ? (
+        <CheckMark />
+      ) : (
+        <svg viewBox="0 0 16 16" aria-hidden="true">
+          <rect x="5.5" y="5.5" width="8" height="8" rx="1.8" fill="none" stroke="currentColor" strokeWidth={1.4} />
+          <path d="M10.5 3.5v-.2c0-1-.8-1.8-1.8-1.8H4.3c-1 0-1.8.8-1.8 1.8v4.4c0 1 .8 1.8 1.8 1.8h.2" fill="none" stroke="currentColor" strokeWidth={1.4} />
+        </svg>
+      )}
+      <span className="wb-copy-tip" aria-hidden="true">{done ? t("widget.copied") : ""}</span>
+    </button>
+  );
+}
+
+/** The trailing controls of a block: copy, then a block button. */
+function Controls({ b, ctx, lang }: { b: WidgetBlock; ctx: BlockCtx; lang: Lang }) {
+  const button = ctx.acts && b.action?.kind === "button" ? b.action : undefined;
+  if (!b.copy && !button) return null;
+  return (
+    <span className="wb-ctls">
+      {b.copy && <Copy text={b.copy} live={ctx.live} />}
+      {button && <ActButton a={button} ctx={ctx} lang={lang} />}
+    </span>
+  );
+}
+
+/** Whether the block draws a control of its own (and so is not an anchor). */
+const hasControl = (b: WidgetBlock, ctx: BlockCtx) => !!b.copy || (ctx.acts && !!b.action);
+
+/** A point's date, with the time when the series is finer than a day. */
+function pointDate(t: string, lang: Lang): string {
+  const d = new Date(t);
+  const timed = t.length > 10 && !/T00:00(:00(\.0+)?)?(Z|[+-]00:?00)?$/.test(t);
+  return timed ? d.toLocaleString(LOCALE[lang], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : d.toLocaleDateString(LOCALE[lang]);
+}
+
+type Point = { t: string; v: number | null };
+
+/** The value and date a trend shows while the pointer rests on one of its points. */
+function readout(b: WidgetBlock, p: Point | null, lang: Lang): { value: string | undefined; date: string } | undefined {
+  if (!p || b.type !== "trend") return undefined;
+  return { value: p.v === null ? undefined : fmt(p.v, b, lang, !!b.signed), date: pointDate(p.t, lang) };
 }
 
 function Delta({ d, lang }: { d: NonNullable<MetricBlock["delta"]>; lang: Lang }) {
@@ -151,8 +323,15 @@ function Delta({ d, lang }: { d: NonNullable<MetricBlock["delta"]>; lang: Lang }
   );
 }
 
-function Spark({ b, lang, big }: { b: TrendBlock; lang: Lang; big?: boolean }) {
+/**
+ * A sparkline or bars. Moving the pointer over it (or dragging a finger) picks the nearest point:
+ * its bar at full strength, or a dot on a thin rule over a line; the block shows that point's value
+ * and date while the pointer stays (`onPoint`). The dot is an element over the svg, so the
+ * `preserveAspectRatio="none"` stretch does not distort it.
+ */
+function Spark({ b, lang, big, onPoint }: { b: TrendBlock; lang: Lang; big?: boolean; onPoint?: (p: Point | null) => void }) {
   const { t } = useLang();
+  const [hover, setHover] = useState<number | null>(null);
   const pts = b.points;
   const vals = pts.map((p) => p.v).filter((v): v is number => v !== null);
   if (!vals.length) return <span className="wb-missing">{t("widget.noHistory")}</span>;
@@ -163,28 +342,65 @@ function Spark({ b, lang, big }: { b: TrendBlock; lang: Lang; big?: boolean }) {
   const span = hi - lo || 1;
   const y = (v: number) => H - ((v - lo) / span) * H;
   const zero = y(0);
-  const tip = (p: { t: string; v: number | null }) => `${new Date(p.t).toLocaleDateString(LOCALE[lang])} · ${p.v === null ? t("widget.noData") : fmt(p.v, b, lang, !!b.signed)}`;
-  const cls = `wb-spark${big ? " big" : ""}`;
   const last = pts.map((p) => p.v).findLastIndex((v) => v !== null);
+  const pick = (e: React.PointerEvent<HTMLSpanElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    const i = nearestIndex(e.clientX - r.left, r.width, pts.length);
+    if (i < 0 || i === hover) return;
+    setHover(i);
+    onPoint?.(pts[i] ?? null);
+  };
+  const leave = () => {
+    setHover(null);
+    onPoint?.(null);
+  };
+  const latest = pts[last];
+  const aria = `${txt(b.label, lang)}${latest?.v != null ? `: ${fmt(latest.v, b, lang, !!b.signed)}` : ""}`;
+  const wrap = (svg: ReactNode, over?: ReactNode) => (
+    <span
+      className={`wb-spark-wrap${big ? " big" : ""}`}
+      onPointerMove={pick}
+      onPointerDown={(e) => {
+        if (e.pointerType === "mouse") return;
+        // A finger on the chart reads it; it does not swipe the card's pages.
+        e.stopPropagation();
+        pick(e);
+      }}
+      onPointerUp={(e) => e.pointerType !== "mouse" && leave()}
+      onPointerCancel={leave}
+      onPointerLeave={leave}
+    >
+      {svg}
+      {over}
+    </span>
+  );
+  const cls = `wb-spark${big ? " big" : ""}`;
+  const xPct = (i: number) => `${((i * 10 + 5) / W) * 100}%`;
   if (b.style === "bar") {
-    return (
-      <svg className={cls} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label={txt(b.label, lang)}>
+    const strong = hover ?? last;
+    return wrap(
+      <svg className={cls} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label={aria}>
         {pts.map((p, i) => {
           const fill = p.v === null ? "none" : b.signed ? (p.v >= 0 ? "var(--tone-positive)" : "var(--tone-negative)") : "var(--accent)";
           const top = p.v === null ? zero : Math.min(y(p.v), zero);
           const h = p.v === null ? 0 : Math.max(Math.abs(y(p.v) - zero), 0.5);
-          // The latest bar at full strength, the history behind it quieter: today reads at a glance.
+          // The latest bar (or the one under the pointer) at full strength, the rest quieter: today reads at a glance.
           return (
-            <g key={i}>
-              <rect x={i * 10 + 1.5} width={7} y={top} height={h} rx={1.2} fill={fill} className={i === last ? undefined : "past"} />
-              <rect x={i * 10} width={10} y={0} height={H} fill="transparent">
-                <title>{tip(p)}</title>
-              </rect>
-            </g>
+            <rect
+              key={i}
+              x={i * 10 + 1.5}
+              width={7}
+              y={top}
+              height={h}
+              rx={1.2}
+              fill={fill}
+              className={`wb-sb${i === strong ? "" : " past"}`}
+              style={{ transformOrigin: p.v !== null && p.v < 0 ? "50% 0" : "50% 100%", animationDelay: `${Math.min(i, 30) * 16}ms` }}
+            />
           );
         })}
         <line x1={0} x2={W} y1={zero} y2={zero} className="wb-zero" vectorEffect="non-scaling-stroke" />
-      </svg>
+      </svg>,
     );
   }
   // A line breaks at a missing point rather than bridging it; each unbroken run gets a faint area
@@ -206,16 +422,20 @@ function Spark({ b, lang, big }: { b: TrendBlock; lang: Lang; big?: boolean }) {
     run.push(xy);
   });
   close();
-  return (
-    <svg className={cls} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label={txt(b.label, lang)}>
-      {area && <path d={area} className="wb-area" fill="var(--accent)" />}
-      <path d={d} fill="none" stroke="var(--accent)" strokeWidth={2} vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
-      {pts.map((p, i) => (
-        <rect key={i} x={i * 10} width={10} y={0} height={H} fill="transparent">
-          <title>{tip(p)}</title>
-        </rect>
-      ))}
-    </svg>
+  const hp = hover === null ? undefined : pts[hover];
+  return wrap(
+    <svg className={cls} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label={aria}>
+      <g className="wb-line">
+        {area && <path d={area} className="wb-area" fill="var(--accent)" />}
+        <path d={d} fill="none" stroke="var(--accent)" strokeWidth={2} vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
+      </g>
+    </svg>,
+    hp && (
+      <>
+        <span className="wb-spark-rule" style={{ left: xPct(hover!) }} />
+        {hp.v !== null && <span className="wb-spark-dot" style={{ left: xPct(hover!), top: `${(y(hp.v) / H) * 100}%` }} />}
+      </>
+    ),
   );
 }
 
@@ -256,60 +476,90 @@ function gaugeTone(b: GaugeBlock): Tone | undefined {
   return b.zones?.find((z) => b.value! <= z.to)?.tone;
 }
 
-function Hero({ b, lang }: { b: WidgetBlock; lang: Lang }) {
+/** The class that flashes a changed value, keyed so a second change restarts it. */
+const flashCls = (f: { dir: Change; n: number } | undefined) => (f ? ` wb-flash-${f.dir}` : "");
+
+function Hero({ b, lang, ctx, flash }: { b: WidgetBlock; lang: Lang; ctx: BlockCtx; flash?: { dir: Change; n: number } }) {
   const { t } = useLang();
-  const value = shown(b, lang);
+  const [point, setPoint] = useState<Point | null>(null);
+  const counting = useCountUp(b.type === "metric" && !b.display ? b.value : null);
+  const read = readout(b, point, lang);
+  let value = shown(b, lang);
+  if (read) value = read.value;
+  else if (b.type === "metric" && !b.display && b.value !== null && counting !== null) value = fmt(counting, b, lang);
   const tone = b.type === "gauge" ? gaugeTone(b) : b.tone;
+  const label = txt(b.label, lang);
+  const check = ctx.acts && b.action?.kind === "check" ? b.action : undefined;
+  const done = !!check && ctx.ticked.has(check.id);
+  const ctl = hasControl(b, ctx);
+  const caption = read ? read.date : txt(b.caption, lang);
   return (
-    <Box url={b.url} className={`wb-hero wb-${b.type}`} tone={tone}>
-      <span className="wb-label">{txt(b.label, lang)}</span>
+    <Box url={b.url} className={`wb-hero wb-${b.type}${done ? " wb-done" : ""}`} tone={tone} label={label} cover={ctl}>
+      <span className="wb-hero-top">
+        <span className="wb-label">
+          {check && b.type !== "status" && <Check a={check} ctx={ctx} lang={lang} />}
+          <span className="wb-lt">{label}</span>
+        </span>
+        <Controls b={b} ctx={ctx} lang={lang} />
+      </span>
       {b.type === "status" ? (
         <>
           <span className="wb-hero-value wb-status-value">
-            <i className="wb-dot" style={{ background: tone ? TONE_VAR[tone] : "var(--muted)" }} />
-            <span className="wb-v">{value}</span>
+            {check ? <Check a={check} ctx={ctx} lang={lang} /> : <i className="wb-dot" style={{ background: tone ? TONE_VAR[tone] : "var(--muted)" }} />}
+            <span key={flash?.n} className={`wb-v${flashCls(flash)}`}>{value}</span>
           </span>
           {b.time && <span className="wb-time">{relTime(b.time, lang)}</span>}
         </>
       ) : b.type === "tanks" ? (
         <Tanks b={b} lang={lang} />
       ) : (
-        <span className={`wb-hero-value${value === undefined ? " missing" : ""}`} style={{ color: b.type === "gauge" && tone && tone !== "neutral" ? TONE_VAR[tone] : undefined }}>
+        <span
+          key={flash?.n}
+          className={`wb-hero-value${value === undefined ? " missing" : ""}${flashCls(flash)}`}
+          style={{ color: b.type === "gauge" && tone && tone !== "neutral" ? TONE_VAR[tone] : undefined }}
+        >
           {value ?? t("widget.noData")}
         </span>
       )}
       {b.type === "metric" && b.delta && <Delta d={b.delta} lang={lang} />}
-      {b.type === "trend" && <Spark b={b} lang={lang} big />}
+      {b.type === "trend" && <Spark b={b} lang={lang} big onPoint={setPoint} />}
       {b.type === "progress" && <Bar b={b} />}
       {b.type === "gauge" && <Scale b={b} lang={lang} />}
-      {b.caption && <span className="wb-caption">{txt(b.caption, lang)}</span>}
+      {caption && <span className={`wb-caption${read ? " wb-readout" : ""}`}>{caption}</span>}
     </Box>
   );
 }
 
-function Row({ b, lang }: { b: WidgetBlock; lang: Lang }) {
+function Row({ b, lang, ctx, flash }: { b: WidgetBlock; lang: Lang; ctx: BlockCtx; flash?: { dir: Change; n: number } }) {
   const { t } = useLang();
-  const value = shown(b, lang);
+  const [point, setPoint] = useState<Point | null>(null);
+  const read = readout(b, point, lang);
+  const value = read ? read.value : shown(b, lang);
   const tone = b.type === "gauge" ? gaugeTone(b) : b.tone;
+  const label = txt(b.label, lang);
   const caption = txt(b.caption, lang);
+  const check = ctx.acts && b.action?.kind === "check" ? b.action : undefined;
+  const done = !!check && ctx.ticked.has(check.id);
   return (
-    <Box url={b.url} className={`wb-row wb-${b.type}`}>
+    <Box url={b.url} className={`wb-row wb-${b.type}${done ? " wb-done" : ""}`} label={label} cover={hasControl(b, ctx)}>
       <span className="wb-row-head">
-        <span className="wb-label" title={[txt(b.label, lang), caption].filter(Boolean).join(" · ")}>
-          {b.type === "status" && <i className="wb-dot" style={{ background: tone ? TONE_VAR[tone] : "var(--muted)" }} />}
-          <span className="wb-lt">{txt(b.label, lang)}</span>
+        <span className="wb-label" title={[label, caption].filter(Boolean).join(" · ")}>
+          {check ? <Check a={check} ctx={ctx} lang={lang} /> : b.type === "status" && <i className="wb-dot" style={{ background: tone ? TONE_VAR[tone] : "var(--muted)" }} />}
+          <span className="wb-lt">{label}</span>
         </span>
         {b.type !== "tanks" && (
           <span className={`wb-row-value${value === undefined ? " missing" : ""}`} style={{ color: (b.type === "gauge" || b.type === "metric") && tone && tone !== "neutral" ? TONE_VAR[tone] : undefined }}>
-            <span className="wb-v" title={value}>
+            <span key={flash?.n} className={`wb-v${flashCls(flash)}`} title={value}>
               {value ?? t("widget.noData")}
             </span>
             {b.type === "metric" && b.delta && <Delta d={{ ...b.delta, label: undefined }} lang={lang} />}
             {b.type === "status" && b.time && <span className="wb-time">{relTime(b.time, lang)}</span>}
+            {read && <span className="wb-time wb-readout">{read.date}</span>}
           </span>
         )}
+        <Controls b={b} ctx={ctx} lang={lang} />
       </span>
-      {b.type === "trend" && <Spark b={b} lang={lang} />}
+      {b.type === "trend" && <Spark b={b} lang={lang} onPoint={setPoint} />}
       {b.type === "progress" && <Bar b={b} />}
       {b.type === "gauge" && <Scale b={b} lang={lang} />}
       {b.type === "tanks" && <Tanks b={b} lang={lang} small />}
@@ -317,19 +567,74 @@ function Row({ b, lang }: { b: WidgetBlock; lang: Lang }) {
   );
 }
 
-export function Blocks({ blocks, size }: { blocks: WidgetBlock[]; size: string }) {
+/** Round dots under the rows: one per page, the current one marked; Left and Right move between them. */
+function Pager({ n, page, onPage, live }: { n: number; page: number; onPage: (i: number) => void; live: boolean }) {
+  const { t } = useLang();
+  const ref = useRef<HTMLDivElement>(null);
+  const go = (i: number) => {
+    onPage(i);
+    ref.current?.querySelectorAll("button")[i]?.focus();
+  };
+  return (
+    <div
+      ref={ref}
+      className="wb-pager"
+      role="group"
+      aria-label={t("widget.pages")}
+      onKeyDown={(e) => {
+        if (!live || (e.key !== "ArrowLeft" && e.key !== "ArrowRight")) return;
+        e.preventDefault();
+        go(Math.max(0, Math.min(n - 1, page + (e.key === "ArrowRight" ? 1 : -1))));
+      }}
+    >
+      {Array.from({ length: n }, (_, i) => (
+        <button key={i} type="button" className="wb-pdot" aria-label={t("widget.page", { n: i + 1, total: n })} aria-current={i === page ? "page" : undefined} disabled={!live} onClick={() => onPage(i)} />
+      ))}
+    </div>
+  );
+}
+
+export function Blocks({ blocks, size, ctx = INERT, flash }: { blocks: WidgetBlock[]; size: string; ctx?: BlockCtx; flash?: Flash }) {
   const { lang } = useLang();
+  const [page, setPage] = useState(0);
+  const swipe = useRef<{ x: number; y: number } | null>(null);
   const [hero, ...rest] = blocks;
   if (!hero) return null;
-  const rows = rest.slice(0, ROWS[size] ?? 2);
+  const per = ROWS[size] ?? 2;
+  const pages = pagesOf(rest, per);
+  const cur = Math.min(page, pages.length - 1);
+  const mark = (i: number) => {
+    const dir = flash?.marks[i];
+    return dir ? { dir, n: flash!.n } : undefined;
+  };
+  const row = (b: WidgetBlock, i: number) => <Row key={`${i}:${b.type}:${b.action?.id ?? ""}`} b={b} lang={lang} ctx={ctx} flash={mark(i + 1)} />;
   return (
     <div className={`wb wb-s${size}`}>
-      <Hero b={hero} lang={lang} />
-      {rows.length > 0 && (
-        <div className="wb-rows">
-          {rows.map((b, i) => (
-            <Row key={i} b={b} lang={lang} />
-          ))}
+      <Hero b={hero} lang={lang} ctx={ctx} flash={mark(0)} />
+      {pages.length === 1 ? (
+        rest.length > 0 && <div className="wb-rows">{rest.map((b, i) => row(b, i))}</div>
+      ) : (
+        <div className="wb-paged">
+          {/* Every page is laid out in the same cell, the others hidden, so the card keeps the height of its tallest page. */}
+          <div
+            className="wb-pages"
+            onPointerDown={(e) => {
+              if (e.pointerType !== "mouse") swipe.current = { x: e.clientX, y: e.clientY };
+            }}
+            onPointerUp={(e) => {
+              const s = swipe.current;
+              swipe.current = null;
+              if (s && ctx.live) setPage(swipePage(cur, pages.length, e.clientX - s.x, e.clientY - s.y));
+            }}
+            onPointerCancel={() => (swipe.current = null)}
+          >
+            {pages.map((p, pi) => (
+              <div key={pi === cur ? `page-${cur}` : `sizer-${pi}`} className={`wb-rows${pi === cur ? "" : " wb-sizer"}`} aria-hidden={pi === cur ? undefined : true} inert={pi !== cur}>
+                {p.map((b, j) => row(b, pi * per + j))}
+              </div>
+            ))}
+          </div>
+          <Pager n={pages.length} page={cur} onPage={setPage} live={ctx.live} />
         </div>
       )}
     </div>

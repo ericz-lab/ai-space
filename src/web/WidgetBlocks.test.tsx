@@ -25,9 +25,21 @@ test("bar emphasis follows the last available point, including gaps and negative
       { t: "2026-10-20T00:00:00Z", v: null },
     ],
   }]);
-  expect(html).toMatch(/fill="var\(--tone-positive\)" class="past"/);
+  expect(html).toMatch(/fill="var\(--tone-positive\)" class="wb-sb past"/);
   expect(html).toContain('fill="var(--tone-negative)"');
-  expect(html).not.toContain('fill="var(--tone-negative)" class="past"');
+  expect(html).toContain('fill="var(--tone-negative)" class="wb-sb"');
   expect(render([{ type: "trend", label: "Missing", style: "bar", points: [] }])).toContain("wb-missing");
   expect(render([])).toBe("");
+});
+
+test("rows beyond the size are paged, not dropped; controls are inert without a live card", () => {
+  const rows = Array.from({ length: 5 }, (_, i) => ({ type: "metric" as const, label: `r${i}`, value: i }));
+  const html = render([{ type: "status", label: "Hero", value: "ok", copy: "hello", action: { id: "done:1", kind: "check" as const, label: "Done" } }, ...rows]);
+  expect(html).toContain("r4");
+  expect(html.match(/class="wb-pdot"/g)?.length).toBe(3);
+  expect(html).toContain('aria-current="page"');
+  expect(html).toMatch(/class="wb-copy wb-ctl"[^>]*disabled/);
+  // Without a card that acts, no check is drawn: the status dot stays.
+  expect(html).not.toContain('role="checkbox"');
+  expect(html).toContain("wb-dot");
 });

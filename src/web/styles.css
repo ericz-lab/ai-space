@@ -1575,7 +1575,7 @@ a.widget-title:hover { color: var(--text); }
 .wb-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; display: inline-block; }
 .wb-missing { font-size: 12px; color: var(--muted); }
 .wb-spark { display: block; width: 100%; height: 28px; overflow: visible; }
-.wb-spark.big { height: 56px; margin-top: 4px; }
+.wb-spark.big { height: 56px; }
 .wb-zero { stroke: color-mix(in srgb, var(--text) 18%, transparent); stroke-width: 1; }
 .wb-spark .past { opacity: 0.6; }
 .wb-area { opacity: 0.14; }
@@ -1626,8 +1626,185 @@ a.wb-tank-cell:hover { background: var(--glass-strong); }
   .wb-hero-value { font-size: 34px; }
 }
 
+/* Touching a card (docs/app-spec.md#views-copy-and-actions). Neutral fills for the controls; the
+   accent only on the one button that sends. Controls are at least 28px to hit, 44px on touch. */
+.wb-hero-top { display: flex; align-items: center; gap: 6px; min-width: 0; }
+/* A row led by a checkbox or ending in a control centres its line: the control has no text baseline. */
+.wb-row-head:has(> .wb-label .wb-check), .wb-row-head:has(> .wb-ctls) { align-items: center; }
+.wb-hero-top .wb-label { flex: 1; }
+.wb .wb-live, .wb .wb-linked { position: relative; }
+.wb .wb-linked:hover, .wb .wb-live:hover { background: var(--glass-strong); }
+.wb a.wb-hero:active, .wb a.wb-row:active, .wb .wb-linked:active { transform: scale(0.992); }
+.wb a.wb-hero, .wb a.wb-row, .wb .wb-linked { transition: background-color 0.15s ease, transform 0.1s ease; }
+/* A linked block with controls: the link covers it, the controls and the chart sit above. */
+.wb-cover { position: absolute; inset: 0; border-radius: inherit; z-index: 0; }
+.wb-linked .wb-ctl, .wb-linked .wb-spark-wrap { position: relative; z-index: 1; }
+.wb-ctls { display: inline-flex; align-items: center; gap: 4px; flex: none; margin-left: 2px; }
+.wb-ctl { font: inherit; color: inherit; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.wb-ctl:disabled, .wa-btn:disabled, .wa-send:disabled { cursor: default; }
+.wb-ctl:focus-visible, .wa-btn:focus-visible, .wa-send:focus-visible, .wa-input:focus-visible, .widget-views button:focus-visible, .wb-pdot:focus-visible, .widget-refresh:focus-visible {
+  outline: 2px solid var(--focus); outline-offset: 2px;
+}
+/* Copy: shown on hover or focus on a pointer device, always on touch. */
+.wb-copy {
+  position: relative; display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; margin: -6px 0; padding: 0; border: 0; border-radius: 50%;
+  background: transparent; color: var(--muted); opacity: 0; transition: opacity 0.15s ease, background-color 0.15s ease;
+}
+.wb-copy svg { width: 15px; height: 15px; }
+.wb-copy:hover:not(:disabled) { background: var(--glass-strong); color: var(--text); }
+.wb-copy.done { color: var(--tone-positive); opacity: 1; }
+.wb-hero:hover .wb-copy, .wb-row:hover .wb-copy, .wb-copy:focus-visible { opacity: 1; }
+.wb-copy-tip:empty { display: none; }
+.wb-copy-tip {
+  position: absolute; right: 100%; top: 50%; transform: translateY(-50%); margin-right: 2px;
+  padding: 2px 7px; border-radius: 999px; font-size: 11px; font-weight: 500; white-space: nowrap;
+  background: var(--glass-strong); color: var(--text); pointer-events: none;
+}
+@media (hover: none) { .wb-copy { opacity: 1; } }
+/* A round checkbox in place of the status dot. */
+.wb-check {
+  flex: none; display: inline-flex; align-items: center; justify-content: center; position: relative;
+  width: 16px; height: 16px; padding: 0; border-radius: 50%; border: 1.5px solid var(--muted); background: transparent; color: var(--on-accent);
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+/* The visible ring stays 16px; the hit area around it is 28px. */
+.wb-check::before { content: ""; position: absolute; inset: -6px; border-radius: 50%; }
+.wb-check:hover:not(:disabled) { border-color: var(--text); }
+.wb-check.on { background: var(--text); border-color: var(--text); color: var(--bg); }
+.wb-check svg { width: 11px; height: 11px; }
+.wb-check:disabled:not(.on) { opacity: 0.55; }
+.wb-done .wb-lt, .wb-done .wb-v { text-decoration: line-through; color: var(--muted); }
+.wb-done { opacity: 0.75; }
+/* A block's own button and the card's buttons: small pills. */
+.wb-btn, .wa-btn {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 0 12px; border: 0; border-radius: 999px;
+  background: color-mix(in srgb, var(--text) 9%, transparent); color: var(--text);
+  font: inherit; font-size: 12px; font-weight: 550; white-space: nowrap; transition: background-color 0.15s ease, transform 0.1s ease;
+}
+.wb-btn { position: relative; min-height: 24px; padding: 0 10px; margin: -2px 0; }
+.wb .wb-linked, .wb .wb-live { border-radius: 10px; }
+.wb-btn::before { content: ""; position: absolute; inset: -2px 0; }
+.wb-btn:hover:not(:disabled), .wa-btn:hover:not(:disabled) { background: color-mix(in srgb, var(--text) 15%, transparent); }
+.wb-btn:active:not(:disabled), .wa-btn:active:not(:disabled), .wa-send:active:not(:disabled) { transform: scale(0.96); }
+.wb-btn:disabled, .wa-btn:disabled { opacity: 0.5; }
+.wa-btn.primary { background: var(--accent); color: var(--on-accent); }
+.wa-btn.primary:hover { background: color-mix(in srgb, var(--accent) 88%, var(--text)); }
+.wb-btn.busy::after, .wa-btn.busy::after, .wa-send.busy::after, .widget-refresh.busy .widget-refresh-ico { animation: wb-spin 0.8s linear infinite; }
+.wb-btn.busy::after, .wa-btn.busy::after {
+  content: ""; width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid currentColor; border-right-color: transparent;
+}
+@keyframes wb-spin { to { transform: rotate(360deg); } }
+/* The as-of time of a local card refreshes it. */
+.widget-refresh {
+  display: inline-flex; align-items: center; gap: 4px; min-height: 28px; margin: -6px -8px -6px auto; padding: 0 8px;
+  border: 0; border-radius: 999px; background: transparent; font-family: inherit; cursor: pointer;
+}
+.widget-refresh:disabled { cursor: default; }
+.widget-refresh-ico { width: 11px; height: 11px; opacity: 0; transition: opacity 0.15s ease; }
+.widget-refresh:hover:not(:disabled) { background: var(--glass-strong); color: var(--text); }
+.widget-refresh:hover:not(:disabled) .widget-refresh-ico, .widget-refresh:focus-visible .widget-refresh-ico, .widget-refresh.busy .widget-refresh-ico { opacity: 1; }
+@media (hover: none) { .widget-refresh-ico { opacity: 0.7; } }
+/* Views: a small segmented pill under the head; the chosen one a neutral fill, never the accent. */
+.widget-views {
+  display: flex; align-self: flex-start; max-width: 100%; overflow-x: auto; scrollbar-width: none; gap: 2px; padding: 2px; margin: -2px 0 10px;
+  border-radius: 999px; background: color-mix(in srgb, var(--text) 5%, transparent);
+}
+.widget-views::-webkit-scrollbar { display: none; }
+.widget-views button {
+  flex: none; min-height: 24px; padding: 0 11px; border: 0; border-radius: 999px; background: transparent;
+  color: var(--muted); font: inherit; font-size: 12px; font-weight: 500; cursor: pointer; white-space: nowrap; transition: background-color 0.15s ease, color 0.15s ease;
+}
+.widget-views button:hover:not(:disabled) { color: var(--text); }
+.widget-views button[aria-selected="true"] { background: color-mix(in srgb, var(--text) 10%, transparent); color: var(--text); }
+.widget-views button:disabled { cursor: default; }
+/* Pages of rows: all laid out in one cell so the card keeps its height; round dots under them. */
+.wb-paged { display: flex; flex-direction: column; min-width: 0; }
+.wb-pages { display: grid; min-width: 0; touch-action: pan-y; }
+.wb-pages > .wb-rows { grid-area: 1 / 1; }
+.wb-sizer { visibility: hidden; }
+.wb-pager { display: flex; justify-content: center; gap: 0; margin: 2px 0 -6px; }
+.wb-pdot { width: 28px; height: 28px; padding: 0; border: 0; background: transparent; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; }
+.wb-pdot::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: color-mix(in srgb, var(--text) 22%, transparent); transition: background-color 0.15s ease, transform 0.15s ease; }
+.wb-pdot:hover:not(:disabled)::before { background: color-mix(in srgb, var(--text) 45%, transparent); }
+.wb-pdot[aria-current]::before { background: var(--text); transform: scale(1.15); }
+.wb-pdot:disabled { cursor: default; }
+.wb-s1x1 > .wb-paged, .wb-s1x2 > .wb-paged, .wb-s2x2 > .wb-paged { padding-top: 8px; }
+.wb-s2x2 > .wb-paged { grid-column: 1 / -1; }
+/* Trend readout: the point under the pointer. */
+.wb-spark-wrap { position: relative; display: block; touch-action: pan-y; cursor: crosshair; }
+.wb-spark-wrap.big { margin-top: 4px; }
+.wb-spark-rule { position: absolute; top: 0; bottom: 0; width: 1px; margin-left: -0.5px; background: color-mix(in srgb, var(--text) 28%, transparent); pointer-events: none; }
+.wb-spark-dot {
+  position: absolute; width: 8px; height: 8px; margin: -4px 0 0 -4px; border-radius: 50%; pointer-events: none;
+  background: var(--accent); box-shadow: 0 0 0 2px var(--solid);
+}
+.wb-readout { color: var(--muted); font-variant-numeric: tabular-nums; }
+/* Card footer: the actions, an in-card confirm, and one line for what came back. */
+.widget-foot { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; min-width: 0; }
+.widget-foot:not(.has-controls) { margin-top: 0; }
+.widget-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.wa-form { flex: 1 1 180px; display: flex; align-items: center; gap: 6px; min-width: 0; }
+.wa-input {
+  flex: 1; min-width: 0; height: 32px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--hairline);
+  background: color-mix(in srgb, var(--text) 4%, transparent); color: var(--text); font: inherit; font-size: 13px;
+}
+.wa-input::placeholder { color: var(--faint); }
+.wa-input:disabled { opacity: 0.6; }
+.wa-send {
+  flex: none; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+  background: var(--accent); color: var(--on-accent); cursor: pointer; transition: opacity 0.15s ease, transform 0.1s ease;
+}
+.wa-send svg { width: 15px; height: 15px; }
+.wa-send:disabled { opacity: 0.4; }
+.wa-send.busy svg { display: none; }
+.wa-send.busy::after { content: ""; width: 12px; height: 12px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; }
+.widget-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.widget-confirm-text { flex: 1 1 140px; min-width: 0; font-size: 13px; color: var(--text); }
+.widget-msg { margin: 0; font-size: 12px; color: var(--muted); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.widget-msg.error { color: var(--danger); }
+.widget-msg:empty { display: block; height: 0; }
+@media (pointer: coarse) {
+  .wb-copy, .wb-pdot { width: 44px; height: 44px; margin: -14px -6px; }
+  .wb-pager { margin: -4px 0 -14px; }
+  .wb-check::before { inset: -14px; }
+  .wb-btn::before { inset: -10px -4px; }
+  .wa-btn, .wa-send, .wa-input { min-height: 44px; height: 44px; }
+  .wa-send { width: 44px; }
+  .widget-views button { min-height: 36px; }
+  .widget-views { padding: 4px; }
+  .widget-refresh { min-height: 44px; margin: -14px -8px -14px auto; }
+}
+/* iOS zooms into a field under 16px. */
+@media (max-width: 700px) { .wa-input { font-size: 16px; } }
+
+/* A value that changed since the last payload flashes once: up, down, or a neutral highlight for text. */
+.wb-flash-up { animation: wb-flash-up 1.2s ease-out; }
+.wb-flash-down { animation: wb-flash-down 1.2s ease-out; }
+.wb-flash-text { animation: wb-flash-text 1.2s ease-out; border-radius: 4px; }
+@keyframes wb-flash-up { 0%, 35% { color: var(--tone-positive); } }
+@keyframes wb-flash-down { 0%, 35% { color: var(--tone-negative); } }
+@keyframes wb-flash-text { 0%, 35% { background: color-mix(in srgb, var(--text) 12%, transparent); } }
+
+/* Entrance: when a card first appears and when its view or page changes; an ordinary refresh does not replay it. */
+.wb-bar > span { transform-origin: left center; animation: wb-grow-x 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.wb-marker { animation: wb-marker-in 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.wb-tank-fill { transform-box: fill-box; transform-origin: 50% 100%; animation: wb-grow-y 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.wb-sb { transform-box: fill-box; animation: wb-grow-y 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.wb-line { animation: wb-wipe 0.8s cubic-bezier(0.3, 0.7, 0.2, 1) both; }
+@keyframes wb-grow-x { from { transform: scaleX(0); } }
+@keyframes wb-grow-y { from { transform: scaleY(0); } }
+@keyframes wb-marker-in { from { left: 0; opacity: 0; } }
+@keyframes wb-wipe { from { clip-path: inset(0 100% 0 0); opacity: 0.3; } to { clip-path: inset(0 0 0 0); } }
+@media (prefers-reduced-motion: reduce) {
+  .wb-bar > span, .wb-marker, .wb-tank-fill, .wb-sb, .wb-line, .wb-flash-up, .wb-flash-down, .wb-flash-text,
+  .wb-btn.busy::after, .wa-btn.busy::after, .wa-send.busy::after, .widget-refresh.busy .widget-refresh-ico { animation: none; }
+  .wb-copy, .wb-check, .wb-btn, .wa-btn, .wa-send, .widget-views button, .wb-pdot::before { transition: none; }
+}
+
 .widgets.editing .widget { position: relative; cursor: grab; outline: 2px dashed var(--hairline); outline-offset: 4px; }
 .widgets.editing .widget a { pointer-events: none; }
+.widgets.editing .widget button:not(.tile-del), .widgets.editing .widget input { pointer-events: none; }
 .launcher.editing .tile { cursor: grab; }
 /* The drop target while a tile is dragged: a bar on the side the dragged tile will land. */
 .tile[data-drop], .widget[data-drop] { position: relative; }

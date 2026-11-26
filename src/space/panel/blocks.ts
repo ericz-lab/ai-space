@@ -9,7 +9,14 @@ export type BlockText = string | Record<string, string>;
 export type Tone = "positive" | "negative" | "warning" | "neutral";
 export type Format = "number" | "compact" | "currency" | "percent";
 
-type Common = { label: BlockText; caption?: BlockText; url?: string; tone?: Tone };
+/** A write-back control on one block (docs/app-spec.md#views-copy-and-actions). */
+export type BlockAction = { id: string; kind: "check" | "button"; label: BlockText; confirm?: BlockText };
+/** A control in the card's footer; at most one `input`. */
+export type CardAction = { id: string; kind: "input" | "button"; label: BlockText; placeholder?: BlockText; confirm?: BlockText };
+/** A read-only switch inside a card: the same rules for its blocks as the top-level ones. */
+export type WidgetViewDef = { id: string; label: BlockText; blocks: WidgetBlock[] };
+
+type Common = { label: BlockText; caption?: BlockText; url?: string; tone?: Tone; copy?: string; action?: BlockAction };
 type Numeric = { format?: Format; currency?: string; decimals?: number; unit?: BlockText };
 
 export type MetricBlock = Common &
@@ -28,6 +35,13 @@ const MAX_POINTS = 90;
 const MAX_ZONES = 8;
 export const MAX_TANKS = 3;
 const MAX_TEXT = 160;
+export const MAX_COPY = 8000;
+export const MIN_VIEWS = 2;
+export const MAX_VIEWS = 4;
+export const MAX_CARD_ACTIONS = 3;
+export const MAX_ACTION_VALUE = 2000;
+const VIEW_ID = /^[a-z0-9][a-z0-9_-]{0,31}$/;
+const ACTION_ID = /^[A-Za-z0-9._:-]{1,128}$/;
 const TONES = new Set<string>(["positive", "negative", "warning", "neutral"]);
 const FORMATS = new Set<string>(["number", "compact", "currency", "percent"]);
 
@@ -58,7 +72,16 @@ function common(r: Raw): Common | undefined {
     caption: text(r.caption),
     url: typeof r.url === "string" && r.url.length <= 2048 ? r.url : undefined,
     tone: typeof r.tone === "string" && TONES.has(r.tone) ? (r.tone as Tone) : undefined,
+    copy: typeof r.copy === "string" && r.copy.length >= 1 && r.copy.length <= MAX_COPY ? r.copy : undefined,
+    action: blockAction(r.action),
   });
+}
+
+function blockAction(v: unknown): BlockAction | undefined {
+  if (!isObj(v) || typeof v.id !== "string" || !ACTION_ID.test(v.id) || (v.kind !== "check" && v.kind !== "button")) return undefined;
+  const label = text(v.label);
+  if (!label) return undefined;
+  return opt({ id: v.id, kind: v.kind as BlockAction["kind"], label, confirm: text(v.confirm) });
 }
 
 function numeric(r: Raw): Numeric {
@@ -152,5 +175,79 @@ export function sanitizeBlocks(v: unknown): WidgetBlock[] | undefined {
     if (b) out.push(b);
     if (out.length >= MAX_BLOCKS) break;
   }
+  return out;
+}
+
+/**
+ * The card-level actions: valid ones only, at most `MAX_CARD_ACTIONS`, one `input` (a second is
+ * dropped), ids unique (a repeated id drops the later entry); undefined when none is valid.
+ */
+export function sanitizeActions(v: unknown): CardAction[] | undefined {
+  if (!Array.isArray(v)) return undefined;
+  const out: CardAction[] = [];
+  const seen = new Set<string>();
+  for (const r of v) {
+    if (out.length >= MAX_CARD_ACTIONS) break;
+    if (!isObj(r) || typeof r.id !== "string" || !ACTION_ID.test(r.id) || seen.has(r.id)) continue;
+    if (r.kind !== "input" && r.kind !== "button") continue;
+    if (r.kind === "input" && out.some((a) => a.kind === "input")) continue;
+    const label = text(r.label);
+    if (!label) continue;
+    seen.add(r.id);
+    out.push(opt({ id: r.id, kind: r.kind as CardAction["kind"], label, placeholder: r.kind === "input" ? text(r.placeholder) : undefined, confirm: text(r.confirm) }));
+  }
+  return out.length ? out : undefined;
+}
+
+/**
+ * The views of a payload: 2 to 4 with a valid, unique id, a label and at least one valid block;
+ * undefined when fewer than two remain.
+ */
+export function sanitizeViews(v: unknown): WidgetViewDef[] | undefined {
+  if (!Array.isArray(v)) return undefined;
+  const out: WidgetViewDef[] = [];
+  for (const r of v) {
+    if (out.length >= MAX_VIEWS) break;
+    if (!isObj(r) || typeof r.id !== "string" || !VIEW_ID.test(r.id) || out.some((x) => x.id === r.id)) continue;
+    const label = text(r.label);
+    const blocks = sanitizeBlocks(r.blocks);
+    if (!label || !blocks?.length) continue;
+    out.push({ id: r.id, label, blocks });
+  }
+  return out.length >= MIN_VIEWS ? out : undefined;
+}
+
+/**
+ * Makes action ids unique across a payload, in place. The same id may stand for the same action in
+ * several block lists (the top-level blocks repeat the default view's, and a task can be in two
+ * views), so a repeat is kept when it has the same kind in another list; a repeat in the same
+ * list, or with another kind, or between the card and a block, is dropped (the later one).
+ */
+export function dedupeActionIds(p: { blocks?: WidgetBlock[]; views?: WidgetViewDef[]; actions?: CardAction[] }): void {
+  const kinds = new Map<string, { kind: string; list: number }>();
+  if (p.actions) for (const a of p.actions) kinds.set(a.id, { kind: a.kind, list: -1 });
+  const lists = [p.blocks ?? [], ...(p.views ?? []).map((x) => x.blocks)];
+  lists.forEach((list, li) => {
+    const here = new Set<string>();
+    for (let i = 0; i < list.length; i++) {
+      const a = list[i]!.action;
+      if (!a) continue;
+      const prev = kinds.get(a.id);
+      if (here.has(a.id) || (prev && (prev.list === -1 || prev.kind !== a.kind))) {
+        const { action: _, ...rest } = list[i]!;
+        list[i] = rest as WidgetBlock;
+        continue;
+      }
+      here.add(a.id);
+      if (!prev) kinds.set(a.id, { kind: a.kind, list: li });
+    }
+  });
+}
+
+/** Every action id the payload declares, with its kind: the ids ai-space forwards to the app. */
+export function declaredActions(p: { blocks?: WidgetBlock[]; views?: WidgetViewDef[]; actions?: CardAction[] }): Map<string, CardAction["kind"] | BlockAction["kind"]> {
+  const out = new Map<string, CardAction["kind"] | BlockAction["kind"]>();
+  for (const a of p.actions ?? []) out.set(a.id, a.kind);
+  for (const list of [p.blocks ?? [], ...(p.views ?? []).map((x) => x.blocks)]) for (const b of list) if (b.action && !out.has(b.action.id)) out.set(b.action.id, b.action.kind);
   return out;
 }

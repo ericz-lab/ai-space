@@ -1,4 +1,5 @@
 import type { AgentView, AppView, ServiceView } from "../panel/view.ts";
+import type { WidgetBlock } from "../panel/blocks.ts";
 import type { WidgetView } from "../panel/widgets.ts";
 import type { PeerSnapshot } from "./client.ts";
 
@@ -41,9 +42,28 @@ export function mergeAgents(peer: string, snap: PeerSnapshot, hidden: Set<string
   return snap.agents.filter((a) => !hidden.has(peerId(peer, a.app))).map((a) => mergeAgent(peer, a, stale));
 }
 
-/** Widgets of apps the hub does not hide; items keep their last payload, marked stale when the peer is. */
+/**
+ * Widgets of apps the hub does not hide; items keep their last payload, marked stale when the peer is.
+ * Actions are not forwarded to a peer's app (v1), so a peer's card loses its card-level `actions` and
+ * every block's `action`, in `blocks` and in `views`; views and copy pass through.
+ */
 export function mergeWidgets(peer: string, snap: PeerSnapshot, hidden: Set<string>, stale: boolean): WidgetView[] {
-  return snap.widgets.filter((w) => !hidden.has(peerId(peer, w.app))).map((w) => ({ ...w, id: peerId(peer, w.id), peer, stale, icon: peerRoute(peer, w.icon) }));
+  return snap.widgets.filter((w) => !hidden.has(peerId(peer, w.app))).map((w) => withoutActions({ ...w, id: peerId(peer, w.id), peer, stale, icon: peerRoute(peer, w.icon) }));
+}
+
+function withoutActions(w: WidgetView): WidgetView {
+  if (!w.ok) return w;
+  const { actions: _, ...rest } = w;
+  const strip = (blocks: WidgetBlock[]) => blocks.map((b) => {
+    if (!b.action) return b;
+    const { action: __, ...plain } = b;
+    return plain as WidgetBlock;
+  });
+  return {
+    ...rest,
+    ...(Array.isArray(w.blocks) ? { blocks: strip(w.blocks) } : {}),
+    ...(Array.isArray(w.views) ? { views: w.views.map((v) => ({ ...v, blocks: Array.isArray(v.blocks) ? strip(v.blocks) : [] })) } : {}),
+  };
 }
 
 export function mergeServices(peer: string, snap: PeerSnapshot, hidden: Set<string>, stale: boolean): ServiceView[] {

@@ -665,7 +665,8 @@ const subscribe = (l: () => void) => {
 const snapshot = () => state ?? initAppearance();
 
 /** The current appearance, re-rendering on every change (preview, save, other tab, OS scheme). */
-export const useAppearance = (): Appearance => useSyncExternalStore(subscribe, snapshot);
+// The third argument lets the widget preview render cards on the server (src/web/widget-preview.tsx).
+export const useAppearance = (): Appearance => useSyncExternalStore(subscribe, snapshot, snapshot);
 
 /** For non-React code (the terminal): called with every change. */
 export function onAppearance(fn: (a: Appearance) => void): () => void {

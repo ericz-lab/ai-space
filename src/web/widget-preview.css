@@ -30,3 +30,4 @@
 @media (max-width: 640px) { .shell { padding-top: 100px; } }
 
 :root[data-preview="production"] .opacity-controls { display: none; }
+.preview-note { margin: -28px auto 24px; max-width: 640px; text-align: center; font: 12px system-ui; color: var(--muted); }

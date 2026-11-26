@@ -665,6 +665,9 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
     setWidgets((cur) => cur.map((x) => (x.id === w.id ? { ...x, size } : x)));
     if (commit) void putLayout({ sizes: { [w.id]: size } });
   };
+  // A card answered by an action or a refresh takes its entry's place; the size shown stays the
+  // one the panel has (the operator's override, or a drag in progress).
+  const replaceWidget = (next: WidgetInfo) => setWidgets((cur) => cur.map((x) => (x.id === next.id ? { ...next, size: x.size } : x)));
   const showHiddenWidgets = () => {
     const ids = hiddenWidgets;
     setHiddenWidgets([]);
@@ -940,6 +943,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
                   dragProps={dragProps("widgets", cards, i)}
                   onResize={editing ? (size, commit) => resizeWidget(w, size, commit) : undefined}
                   onRemove={editing ? () => unpinEntry(key) : undefined}
+                  onUpdate={replaceWidget}
                 />
               );
             })}

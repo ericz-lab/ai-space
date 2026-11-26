@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { previewOpacity, previewPage } from "./widget-preview.tsx";
+import { previewFeed, previewOpacity, previewPage } from "./widget-preview.tsx";
 
 test("preview defaults to 76 and bounds finite opacity inputs", () => {
   for (const value of [null, "", " ", "invalid", "Infinity"]) expect(previewOpacity(value)).toBe(76);
@@ -9,14 +9,43 @@ test("preview defaults to 76 and bounds finite opacity inputs", () => {
   expect(previewOpacity("120")).toBe(100);
 });
 
-test("preview renders fixtures and slider without reflecting arbitrary query markup", () => {
-  const html = previewPage(new URL("http://localhost/?opacity=81&lang=zh&theme=light"));
+test("preview renders fixtures and slider without reflecting arbitrary query markup", async () => {
+  const html = await previewPage(new URL("http://localhost/?opacity=81&lang=zh&theme=light"));
   expect(html).toContain('--widget-alpha: 0.81');
   expect(html).toContain('data-theme="light"');
   expect(html).toContain('value="81"');
   expect(html).toContain("示例数据");
   expect(html).toContain("Market Board");
-  const invalid = previewPage(new URL("http://localhost/?opacity=%3Cscript%3E&theme=%3Cscript%3E"));
+  const invalid = await previewPage(new URL("http://localhost/?opacity=%3Cscript%3E&theme=%3Cscript%3E"));
   expect(invalid).toContain('--widget-alpha: 0.76');
   expect(invalid).toContain('data-theme="dark"');
+  expect(invalid).not.toContain("<script>alert");
+});
+
+test("the preview's cards are the production card, with views, actions and pages", async () => {
+  const html = await previewPage(new URL("http://localhost/?lang=en"));
+  // The segmented views of the usage card, the todo card's checks and input, the 2x2 card's pager.
+  expect(html).toContain('role="tablist"');
+  expect(html).toContain('role="checkbox"');
+  expect(html).toContain('class="wa-input"');
+  expect(html).toContain('class="wb-pager"');
+  expect(html).toContain('id="preview-data"');
+  const data = JSON.parse(html.match(/<script type="application\/json" id="preview-data">(.*?)<\/script>/s)![1]!);
+  const peer = data.widgets.find((w: { peer?: string }) => w.peer);
+  expect(peer).toMatchObject({ peer: "david" });
+  expect(peer).not.toHaveProperty("actions");
+});
+
+test("the preview's sources: a check finishes a task, the bank call always fails, an input adds", async () => {
+  const { feed } = previewFeed();
+  const done = await feed.act("todo", "today", { action: "done:1" });
+  if (!done.ok) throw new Error(done.error);
+  expect(JSON.stringify(done.widget)).not.toContain("Buy milk");
+  expect(await feed.act("todo", "today", { action: "done:2" })).toEqual({ ok: false, status: 502, error: "the bank list is read-only" });
+  const add = await feed.act("todo", "today", { action: "add", value: "Write the report" });
+  expect(add.ok && JSON.stringify(add.widget)).toContain("Write the report");
+  const a = await feed.refresh("market", "watchlist");
+  const b = await feed.refresh("market", "watchlist");
+  if (!a.ok || !b.ok || !a.widget.ok || !b.widget.ok) throw new Error("market down");
+  expect(a.widget.blocks?.[0]).not.toEqual(b.widget.blocks?.[0]);
 });
