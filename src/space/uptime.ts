@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import { isOperator } from "./auth.ts";
+import { identify } from "./auth.ts";
 
 /**
  * How long this Space has run, across restarts (docs/usage.md#uptime). Each start of the service
@@ -7,7 +7,8 @@ import { isOperator } from "./auth.ts";
  * last time. A crash or power cut therefore loses at most one tick. Instants are epoch milliseconds
  * (docs/time.md). The figures are this machine's own: a hub never adds its peers' to them.
  *
- *   GET /api/space/uptime   owner: { ok, uptime: { startedAt, currentMs, totalMs, firstStartedAt, restarts } }
+ *   GET /api/space/uptime   owner, or an app with its SPACE_APP_TOKEN (space-ops shows it per machine):
+ *                           { ok, uptime: { startedAt, currentMs, totalMs, firstStartedAt, restarts } }
  *
  * `GET /api/space` carries { startedAt, totalMs } of the same for the operator.
  */
@@ -96,11 +97,12 @@ export class UptimeStore {
   }
 }
 
-export function createUptimeRoutes(opts: { uptime: UptimeStore; token: string }) {
+/** `appForToken`: an app's own token may read it too (an `app-read` route, docs/auth.md#access-policy). */
+export function createUptimeRoutes(opts: { uptime: UptimeStore; token: string; appForToken?: (token: string) => Promise<string | undefined> }) {
   return {
     "/api/space/uptime": {
-      GET: (req: Request) => {
-        if (!isOperator(req, opts.token)) return Response.json({ ok: false, error: "unauthorized" }, { status: 401 });
+      GET: async (req: Request) => {
+        if (!(await identify(req, { token: opts.token, appForToken: opts.appForToken }))) return Response.json({ ok: false, error: "unauthorized" }, { status: 401 });
         const uptime = opts.uptime.summary();
         return uptime ? Response.json({ ok: true, uptime }, { headers: { "cache-control": "no-store" } }) : Response.json({ ok: false, error: "not started" }, { status: 503 });
       },
