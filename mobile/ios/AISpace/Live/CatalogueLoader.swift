@@ -108,6 +108,28 @@ final class CatalogueLoader: ObservableObject {
         #endif
     }
 
+    /// A card the Space answered after an action or a refresh, in place of the one on show (its
+    /// size and frame are the Space's, as in `GET /api/widgets`). The saved catalogue catches up on
+    /// the next refresh.
+    func replace(_ widget: CatalogWidget) {
+        guard var c = catalogue, let i = c.widgets.firstIndex(where: { $0.id == widget.id }) else { return }
+        c.widgets[i] = widget
+        catalogue = c
+    }
+
+    /// A layout write drawn at once, before the Space has stored it (src/web/widget-layout.ts
+    /// `applyWrite`): frames and sizes by widget id, a size alone dropping the frame, and the alignment.
+    func apply(_ write: LayoutWrite) {
+        guard var c = catalogue else { return }
+        for (i, w) in c.widgets.enumerated() {
+            guard let a = WidgetLayout.applied(write, id: w.id, size: w.size, frame: w.storedFrame) else { continue }
+            c.widgets[i].size = a.size
+            c.widgets[i].frame = a.frame.map { Lenient($0) }
+        }
+        if let align = write.widgetAlign { c.widgetAlign = align }
+        if c != catalogue { catalogue = c }
+    }
+
     /// Signing out forgets what the Space showed, not only the session. A refresh on its way
     /// belongs to the session that ended: its answer is dropped, and it does not hold up the next one.
     func forget() {
