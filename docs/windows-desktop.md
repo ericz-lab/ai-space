@@ -85,7 +85,8 @@ to that page's own place instead of loading the web launcher in the tab.
 
 The Space's screens and its library, natively (`Views/HomePage.cs`), as the Mac's launcher and the
 Linux client's Home lay them out; the rules are in `AISpace.Core` (`HomeCatalogue.cs`,
-`HomeSearch.cs`, `HomeWidgets.cs`, `HomeScreens.cs`), tested with the other clients' cases.
+`HomeSearch.cs`, `HomeWidgets.cs`, `HomeScreens.cs`, `WidgetLayout.cs`, `WidgetInteract.cs`), tested with the
+other clients' cases.
 
 - **What it reads.** `GET /api/apps` and `/api/agents`, with `/api/widgets`, `/api/peers` and
   `/api/panel/layout` when the Space has them (`SpaceApi.GetHome`), when the page is first shown,
@@ -125,8 +126,8 @@ Linux client's Home lay them out; the rules are in `AISpace.Core` (`HomeCatalogu
 - **Screens** are this computer's (`screens.json` beside the saved Spaces, by Space): the panel's
   screens (or the home screen the panel would seed) are copied once, then a tile's or a card's
   menu (right click, Shift+F10) puts it on a screen or takes it off and moves it, and a screen
-  tab's menu in the bar makes, renames and deletes screens or copies the web panel's layout again. Nothing is written to
-  the Space. A removed Space's screens go with it.
+  tab's menu in the bar makes, renames and deletes screens or copies the web panel's layout again. Nothing of the
+  screens is written to the Space (the widgets' frames are, below). A removed Space's screens go with it.
 - **Edit mode** (编辑屏幕), the web panel's ([panel.md](panel.md#arranging-hiding-and-uninstalling-apps)),
   one screen at a time (`Views/HomeEdit.cs`): Edit Screen in its tab's menu or in a tile's or a
   card's on it. The command box gives way to a bar naming the screen, with Rename…, Delete
@@ -134,7 +135,8 @@ Linux client's Home lay them out; the rules are in `AISpace.Core` (`HomeCatalogu
   is dragged onto another of its kind to take that one's place (tiles and cards are drawn apart, as
   the menu's Move Earlier and Move Later keep them); a click arranges and opens nothing. From the
   keyboard, on the focused entry, Delete removes it and Ctrl with an arrow moves it. Done, Escape,
-  Ctrl+F or another place leaves edit mode. As the menus, it changes this computer's screens only.
+  Ctrl+F or another place leaves edit mode. As the menus, it changes this computer's screens only;
+  resizing widget cards (below) changes the Space's layout.
 - **Apps from the App Store.** The web panel pins an app the store installs to its home screen
   ([app-catalog.md](app-catalog.md)); this computer keeps its own layout, so Home adds it to the
   home screen here too. `screens.json` remembers the apps on the panel's home screen (`panelHome`),
@@ -167,12 +169,57 @@ Linux client's Home lay them out; the rules are in `AISpace.Core` (`HomeCatalogu
   rather than half an icon. The reader refuses DTDs and external references and caps the size.
 - **Widget cards** follow the blocks contract ([panel.md](panel.md#widgets)): the first block is
   drawn large (metric with its change, trend as a line or bars, progress, gauge with its zones,
-  status, tanks), the next ones as rows, as many as the card's size holds; a card without blocks
-  lists its items with their age; a card says when its state is outdated or its machine offline.
+  status, tanks), the next ones as rows; a card without blocks lists its items with their age; a
+  card says when its state is outdated or its machine offline (`Views/HomeCards.cs`,
+  `Views/WidgetParts.cs`).
+- **Touching a card** ([app-spec.md](app-spec.md#views-copy-and-actions), the web panel's
+  `Tiles.tsx`/`WidgetBlocks.tsx`, rules in `WidgetInteract.cs`). Views: a row of toggles under the
+  head, the first the default, the choice kept per widget on this computer (`widget-views.json`
+  beside the saved Spaces); Left and Right move between them. Copy: a button on a block with
+  `copy` puts its text on the clipboard and turns into a tick for 1.5 s; it never opens the block's
+  link. Actions, on a local widget only (a peer's card draws none, whatever it carries): a block's
+  `check` (a checkbox in place of the status dot, ticked at once and unticked when the action
+  fails) and `button`, the card's text field with its send button and its buttons; an action with
+  `confirm` asks inside the card (Cancel, or the action's name; Escape cancels). Each is
+  `POST /api/widgets/:app/:name/action` with the connection's sign-in and the Space's origin, as
+  the layout write; the card the Space answers with takes the old one's place and the app's
+  message shows for 4 s; a failure shows in the card for 6 s and keeps what was typed. Only an id
+  the card's own payload declared is ever sent. Rows that do not fit are paged: dots under them
+  (a click, Left and Right on the focused dot, a horizontal swipe on a touch screen, a touchpad's
+  horizontal scroll or a tilted wheel), the card as tall on every page. The pointer over a trend
+  shows the nearest point's value and date in place of the latest. The head says how old the card
+  is; on a local card that is a button that reads it again (`POST …/refresh`). A value that changed
+  since the last read flashes once, and bars, gauges, tanks and the hero's number enter with a short
+  motion when a card first shows and on a view or page change, not on a plain refresh; none of it
+  when Windows is set to show fewer animations. In edit mode and in the Library and search results
+  every control is drawn and inert.
+- **Resizing cards** ([panel.md](panel.md#resize-a-widget), the web panel's `WidgetArea.tsx`, all
+  the arithmetic in `WidgetLayout.cs`, a port of `widget-layout.ts` with its tests): on a Space
+  that has the stepless layout (its layout carries `widgetAlign`) a screen's cards flow in rows with a
+  20px gap, each at its frame (`w` a share of the area's width, `h` its height; without one, its
+  size's default), a row as tall as its tallest card, short rows at the start or centred
+  (`Views/WidgetFlow.cs`). At a page width of 700 or less they are one column sized by their
+  content. A card's inner layout follows its box: as many rows per page as fit under the hero. In
+  edit mode each card has three handles: the right edge (the boundary with the next card of the
+  row moves, the last card of a row grows into the row's free space; with Shift only this card
+  changes and the next ones re-flow), the bottom edge (the row's height) and the corner (both).
+  They snap within 8px to the area's quarters, thirds and halves, to other rows' edges and heights,
+  with a thin accent line where they snapped; Alt held turns snapping off, Escape puts the card
+  back. The head shows the card's size while edited. A focused handle moves with the arrow keys,
+  8px a press, 1px with Shift, saved once the keys rest. A toolbar above the cards has Align,
+  Center, Split evenly, Reset (asked in the page) and, for eight seconds, Undo
+  (`Views/HomeLayout.cs`). Each gesture or action is one `PUT /api/panel/layout` with the changed
+  frames, their nearest classic sizes and the alignment, drawn at once and put back with a message
+  when it fails. Frames are the Space's, by widget, so a browser and every computer show the same
+  sizes; the screens stay this computer's. A Space that refuses `frames` gets the nearest sizes
+  only, which is said once. A Space from before the stepless layout draws the cards as before.
 
 Where it differs from the Mac: an `embed` widget's page is not drawn inside its card (a web view
 does not scroll with the page's content); the card opens it. Tiles and cards are moved with their
-menu or in edit mode, and the box does not offer agent skills' intents of its own.
+menu or in edit mode, and the box does not offer agent skills' intents of its own. Where it
+differs from the web panel's widget area: a card dragged to another place takes the target's place
+on the drop, the rows do not re-flow while it moves; there is no size menu (the server's rule that
+a size written alone drops a frame does not come up here).
 
 ### Built-in icons
 
@@ -501,7 +548,9 @@ desktop/windows/
                        JSON calls; partial, an area adds its routes in SpaceApi.<Area>.cs) and
                        live state (catalogue, inbox, runs), deep links, navigation and permission
                        rules, installation strings, the search for an AI Space on this computer and
-                       its installer's command (ThisComputer.cs), voice input's rules (Voice.cs:
+                       its installer's command (ThisComputer.cs), the widget area's layout
+                       (WidgetLayout.cs) and a card's interactions (WidgetInteract.cs, with
+                       SpaceApi.Widgets.cs: action, refresh, the layout write), voice input's rules (Voice.cs:
                        language, transcript, frames, clip, which Space; VoiceSession.cs: the live
                        session and its fallback; HoldKey.cs: the hold key and the paste;
                        SpaceApi.Voice.cs: its routes), the chat (ChatStream.cs: the stream
@@ -516,7 +565,8 @@ desktop/windows/
                        sign-in), Ui.cs (the pieces the native windows and pages are made of),
                        ThisComputerSetup.cs (the first launch), Web/ (WebView2 profiles and
                        PanelView, the Mac's PanelSession), Views/ (the native pages: NativePage.cs
-                       the contract, HomePage, InboxPage, ShortcutsPage, SpaceSettingsPage, PetView,
+                       the contract, HomePage (with HomeCards, WidgetParts, WidgetFlow and
+                       HomeLayout: the widget cards and their area), InboxPage, ShortcutsPage, SpaceSettingsPage, PetView,
                        ChatPage with ChatView and ChatParts (the native chat);
                        welcome, connection, Settings, Quick Chat, the floating ball's window and
                        dial, the voice overlay and the fields' microphone), Shell/ (single

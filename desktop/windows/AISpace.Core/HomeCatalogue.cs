@@ -174,6 +174,48 @@ public sealed class HomeCatalogue
     public IReadOnlyList<HomeScreen>? Screens { get; init; }
     /// <summary>Icons of the panel's own tiles (inbox, terminal, settings, …), as <c>/api/apps</c> names them.</summary>
     public IReadOnlyDictionary<string, string> BuiltinIcons { get; init; } = new Dictionary<string, string>();
+    /// <summary>
+    /// The widget area's alignment from <c>/api/panel/layout</c>; null from a Space whose layout has
+    /// none, one from before the stepless layout, which then draws its cards as before.
+    /// </summary>
+    public WidgetAlign? WidgetAlign { get; init; }
+
+    /// <summary>Whether the Space stores frames: its cards are drawn in the stepless layout and can be resized.</summary>
+    public bool Stepless => WidgetAlign is not null;
+
+    /// <summary>
+    /// Whether the Space has the widgets' action and refresh routes: it says so by what it sends (the
+    /// stepless layout's alignment, or a widget with views or actions), never by a probing write.
+    /// </summary>
+    public bool WidgetWrites => Stepless || Widgets.Any(w => w.Views is not null || w.Actions is not null);
+
+    private HomeCatalogue With(IReadOnlyList<HomeWidget> widgets, WidgetAlign? align) => new()
+    {
+        Apps = Apps,
+        AppInfos = AppInfos,
+        Agents = Agents,
+        AgentGroups = AgentGroups,
+        Widgets = widgets,
+        Peers = Peers,
+        Screens = Screens,
+        BuiltinIcons = BuiltinIcons,
+        WidgetAlign = align,
+    };
+
+    /// <summary>A layout write as the Space stores it (<see cref="WidgetLayout.ApplyWrite"/>): the frames, the sizes, the alignment.</summary>
+    public HomeCatalogue ApplyLayout(LayoutWrite write) => With(
+        Widgets.Select(w => WidgetLayout.Applied(w.Id, w.Size ?? "1x1", w.Frame, write) is { } a ? w with { Size = a.Size, Frame = a.Frame } : w).ToList(),
+        write.Align ?? WidgetAlign);
+
+    /// <summary>
+    /// A card an action or a refresh answered with, in its entry's place; the size and frame stay the
+    /// ones shown (a layout write may be on its way), as the web panel's <c>replaceWidget</c>.
+    /// </summary>
+    public HomeCatalogue ReplaceWidget(HomeWidget next) => With(
+        Widgets.Select(w => w.Id == next.Id ? next with { Size = w.Size, Frame = w.Frame ?? next.Frame } : w).ToList(), WidgetAlign);
+
+    /// <summary>The cards of an area as the layout knows them.</summary>
+    public static List<LayoutCard> LayoutCards(IEnumerable<HomeWidget> widgets) => widgets.Select(w => new LayoutCard(w.Id, w.Size ?? "1x1", w.Frame)).ToList();
 
     public static HomeCatalogue Decode(JsonElement apps, JsonElement agents, JsonElement? widgets = null, JsonElement? peers = null, JsonElement? layout = null)
     {
@@ -253,6 +295,13 @@ public sealed class HomeCatalogue
             }
         }
 
+        WidgetAlign? align = null;
+        if (layout is { ValueKind: JsonValueKind.Object } la && la.TryGetProperty("layout", out var lin) && lin.ValueKind == JsonValueKind.Object)
+        {
+            // An unknown value from a newer Space is still a Space with the stepless layout.
+            align = HomeJson.Str(lin, "widgetAlign") is { } wa ? WidgetLayout.ParseAlign(wa) ?? Core.WidgetAlign.Start : null;
+        }
+
         var builtins = new Dictionary<string, string>();
         if (apps.ValueKind == JsonValueKind.Object && apps.TryGetProperty("builtins", out var b) && b.ValueKind == JsonValueKind.Object)
         {
@@ -272,6 +321,7 @@ public sealed class HomeCatalogue
             Peers = peerList,
             Screens = screens,
             BuiltinIcons = builtins,
+            WidgetAlign = align,
         };
     }
 

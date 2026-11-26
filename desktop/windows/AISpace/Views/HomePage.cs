@@ -63,7 +63,7 @@ internal sealed partial class HomePage : NativePage
         var file = Path.Combine(context.Model.Paths.Config, "screens.json");
         if (!Stores.TryGetValue(file, out var store)) Stores[file] = store = new ScreenStore(file);
         _store = store;
-        _cards = new HomeCards(context, OpenWidget);
+        _cards = new HomeCards(context, OpenWidget, ReplaceWidget, ViewsFor(Path.Combine(context.Model.Paths.Config, "widget-views.json")));
 
         _box = Ui.SearchBox(L.T("Search apps, agents and widgets, or ask Space Assistant"), OnQuery, _ => Submit(alwaysAsk: false));
         _box.MaxWidth = 720;
@@ -102,6 +102,8 @@ internal sealed partial class HomePage : NativePage
         _root.Children.Add(scroll);
         Content = _root;
         PreviewKeyDown += OnPageKey;
+        // The widget area is one column at a page width of 700 or less: it lays itself out again when the page's width changes.
+        SizeChanged += (_, _) => _flow?.InvalidateMeasure();
     }
 
     public override string Title => L.T("Home");
@@ -276,7 +278,13 @@ internal sealed partial class HomePage : NativePage
     private void OnPageKey(object sender, KeyEventArgs e)
     {
         var ctrl = Keyboard.Modifiers == ModifierKeys.Control;
-        if (_editing is not null && EditKey(e))
+        if (e.Key == Key.Escape && _dragThumb is { IsDragging: true } dragged)
+        {
+            // Escape during a drag puts the card back as it was and stays in edit mode.
+            e.Handled = true;
+            dragged.CancelDrag();
+        }
+        else if (_editing is not null && EditKey(e))
         {
             e.Handled = true;
         }
@@ -417,12 +425,29 @@ internal sealed partial class HomePage : NativePage
         _box.Visibility = _editing is null ? Visibility.Visible : Visibility.Collapsed;
         NotifyPlaces(screens);
         DrawBanner();
+        // Not while an edge is being moved: drawing anew would take the handle away under the pointer.
+        if (Resizing)
+        {
+            _drawAfterDrag = true;
+            return;
+        }
         var sig = Signature(screens);
-        if (sig == _drawn) return;
+        if (sig == _drawn)
+        {
+            SyncFlow();
+            return;
+        }
         _drawn = sig;
         var focused = _body.IsKeyboardFocusWithin && Keyboard.FocusedElement is FrameworkElement { Tag: string key } ? key : null;
+        // A control inside a card (a view, a page, the text field) is found again inside that card.
+        var focusedCard = focused is not null && Keyboard.FocusedElement is DependencyObject fe && SlotOf(fe) is { Tag: string slotKey } ? slotKey : null;
         _body.Children.Clear();
         _first = null;
+        _flow = null;
+        _toolbarHost = null;
+        _areaSlots.Clear();
+        _handles.Clear();
+        if (_editing is null) ForgetLayoutEdit();
         if (_catalogue is not { } c)
         {
             _body.Children.Add(_error is null
@@ -434,15 +459,36 @@ internal sealed partial class HomePage : NativePage
         if (q.Length > 0) DrawResults(c, q);
         else if (_shownId == LibraryId) DrawLibrary(c);
         else DrawScreen(c, screens.First(s => s.Id == _shownId));
-        if (focused is not null && Find(_body, focused) is { } again) again.Focus();
+        if (focusedCard is not null && FindSlot(_body, focusedCard) is { } card && HomeCards.FindTagged(card, focused!) is { } inner) inner.Focus();
+        else if (focused is not null && Find(_body, focused) is { } again) again.Focus();
     }
 
     private static FrameworkElement? Find(DependencyObject root, string key)
     {
         foreach (var child in LogicalTreeHelper.GetChildren(root).OfType<DependencyObject>())
         {
-            if (child is ButtonBase { Tag: string k } b && k == key) return b;
+            // A tile, a card's head, a resize handle.
+            if (child is Control { Tag: string k, Focusable: true } b && k == key && b is ButtonBase or Thumb) return b;
             if (Find(child, key) is { } found) return found;
+        }
+        return null;
+    }
+
+    private static WidgetSlot? FindSlot(DependencyObject root, string key)
+    {
+        foreach (var child in LogicalTreeHelper.GetChildren(root).OfType<DependencyObject>())
+        {
+            if (child is WidgetSlot { Tag: string k } s && k == key) return s;
+            if (FindSlot(child, key) is { } found) return found;
+        }
+        return null;
+    }
+
+    private static WidgetSlot? SlotOf(DependencyObject d)
+    {
+        for (var p = d; p is not null; p = LogicalTreeHelper.GetParent(p) ?? (p is System.Windows.Media.Visual ? System.Windows.Media.VisualTreeHelper.GetParent(p) : null))
+        {
+            if (p is WidgetSlot slot) return slot;
         }
         return null;
     }
@@ -458,7 +504,11 @@ internal sealed partial class HomePage : NativePage
         if (_catalogue is { } c)
         {
             foreach (var e in c.Apps.Concat(c.Agents)) s.Append(e.Key).Append('|').Append(e.Title).Append('|').Append(e.Icon).Append('|').Append(e.Reach).Append('|').Append(e.Peer).Append('\n');
-            foreach (var w in c.Widgets) s.Append(w.Id).Append('|').Append(w.Title).Append('|').Append(w.State).Append('\n');
+            // On a screen in the stepless layout a card's size and frame are put on the area in place
+            // (SyncFlow), so a layout write does not draw the screen anew; elsewhere the size is drawn.
+            var area = c.Stepless && _query.Trim().Length == 0 && _shownId != LibraryId;
+            s.Append("stepless=").Append(c.Stepless).Append(c.WidgetWrites).Append('\n');
+            foreach (var w in c.Widgets) s.Append(w.Id).Append('|').Append(w.Title).Append('|').Append(w.Content).Append(area ? "" : w.Size).Append('\n');
             foreach (var (name, served) in c.BuiltinIcons) s.Append(name).Append('=').Append(served).Append(',');
             s.Append("offers=").Append(_offers).Append(_store.StoreCardHidden(SpaceKey)).Append('\n');
         }
@@ -713,7 +763,7 @@ internal sealed partial class HomePage : NativePage
         }
         if (widgets.Count > 0)
         {
-            var cards = CardGrid(widgets, screen.Id);
+            var cards = CardArea(widgets, screen.Id);
             cards.Margin = new Thickness(0, 16, 0, 0);
             _body.Children.Add(cards);
         }
@@ -786,13 +836,15 @@ internal sealed partial class HomePage : NativePage
         return grid;
     }
 
+    /// <summary>Cards sized by their content: the library's and the search's (drawn, inert), and a screen's on a Space without the stepless layout.</summary>
     private WrapPanel CardGrid(IEnumerable<HomeWidget> widgets, string? screen)
     {
         var grid = HomeCards.Grid();
         var editing = EditingHere(screen);
+        var mode = screen is null ? CardMode.Preview : editing ? CardMode.Editing : CardMode.Live;
         foreach (var w in widgets)
         {
-            var card = _cards.Card(w);
+            var card = _cards.Card(w, mode, framed: false, _catalogue?.WidgetWrites == true);
             var entry = HomeCatalogue.WidgetEntry(w);
             card.ContextMenu = new ContextMenu();
             card.ContextMenuOpening += (_, _) => FillEntryMenu(card.ContextMenu, entry, screen);
