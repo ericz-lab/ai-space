@@ -19,7 +19,7 @@ enum ScreenShot {
     static let settingsURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!
 
     /// The display under the pointer, without the windows numbered in `excluding` (the voice
-    /// capsule), as JPEG bytes; nil without the grant or when anything fails.
+    /// overlay), as JPEG bytes; nil without the grant or when anything fails.
     @MainActor
     static func take(excluding windowNumbers: [Int]) async -> Data? {
         guard granted else { return nil }
@@ -28,7 +28,7 @@ enum ScreenShot {
               let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else { return nil }
         let displayID = CGDirectDisplayID(number.uint32Value)
         do {
-            // Off-screen windows too, so the capsule is excluded even when it appears after this list.
+            // Off-screen windows too, so the overlay is excluded even when it appears after this list.
             let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
             guard let display = content.displays.first(where: { $0.displayID == displayID }) else { return nil }
             let excluded = content.windows.filter { windowNumbers.contains(Int($0.windowID)) }

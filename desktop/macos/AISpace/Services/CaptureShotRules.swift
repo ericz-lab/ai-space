@@ -105,12 +105,22 @@ enum CaptureShotRules {
     /// The most tries one note makes: the first, one network retry and one fall back to words.
     static let maxTries = 4
 
-    /// The capsule after the target kept the note; `shot` when the screenshot went with it.
-    static func sentNote(title: String, label: String?, shot: Bool) -> String {
-        guard shot else { return DictationRules.sentNote(title: title, label: label) }
+    /// Whether the overlay shows the Screenshot mark: on a note (right ⌥) whose screenshot goes
+    /// with it, while it listens, transcribes and sends; the result says it in its title instead.
+    static func marks(_ phase: DictationRules.OverlayPhase, destination: DictationRules.Destination, attached: Bool) -> Bool {
+        guard destination == .capture, attached else { return false }
+        switch phase {
+        case .starting, .listening, .transcribing, .sending: return true
+        case .kept, .note: return false
+        }
+    }
+
+    /// The overlay's title after the target kept the note; `shot` when the screenshot went with it.
+    static func keptTitle(title: String, label: String?, shot: Bool) -> String {
+        guard shot else { return DictationRules.keptTitle(title: title, label: label) }
         let label = label?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return label.isEmpty
-            ? String(localized: "Sent to \(title) · with a screenshot")
-            : String(localized: "Sent to \(title) · \(label) · with a screenshot")
+            ? String(localized: "Kept in \(title) · with a screenshot")
+            : String(localized: "Kept in \(title) · \(label) · with a screenshot")
     }
 }

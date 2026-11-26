@@ -128,12 +128,25 @@ struct CaptureShotRulesTests {
         #expect(tries <= CaptureShotRules.maxTries)
     }
 
-    @Test func theSentNoteSaysWhenTheScreenshotWentWithIt() {
-        #expect(CaptureShotRules.sentNote(title: "Decree", label: nil, shot: false) == DictationRules.sentNote(title: "Decree", label: nil))
-        #expect(CaptureShotRules.sentNote(title: "Decree", label: "Decree #3", shot: false) == DictationRules.sentNote(title: "Decree", label: "Decree #3"))
-        let with = CaptureShotRules.sentNote(title: "Decree", label: "Decree #3", shot: true)
-        #expect(with.contains("Decree #3"))
-        #expect(with != DictationRules.sentNote(title: "Decree", label: "Decree #3"))
-        #expect(CaptureShotRules.sentNote(title: "Decree", label: "  ", shot: true) == CaptureShotRules.sentNote(title: "Decree", label: nil, shot: true))
+    @Test func theKeptTitleSaysWhenTheScreenshotWentWithIt() {
+        #expect(CaptureShotRules.keptTitle(title: "Decree", label: nil, shot: false) == DictationRules.keptTitle(title: "Decree", label: nil))
+        #expect(CaptureShotRules.keptTitle(title: "Decree", label: "Decree #3", shot: false) == DictationRules.keptTitle(title: "Decree", label: "Decree #3"))
+        #expect(CaptureShotRules.keptTitle(title: "Decree", label: "Decree #3", shot: true) == "Kept in Decree · Decree #3 · with a screenshot")
+        #expect(CaptureShotRules.keptTitle(title: "Decree", label: nil, shot: true) == "Kept in Decree · with a screenshot")
+        #expect(CaptureShotRules.keptTitle(title: "Decree", label: "  ", shot: true) == CaptureShotRules.keptTitle(title: "Decree", label: nil, shot: true))
+    }
+
+    @Test func theOverlayMarksTheScreenshotWhileItListensAndSends() {
+        let going: [DictationRules.OverlayPhase] = [.starting, .listening, .transcribing, .sending]
+        for phase in going {
+            #expect(CaptureShotRules.marks(phase, destination: .capture, attached: true))
+            // Not attached (no grant, words-only target, not in yet, refused): no mark.
+            #expect(!CaptureShotRules.marks(phase, destination: .capture, attached: false))
+            // fn never takes a screenshot, so never shows the mark.
+            #expect(!CaptureShotRules.marks(phase, destination: .field, attached: true))
+        }
+        // The result names it in its title instead; a note about a failure has no mark.
+        #expect(!CaptureShotRules.marks(.kept(label: "Decree #3"), destination: .capture, attached: true))
+        #expect(!CaptureShotRules.marks(.note("x", clipboard: true), destination: .capture, attached: true))
     }
 }

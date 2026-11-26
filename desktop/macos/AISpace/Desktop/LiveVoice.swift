@@ -25,11 +25,14 @@ final class LiveVoice: ObservableObject {
     /// The transcript so far: the final segments and the current one's draft.
     @Published private(set) var text = ""
     @Published var error: String?
+    /// How loud the microphone is, smoothed, 0…1 (DictationRules.meterLevel): about 20 updates a
+    /// second at most, and 0 whenever it is not recording.
+    @Published private(set) var level = 0.0
 
     private nonisolated static let bytesPerSecond = 32000
     /// Held while the model loads; the Space holds about a minute more.
     private nonisolated static let maxBacklog = 50 * bytesPerSecond
-    private nonisolated static let maxSeconds = 90
+    private nonisolated static let maxSeconds = DictationRules.maxRecordingSeconds
 
     /// What the microphone tap shares with the main actor.
     private struct Held {
@@ -39,6 +42,9 @@ final class LiveVoice: ObservableObject {
         var clip: Data? = Data()
         /// False once the recording goes up as a clip: nothing more into the live stream.
         var live = true
+        /// The loudest buffer since the level was last reported, and when that was.
+        var peak = 0.0
+        var levelAt: UInt64 = 0
     }
 
     private enum TapEvent: Sendable { case failed, full }
@@ -98,6 +104,7 @@ final class LiveVoice: ObservableObject {
         case .starting: cancel()
         case .recording:
             state = .finishing
+            level = 0
             releaseAudio()
             if clipOnly { upload(generation: generation) } else { timeout(70, generation: generation) }
         case .finishing, .idle: break
@@ -169,7 +176,12 @@ final class LiveVoice: ObservableObject {
         audio = continuation
         captured = stream
         self.held = held
-        let tap = Self.tap(format: format, output: output, converter: converter, held: held, continuation: continuation) { [weak self] event in
+        let tap = Self.tap(format: format, output: output, converter: converter, held: held, continuation: continuation, level: { [weak self] rms in
+            Task { @MainActor in
+                guard let self, self.generation == generation, self.state == .recording else { return }
+                self.level = DictationRules.smooth(previous: self.level, sample: DictationRules.meterLevel(rms: rms))
+            }
+        }) { [weak self] event in
             Task { @MainActor in
                 guard let self, self.generation == generation else { return }
                 switch event {
@@ -187,6 +199,7 @@ final class LiveVoice: ObservableObject {
     /// The microphone tap, off the main actor: converts each buffer and shares it through `held`.
     private nonisolated static func tap(format: AVAudioFormat, output: AVAudioFormat, converter: AVAudioConverter,
                                         held: OSAllocatedUnfairLock<Held>, continuation: AsyncStream<Data>.Continuation,
+                                        level: @escaping @Sendable (Double) -> Void,
                                         report: @escaping @Sendable (TapEvent) -> Void) -> AVAudioNodeTapBlock {
         { buffer, _ in
             let capacity = AVAudioFrameCount(ceil(Double(buffer.frameLength) * 16000 / format.sampleRate)) + 32
@@ -202,6 +215,22 @@ final class LiveVoice: ObservableObject {
             if status == .error { report(.failed); return }
             guard converted.frameLength > 0, let samples = converted.int16ChannelData else { return }
             let data = Data(bytes: samples[0], count: Int(converted.frameLength) * 2)
+            // The meter: this buffer's RMS, the loudest since the last report, every 50 ms at most.
+            var sum = 0.0
+            for i in 0..<Int(converted.frameLength) {
+                let v = Double(samples[0][i]) / 32768
+                sum += v * v
+            }
+            let rms = (sum / Double(converted.frameLength)).squareRoot()
+            let loudest = held.withLock { h -> Double? in
+                h.peak = max(h.peak, rms)
+                let now = DispatchTime.now().uptimeNanoseconds
+                guard now &- h.levelAt >= UInt64(DictationRules.levelInterval * 1e9) else { return nil }
+                h.levelAt = now
+                defer { h.peak = 0 }
+                return h.peak
+            }
+            if let loudest { level(loudest) }
             enum Outcome { case send, kept, full }
             let outcome = held.withLock { h -> Outcome in
                 if h.clip != nil, h.clip!.count + data.count <= maxSeconds * bytesPerSecond { h.clip!.append(data) }
@@ -314,6 +343,7 @@ final class LiveVoice: ObservableObject {
         deliver = nil
         captured = nil; held = nil
         ready = false; clipOnly = false
+        level = 0
         state = .idle
         text = ""
     }
