@@ -1,5 +1,5 @@
 import type { FailureKind } from "../model/failure.ts";
-import { MAX_CALL_BODY_BYTES } from "../bus/types.ts";
+import { MAX_CALL_BODY_BYTES, MAX_CALL_TIMEOUT_MS } from "../bus/types.ts";
 import { ProviderError, type LiveTarget, type ProviderState, type SpeakInput, type SpeakResult, type SpeechAdapter, type SpeechCaller, type SpeechCapability, type TranscribeInput, type TranscribeResult, type VoiceStudioSpec } from "./types.ts";
 
 /**
@@ -40,12 +40,29 @@ export type VoiceStudioDeps = {
   peers?: StudioPeers;
   fetch?: typeof fetch;
   now?: () => number;
+  /** The pause between two result requests that answered too soon; tests pass one that does not wait. */
+  sleep?: (ms: number) => Promise<void>;
 };
 
 const VOICES_TTL_MS = 60_000;
 const VOICES_TIMEOUT_MS = 8_000;
 /** `voice-studio` reads at most this many speakers in one script. */
 const MAX_SPEAKERS = 4;
+
+/**
+ * A file as a job (voice-studio's `transcribe-start` and `transcribe-result`): the upload answers at once
+ * and the text is asked for, each request waiting `JOB_WAIT_SECONDS` at most. A peer is usually behind a
+ * tunnel that ends a request with no answer in about 100 seconds (Cloudflare's 524), which one long file,
+ * or a short one behind others on the card, passes. Used whenever the app declares both capabilities.
+ */
+const JOB_START = "transcribe-start";
+const JOB_RESULT = "transcribe-result";
+const JOB_WAIT_SECONDS = 25;
+/** The bus's own limit for one call: a job gets the time the single call had. */
+const JOB_DEADLINE_MS = MAX_CALL_TIMEOUT_MS;
+/** Result requests that may fail in a row before the job is given up: one lost request must not lose the text. */
+const JOB_ASK_FAILURES = 3;
+const JOB_PAUSE_MS = 1_000;
 
 type Place = { local: true } | { peer: StudioPeer };
 
@@ -104,8 +121,58 @@ export class VoiceStudioAdapter implements SpeechAdapter {
     form.append("file", input.file, input.filename);
     if (input.language) form.append("language", input.language);
     if (input.context) form.append("context", input.context);
-    const res = await this.call("transcribe", new Request("http://speech.invalid/", { method: "POST", body: form, ...(input.signal ? { signal: input.signal } : {}) }), caller);
+    const at = this.place("transcribe");
+    const req = new Request("http://speech.invalid/", { method: "POST", body: form, ...(input.signal ? { signal: input.signal } : {}) });
+    if (this.hasJobs(at)) return this.transcribeJob(at, req, input, caller);
+    const res = await this.call(at, "transcribe", req, caller);
     return transcriptOf(this.name, await res.json().catch(() => null), input.language);
+  }
+
+  /** Whether the app where it is declares the job capabilities; an older voice-studio has only `transcribe`. */
+  private hasJobs(at: Place): boolean {
+    const has = (cap: string) => ("local" in at ? this.deps.hasLocal(this.spec.app, cap) : at.peer.provides(this.spec.app, cap));
+    return has(JOB_START) && has(JOB_RESULT);
+  }
+
+  private async transcribeJob(at: Place, start: Request, input: TranscribeInput, caller: SpeechCaller): Promise<TranscribeResult> {
+    const now = this.deps.now ?? Date.now;
+    const sleep = this.deps.sleep ?? ((ms: number) => new Promise<void>((done) => setTimeout(done, ms)));
+    const began = now();
+    const started = (await (await this.call(at, JOB_START, start, caller)).json().catch(() => null)) as { id?: unknown } | null;
+    if (!started || typeof started.id !== "string" || !started.id) throw failure(`${this.name}: the job has no id`, 502, "other");
+    let failures = 0;
+    for (;;) {
+      if (input.signal?.aborted) throw failure(`${this.name}: aborted`, 499, "other");
+      if (now() - began > JOB_DEADLINE_MS) throw failure(`${this.name}: no transcript within ${Math.round(JOB_DEADLINE_MS / 1000)}s`, 504, "transport");
+      const asked = now();
+      let body: { status?: unknown; code?: unknown; detail?: unknown } | null;
+      try {
+        const res = await this.call(at, JOB_RESULT, new Request("http://speech.invalid/", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ id: started.id, wait: JOB_WAIT_SECONDS }),
+          ...(input.signal ? { signal: input.signal } : {}),
+        }), caller);
+        body = (await res.json().catch(() => null)) as typeof body;
+        failures = 0;
+      } catch (e) {
+        // 404: the app no longer knows the job (it restarted); asking again cannot bring it back.
+        if (e instanceof ProviderError && /HTTP 404\b/.test(e.message)) throw failure(e.message, 502, "transport");
+        if (input.signal?.aborted || ++failures >= JOB_ASK_FAILURES) throw e;
+        await sleep(JOB_PAUSE_MS);
+        continue;
+      }
+      if (body?.status === "done") return transcriptOf(this.name, body, input.language);
+      if (body?.status === "error") {
+        const code = typeof body.code === "number" ? body.code : 500;
+        const said = `${this.name}: HTTP ${code}${typeof body.detail === "string" ? `: ${body.detail.slice(0, 300)}` : ""}`;
+        // The same reading as a direct call: the app's refusal of the file keeps its status, the rest is the provider failing.
+        throw failure(said, code === 400 || code === 413 || code === 422 ? code : 502);
+      }
+      if (body?.status !== "queued" && body?.status !== "running") throw failure(`${this.name}: the job answered no status`, 502, "other");
+      // An answer that did not wait (an app that ignores `wait`) must not turn this into a tight loop.
+      if (now() - asked < JOB_PAUSE_MS) await sleep(JOB_PAUSE_MS);
+    }
   }
 
   async speak(input: SpeakInput, caller: SpeechCaller): Promise<SpeakResult> {
@@ -115,7 +182,7 @@ export class VoiceStudioAdapter implements SpeechAdapter {
       body: JSON.stringify({ text: input.text, voices: input.voices }),
       ...(input.signal ? { signal: input.signal } : {}),
     });
-    const res = await this.call("speak", req, caller);
+    const res = await this.call(this.place("speak"), "speak", req, caller);
     return { audio: await res.arrayBuffer(), contentType: res.headers.get("content-type") ?? "audio/wav" };
   }
 
@@ -167,8 +234,7 @@ export class VoiceStudioAdapter implements SpeechAdapter {
   }
 
   /** The capability call here or on the peer; a failed answer becomes a ProviderError with its status and words. */
-  private async call(cap: "transcribe" | "speak", req: Request, caller: SpeechCaller): Promise<Response> {
-    const at = this.place(cap);
+  private async call(at: Place, cap: string, req: Request, caller: SpeechCaller): Promise<Response> {
     const res = "local" in at
       ? await this.deps.callLocal(req, caller.app, this.spec.app, cap)
       : await this.deps.callRemote(req, caller.app, at.peer, this.spec.app, cap);
