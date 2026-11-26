@@ -207,7 +207,7 @@ Keep the desktop client in this repository so bridge changes and compatibility t
 
 ```text
 desktop/macos/
-  project.yml            XcodeGen spec; AISpace.xcodeproj is generated from it
+  project.yml            XcodeGen spec; AISpace.xcodeproj is generated from it (git-ignored)
   AISpace/
     AISpaceApp.swift     app, main window (close hides it), menu bar, menus, Services, aispace:// links
     AppModel.swift       connections, catalogue, screens, web sessions, conversations, link routing
@@ -260,7 +260,7 @@ bun run desktop:build    # desktop/macos/build/AISpace.app, ad-hoc signed
 open desktop/macos/build/AISpace.app
 CONFIG=debug bun run desktop:build                       # Web Inspector on, state changes logged
 SIGN_IDENTITY="Developer ID Application: …" bun run desktop:build   # then notarize
-bun run desktop:xcode    # regenerate AISpace.xcodeproj after adding or moving files
+bun run desktop:xcode    # generate AISpace.xcodeproj (git-ignored): after a clone, after adding or moving files
 ```
 
 These commands are not part of `bun run check`; servers and Linux never need them. The macOS 27 Command Line Tools declare SwiftUI's `@State` as a macro whose plugin only Xcode ships, so view state lives in small `ObservableObject`s, and native strings use `.strings` tables because compiling a String Catalog needs Xcode.

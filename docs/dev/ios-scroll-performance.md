@@ -63,10 +63,11 @@ What is not established: the render and GPU figures after the changes. The devic
 
 ## Measuring again
 
-A debug build scrolls by itself: `AISPACE_SCROLL_BENCH=<seconds>` (`AISpace/DebugLaunch.swift`) moves the page on show up and down for the first half of the time, then swipes through the pages, and logs the frames the main thread delivered late. Build with optimizations on and the launch switches kept:
+A debug build scrolls by itself: `AISPACE_SCROLL_BENCH=<seconds>` (`AISpace/DebugLaunch.swift`) moves the page on show up and down for the first half of the time, then swipes through the pages, and logs the frames the main thread delivered late. Build with optimizations on and the launch switches kept (`bun run ios:xcode` generates the project first):
 
 ```bash
 export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+bun run ios:xcode
 xcodebuild -project mobile/ios/AISpace.xcodeproj -scheme AISpace -configuration Release \
   -destination 'id=<device udid>' DEVELOPMENT_TEAM=<team> \
   'SWIFT_ACTIVE_COMPILATION_CONDITIONS=DEBUG' -allowProvisioningUpdates build

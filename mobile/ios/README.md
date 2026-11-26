@@ -31,7 +31,7 @@ The Mac client lives in `desktop/macos/` on `feat/macos-desktop`; this branch st
 
 ```text
 mobile/ios/
-  project.yml            XcodeGen spec; AISpace.xcodeproj is generated from it
+  project.yml            XcodeGen spec; AISpace.xcodeproj is generated from it (git-ignored)
   AISpace/
     AISpaceApp.swift     app, scene delegate (quick actions), aispace:// links
     AppModel.swift       saved Spaces, sessions, what is on show, link routing
@@ -84,7 +84,7 @@ Two rules keep the sources compiling without Xcode, as in the Mac client: no `@S
 ### With Xcode (required for the Simulator and a device)
 
 ```bash
-bun run ios:xcode    # regenerate AISpace.xcodeproj after adding or moving files
+bun run ios:xcode    # generate AISpace.xcodeproj (git-ignored): after a clone, after adding or moving files
 bun run ios:test:sim # the whole AISpaceTests suite in the iOS Simulator (scripts/test-sim.sh)
 xcodebuild -project mobile/ios/AISpace.xcodeproj -scheme AISpace \
   -destination 'platform=iOS Simulator,name=iPhone 16' build test
@@ -320,7 +320,7 @@ Keychain access group `$(AppIdentifierPrefix)dev.ai-space.ios.share`. Do not rep
 prefix with an unprefixed string. `bun run ios:xcode` generates and embeds the extension.
 The ad-hoc Catalyst build does not package the extension or have these sharing entitlements.
 
-With the developer account signed in to Xcode. The team id is per machine and stays out of the repository: put `DEVELOPMENT_TEAM = <your-team-id>` in `mobile/ios/Config/Local.xcconfig` (git-ignored, included by `Config/Signing.xcconfig`), and both Xcode and `xcodebuild` pick it up, so `bun run ios:xcode` no longer loses it. Passing `DEVELOPMENT_TEAM=` on the command line, as below, works as well.
+With the developer account signed in to Xcode, and `bun run ios:xcode` run first to generate the project. The team id is per machine and stays out of the repository: put `DEVELOPMENT_TEAM = <your-team-id>` in `mobile/ios/Config/Local.xcconfig` (git-ignored, included by `Config/Signing.xcconfig`), and both Xcode and `xcodebuild` pick it up, so `bun run ios:xcode` no longer loses it. Passing `DEVELOPMENT_TEAM=` on the command line, as below, works as well.
 
 
 ```bash

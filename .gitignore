@@ -8,6 +8,9 @@ Thumbs.db
 *.swp
 xcuserdata/
 *.xcuserstate
+# Generated from project.yml by `bun run ios:xcode` / `bun run desktop:xcode`
+mobile/ios/AISpace.xcodeproj/
+desktop/macos/AISpace.xcodeproj/
 
 # Env / secrets
 .env

@@ -47,6 +47,9 @@ for p in "$profiles"/*.mobileprovision; do
 done
 
 "$here/scripts/swiftterm.sh"
+# The Xcode project is generated from project.yml and git-ignored (`bun run ios:xcode`).
+command -v xcodegen >/dev/null 2>&1 || { echo "xcodegen not found: brew install xcodegen" >&2; exit 1; }
+xcodegen generate --spec "$here/project.yml" --quiet
 
 derived="$here/build/device"
 xcodebuild -project "$here/AISpace.xcodeproj" -scheme AISpace -configuration Debug \

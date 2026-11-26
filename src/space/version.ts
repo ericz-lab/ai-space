@@ -4,7 +4,8 @@ import { SPACE_ROOT } from "./config.ts";
 /**
  * The one version of ai-space (docs/editions.md): `package.json` holds it, and every edition is
  * built from it. The native projects cannot read `package.json`, so they carry a copy that
- * `bun run set-version <x.y.z>` rewrites and `version.test.ts` checks.
+ * `bun run set-version <x.y.z>` rewrites and `version.test.ts` checks. The Xcode projects are
+ * generated from `project.yml` and not tracked, so their copy is the one in `project.yml`.
  */
 
 export const VERSION_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
@@ -22,9 +23,7 @@ export type VersionCopy = { path: string; pattern: RegExp };
 export const VERSION_COPIES: VersionCopy[] = [
   { path: "desktop/macos/AISpace/Info.plist", pattern: /(<key>CFBundleShortVersionString<\/key>\s*<string>)([^<$]+)(<\/string>)/ },
   { path: "desktop/macos/project.yml", pattern: /(MARKETING_VERSION: )(\S+)()/ },
-  { path: "desktop/macos/AISpace.xcodeproj/project.pbxproj", pattern: /(MARKETING_VERSION = )([^;]+)(;)/g },
   { path: "mobile/ios/project.yml", pattern: /(MARKETING_VERSION: )(\S+)()/ },
-  { path: "mobile/ios/AISpace.xcodeproj/project.pbxproj", pattern: /(MARKETING_VERSION = )([^;]+)(;)/g },
   { path: "mobile/ios/scripts/build.sh", pattern: /(s\/\$\(MARKETING_VERSION\)\/)([^/]+)(\/)/ },
   { path: "mobile/android/app/build.gradle.kts", pattern: /(versionName = ")([^"]+)(")/ },
   { path: "desktop/windows/Directory.Build.props", pattern: /(<Version>)([^<]+)(<\/Version>)/ },
