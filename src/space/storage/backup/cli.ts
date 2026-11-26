@@ -1,5 +1,6 @@
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
+import { parsePackageManifest } from "../../packages/manifest.ts";
 import { MANIFEST_FILE, loadManifest } from "../../scheduler/manifest.ts";
 import { runStopCommand } from "../../panel/index.ts";
 import type { Workspace } from "../../workspace.ts";
@@ -179,7 +180,7 @@ async function findManifest(app: string, ctx: Pick<CliContext, "appDirs">): Prom
   let unreadable = false;
   for (const dir of await ctx.appDirs()) {
     try {
-      const m = await loadManifest(dir);
+      const m = await readManifest(dir);
       if (m.app === app) return { found: { dir, backup: m.backup }, unreadable };
     } catch {
       // Another app's broken manifest is not this app's problem, unless this app's is the one that broke.
@@ -189,12 +190,25 @@ async function findManifest(app: string, ctx: Pick<CliContext, "appDirs">): Prom
   return { unreadable };
 }
 
+/** An app's name and `backup:` section, from a checkout's manifest or an installed package's (spec 2). */
+async function readManifest(dir: string): Promise<{ app: string; backup?: unknown }> {
+  try {
+    return await loadManifest(dir);
+  } catch (e) {
+    const file = Bun.file(join(dir, MANIFEST_FILE));
+    if (!(await file.exists())) throw e;
+    const text = await file.text();
+    if (!/^spec:\s*2\s*$/m.test(text)) throw e;
+    return parsePackageManifest(text);
+  }
+}
+
 /** `space` plus every registered app (a directory with a manifest) that does not opt out: the apps that have a backup task. */
 async function backedUpApps(ctx: CliContext): Promise<string[]> {
   const apps = new Set([SPACE_APP]);
   for (const dir of await ctx.appDirs()) {
     try {
-      const m = await loadManifest(dir);
+      const m = await readManifest(dir);
       const spec: BackupSpec = parseBackupSpec(m.backup);
       if (spec.enabled) apps.add(m.app);
     } catch {

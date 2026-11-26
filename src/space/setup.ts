@@ -1068,7 +1068,6 @@ export function realDeps(io: SetupIO, ws: Workspace, env: Record<string, string 
     hostname: () => hostname().split(".")[0]!.toLowerCase(),
     findMagpie: () => findMagpie({ env }),
     async service() {
-      // Imported here: service.ts reads local.ts, which reads this file.
       const { realServiceDeps, serviceRestart, serviceStatus } = await import("./service.ts");
       const d = { ...realServiceDeps(), env: { ...env, SPACE_HOME: ws.home } };
       const s = await serviceStatus(d);

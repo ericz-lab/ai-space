@@ -1,12 +1,9 @@
 #!/bin/sh
-# The Mac downloads (docs/release.md), in a .dmg with an Applications link, under dist/ at the
+# The Mac download (docs/release.md), in a .dmg with an Applications link, under dist/ at the
 # repository root:
 #
 #   ai-space-desktop-<version>-macos-<arch>.dmg           build/AISpace.app from build.sh: the
 #                                                         client, what a release publishes
-#   ai-space-local-<version>-macos-<arch>.dmg             EDITION=local APP=<AI Space.app> from
-#                                                         release/local.ts (already signed inside);
-#                                                         not published, built on request
 #   ...-unsigned.dmg                                      no Developer ID given: for testing only,
 #                                                         Gatekeeper blocks it for everyone else
 #
@@ -29,21 +26,10 @@ if [ "$SIGNED" = yes ] && { [ -z "${APPLE_ID:-}" ] || [ -z "${APPLE_TEAM_ID:-}" 
   exit 1
 fi
 
-EDITION=${EDITION:-client}
-case "$EDITION" in
-  client) CONFIG=release ./scripts/build.sh; APP=build/AISpace.app ;;
-  local)
-    [ -n "${APP:-}" ] || { echo "EDITION=local needs APP=<path to AI Space.app> from release/local.ts" >&2; exit 2; }
-    case "$APP" in /*) ;; *) APP="$ROOT/$APP" ;; esac
-    [ -f "$APP/Contents/Resources/space/RELEASE.json" ] || { echo "$APP carries no Local release" >&2; exit 1; }
-    codesign --verify --strict --deep "$APP"
-    ;;
-  *) echo "EDITION must be client or local" >&2; exit 2 ;;
-esac
+CONFIG=release ./scripts/build.sh
+APP=build/AISpace.app
 
-PRODUCT=desktop
-[ "$EDITION" = local ] && PRODUCT=local
-NAME="ai-space-$PRODUCT-$VERSION-macos-$ARCH"
+NAME="ai-space-desktop-$VERSION-macos-$ARCH"
 [ "$SIGNED" = yes ] || NAME="$NAME-unsigned"
 mkdir -p "$ROOT/dist"
 DMG="$ROOT/dist/$NAME.dmg"

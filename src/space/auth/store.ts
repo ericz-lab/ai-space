@@ -49,8 +49,8 @@ type SessionRow = { id: number; created_at: number; expires_at: number; last_see
 const session = (r: SessionRow): Session => ({ id: r.id, createdAt: r.created_at, expiresAt: r.expires_at, lastSeenAt: r.last_seen_at, revokedAt: r.revoked_at, userAgent: r.user_agent });
 
 /**
- * A device credential: a long-lived bearer token one client holds for itself (the Local edition's
- * Mac app), made on the machine and revocable on its own. It counts as the owner.
+ * A device credential: a long-lived bearer token one client holds for itself (`space auth device-add`),
+ * made on the machine and revocable on its own. It counts as the owner.
  */
 export type Device = { id: number; name: string; createdAt: number; lastSeenAt: number | null; revokedAt: number | null };
 

@@ -10,7 +10,6 @@ import { Dictation } from "./dictation.ts";
 import { APP_ID, APP_ROOT, log, logError, path, prefs, readTextSync, t } from "./env.ts";
 import { FloatingBall } from "./floating-ball.ts";
 import { Notifier } from "./inbox.ts";
-import { LocalManager } from "./local-manager.ts";
 import { startMemoryStats } from "./memory.ts";
 import { AppModel } from "./model.ts";
 import { QuickChat } from "./quick-chat.ts";
@@ -24,18 +23,17 @@ import { MainWindow, type View } from "./window.ts";
  * With "keep running" on, closing the window hides it and notifications keep arriving.
  */
 
-export function appVersion(): { version: string; commit?: string; edition: string } {
+export function appVersion(): { version: string; commit?: string } {
   try {
-    return JSON.parse(readTextSync(path(APP_ROOT, "VERSION.json")) ?? "") as { version: string; commit?: string; edition: string };
+    return JSON.parse(readTextSync(path(APP_ROOT, "VERSION.json")) ?? "") as { version: string; commit?: string };
   } catch {
-    return { version: "dev", edition: "client" };
+    return { version: "dev" };
   }
 }
 
 export class Application {
   readonly app: any;
   private model!: AppModel;
-  private local!: LocalManager;
   private main: MainWindow | undefined;
   private quick!: QuickChat;
   private ball!: FloatingBall;
@@ -75,12 +73,11 @@ export class Application {
     Gtk.Window.set_default_icon_name(APP_ID);
 
     this.model = new AppModel();
-    this.local = new LocalManager(this.model);
     this.quick = new QuickChat(this.app, this.model, () => this.window());
     this.ball = new FloatingBall(this.app, this.model, this.quick, () => {
       const main = this.window();
       main.present();
-      showSettings(main.window, this.model, this.local, "general");
+      showSettings(main.window, this.model, "general");
     });
     // The desk pet on the desktop; the one in the window is the window's (window.ts).
     this.deskPet = new DeskPet(
@@ -110,8 +107,8 @@ export class Application {
     act("quit", () => this.app.quit(), ["<Control>q"]);
     act("quick-chat", () => this.quick.toggle(), ["<Control><Shift>space"]);
     act("dictate", () => this.dictation.toggle());
-    act("settings", () => showSettings(this.window().window, this.model, this.local), ["<Control>comma"]);
-    act("peer-settings", () => showSettings(this.window().window, this.model, this.local, "peer"));
+    act("settings", () => showSettings(this.window().window, this.model), ["<Control>comma"]);
+    act("peer-settings", () => showSettings(this.window().window, this.model, "peer"));
     act("about", () => this.about());
     // Settings › General changed the floating ball: shown or not, or its sections.
     act("floating-ball-sync", () => {
@@ -124,12 +121,6 @@ export class Application {
       this.main?.pet.sync();
     });
 
-    if (this.local.available) {
-      void this.local.refresh().then(async () => {
-        await this.local.ensureSignIn();
-        await this.local.autoUpdate();
-      });
-    }
     this.model.refreshAll();
     this.model.startPolling();
     this.ball.sync();
@@ -139,7 +130,7 @@ export class Application {
 
   private window(): MainWindow {
     if (!this.main) {
-      this.main = new MainWindow(this.app, this.model, this.local);
+      this.main = new MainWindow(this.app, this.model);
       // Keep running: closing hides the window and notifications keep arriving. Otherwise closing
       // it quits, Quick Chat and tab windows included.
       this.main.window.connect("close-request", () => {
@@ -187,7 +178,7 @@ export class Application {
           else if (name === "ball" && arg) this.ball.debug(a.slice("ball=".length));
           else if (name === "settings" && arg) {
             const [section, detail] = arg.split("/") as [Section, Detail | undefined];
-            showSettings(main.window, this.model, this.local, section, detail);
+            showSettings(main.window, this.model, section, detail);
           }
           else (name.startsWith("app.") ? this.app.lookup_action(name.slice(4)) : main.window.lookup_action(name))?.activate(null);
         }
@@ -240,7 +231,6 @@ export class Application {
       application_name: t("appName"),
       application_icon: APP_ID,
       version: v.commit ? `${v.version} (${v.commit.slice(0, 10)})` : v.version,
-      comments: v.edition === "local" ? t("localTitle") : "",
       website: "https://github.com/ericz-lab/ai-space",
     });
     dialog.present(this.window().window);

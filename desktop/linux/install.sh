@@ -4,8 +4,8 @@
 #   ~/.local/bin/ai-space              the launcher
 #   ~/.local/share/applications        the desktop entry (and the aispace:// handler)
 #   ~/.local/share/icons, metainfo     the icon and AppStream metadata
-# `install.sh --uninstall` removes those. Neither touches a Space's workspace or the Local
-# edition's background service: remove that first in Settings › This Computer.
+# `install.sh --uninstall` removes those. Neither touches a Space's workspace or an AI Space
+# installed on this computer (`space uninstall` removes that).
 # `install.sh --apparmor` (with sudo) adds an AppArmor profile that lets this app, and only it,
 # use the user namespaces WebKit's sandbox needs where the system restricts them (Ubuntu 23.10+).
 set -eu
@@ -55,7 +55,7 @@ esac
 
 missing=""
 command -v gjs >/dev/null 2>&1 || missing="$missing gjs"
-for lib in Adw-1 WebKit-6.0 Soup-3.0 Secret-1; do
+for lib in Adw-1 WebKit-6.0 Soup-3.0; do
   found=""
   for d in /usr/lib/*/girepository-1.0 /usr/lib64/girepository-1.0 /usr/lib/girepository-1.0; do
     [ -f "$d/$lib.typelib" ] && found=1 && break
@@ -64,9 +64,9 @@ for lib in Adw-1 WebKit-6.0 Soup-3.0 Secret-1; do
 done
 if [ -n "$missing" ]; then
   echo "AI Space needs:$missing" >&2
-  echo "  Debian/Ubuntu: sudo apt install gjs gir1.2-adw-1 gir1.2-webkit-6.0 gir1.2-soup-3.0 gir1.2-secret-1" >&2
-  echo "  Fedora:        sudo dnf install gjs libadwaita webkitgtk6.0 libsoup3 libsecret" >&2
-  echo "  Arch:          sudo pacman -S gjs libadwaita webkitgtk-6.0 libsoup3 libsecret" >&2
+  echo "  Debian/Ubuntu: sudo apt install gjs gir1.2-adw-1 gir1.2-webkit-6.0 gir1.2-soup-3.0" >&2
+  echo "  Fedora:        sudo dnf install gjs libadwaita webkitgtk6.0 libsoup3" >&2
+  echo "  Arch:          sudo pacman -S gjs libadwaita webkitgtk-6.0 libsoup3" >&2
   exit 1
 fi
 
@@ -102,8 +102,7 @@ command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database -q
 command -v gtk-update-icon-cache >/dev/null 2>&1 && gtk-update-icon-cache -q -t "$DATA/icons/hicolor" 2>/dev/null || true
 command -v xdg-mime >/dev/null 2>&1 && xdg-mime default "$APP_ID.desktop" x-scheme-handler/aispace || true
 
-edition=$(sed -n 's/.*"edition": *"\([a-z]*\)".*/\1/p' "$DEST/VERSION.json" 2>/dev/null || true)
-echo "AI Space ($edition edition) installed. Open it from the app grid, or run: ai-space"
+echo "AI Space installed. Open it from the app grid, or run: ai-space"
 if [ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || echo 0)" = 1 ] && ! grep -qsF "$DEST/bin/ai-space-gjs" /etc/apparmor.d/ai-space; then
   echo "This system restricts user namespaces, so web pages run without WebKit's sandbox."
   echo "To turn the sandbox on: $DEST/install.sh --apparmor   (asks for your password)"

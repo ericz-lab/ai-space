@@ -229,10 +229,10 @@ Settings → Scheduler → Model usage opens a floating window. It reads the ope
 
 ## Adopting it in an app
 
-An app that has its own runner keeps it and adds one more backend, tried first when `SPACE_MODEL_URL` (ai-space's loopback address) and `SPACE_APP_TOKEN` are set:
+An app that has its own runner keeps it and adds one more backend, tried first when `SPACE_API_URL` (ai-space's loopback address) and `SPACE_APP_TOKEN` are set:
 
 ```ts
-const res = await fetch(`${process.env.SPACE_MODEL_URL}/api/model/run`, {
+const res = await fetch(`${process.env.SPACE_API_URL}/api/model/run`, {
   method: "POST",
   headers: { "content-type": "application/json", authorization: `Bearer ${process.env.SPACE_APP_TOKEN}` },
   body: JSON.stringify({ prompt, model: "haiku", tag: "translate", timeoutMs: 120_000 }),

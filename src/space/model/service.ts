@@ -277,7 +277,7 @@ export class ModelService {
     return { outcome, call };
   }
 
-  /** The calls in flight (docs/local.md#updates). */
+  /** The calls in flight (GET /api/space/activity, src/space/activity.ts). */
   inFlight(): { app: string; tag: string; model: string; startedAt: number }[] {
     return [...this.inflight.values()].map((e) => ({ app: e.app, tag: e.tag, model: e.model, startedAt: e.startedAt }));
   }

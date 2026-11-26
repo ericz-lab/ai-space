@@ -1,9 +1,9 @@
 import { isOperator } from "./auth.ts";
 
 /**
- * What the Space is doing right now, so an update can wait for it instead of cutting it off
- * (docs/local.md#updates). A restart drains this work anyway (SIGTERM, SPACE_DRAIN_SECONDS);
- * this lets the one restarting choose a moment when there is nothing to drain.
+ * What the Space is doing right now, so an update can wait for it instead of cutting it off. A
+ * restart drains this work anyway (SIGTERM, SPACE_DRAIN_SECONDS); this lets the one restarting
+ * choose a moment when there is nothing to drain. The retired Local edition's app was its caller.
  *
  *   GET /api/space/activity   owner: { busy, items: [{ kind, label, since? }] }
  */

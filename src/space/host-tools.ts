@@ -4,8 +4,8 @@ import { win32 } from "node:path";
 /**
  * Programs ai-space may start on the host, found deliberately. On a Mac without the Command Line
  * Tools, `/usr/bin/git`, `/usr/bin/python3` and a few others exist but are stubs: running one opens
- * a dialog offering to install the tools and then fails. The Local edition runs on such a Mac, so a
- * stub counts as missing and is never started (docs/editions.md#ai-space-local).
+ * a dialog offering to install the tools and then fails. ai-space may run on such a Mac, so a stub
+ * counts as missing and is never started.
  */
 
 /** The `/usr/bin` programs that are Command Line Tools stubs on macOS. */
@@ -55,8 +55,9 @@ export function whichUsable(name: string, opts: { PATH?: string } = {}): string 
 
 /**
  * Where agent CLIs and their package managers put programs for one user. A process started by
- * launchd (the Local edition's background service) gets only `/usr/bin:/bin:/usr/sbin:/sbin`, not a
- * terminal's shell profile, so `claude`, `codex` and the tools they call would not be found.
+ * launchd (the Server's LaunchAgent, src/space/service.ts `launchPath`) gets only
+ * `/usr/bin:/bin:/usr/sbin:/sbin`, not a terminal's shell profile, so `claude`, `codex` and the
+ * tools they call would not be found without them.
  */
 export function userToolDirs(home: string, platform: string = process.platform): string[] {
   if (platform === "win32") {

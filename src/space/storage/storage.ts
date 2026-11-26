@@ -294,6 +294,11 @@ export class StorageService {
   private async provisionPostgres(app: string, name: string, recordedUrl?: string): Promise<string> {
     if (!this.pgAdminUrl) throw new Error(`storage: ${app}/${name} needs postgres but SPACE_PG_ADMIN_URL is not set`);
     const ident = `${app}_${name}`.toLowerCase().replace(/[^a-z0-9_]+/g, "_").slice(0, 63);
+    // Two declarations can fold to one identifier (`my-app`/`main` and `my`/`app-main`, a long name cut
+    // at 63): the second would share the first one's database and reset its role's password.
+    const others = (await this.db.sql`SELECT app, name, url FROM storage_databases WHERE backend = ${"postgres"} AND NOT (app = ${app} AND name = ${name})`) as { app: string; name: string; url: string }[];
+    const taken = others.find((o) => postgresRole(o.url) === ident);
+    if (taken) throw new Error(`storage: ${app}/${name} would use the postgres database ${ident}, which already belongs to ${taken.app}/${taken.name}; rename one of them`);
     const a = new URL(this.pgAdminUrl);
     const urlWith = (password: string) =>
       `postgres://${encodeURIComponent(ident)}:${encodeURIComponent(password)}@${a.hostname}${a.port ? `:${a.port}` : ""}/${ident}`;
@@ -499,6 +504,15 @@ function assertName(v: string, what: string): void {
 }
 
 /** The password in a recorded postgres URL, when it belongs to `role`. */
+/** The role (and database) a recorded postgres URL names. */
+function postgresRole(url: string): string | undefined {
+  try {
+    return decodeURIComponent(new URL(url).username) || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function recordedPassword(url: string | undefined, role: string): string | undefined {
   if (!url) return undefined;
   try {

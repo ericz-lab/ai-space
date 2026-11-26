@@ -172,12 +172,17 @@ export function createPeerRoutes(opts: PeerApiOptions): Routes {
    * caller is the owner or the app of the same name. Nothing of the caller's credentials travels: the owning
    * side gets the path, `accept` and a socket's subprotocol, and grants or refuses by its own connection grant.
    */
+  /** Over a connection, by grant or by a connection peer's `apps` scope: the owner, or the app of the same name. */
+  const foreignCaller = async (req: Request, app: string): Promise<Response | undefined> => {
+    if (!opts.callerApp) return undefined;
+    const caller = await opts.callerApp(req);
+    return caller !== null && caller !== app ? error(403, "an app may reach only the app of its own name on a connected Space") : undefined;
+  };
+
   const connectionProxy = async (req: Request & { params: Record<string, string> }, server: Bun.Server<unknown>, connection: string): Promise<Response | undefined> => {
     const peer = req.params.peer ?? "", app = req.params.app ?? "";
-    if (opts.callerApp) {
-      const caller = await opts.callerApp(req);
-      if (caller !== null && caller !== app) return error(403, "an app may reach only the app of its own name on a connected Space");
-    }
+    const refused = await foreignCaller(req, app);
+    if (refused) return refused;
     const u = new URL(req.url);
     const rest = u.pathname.replace(/^\/api\/peers\/[^/]+\/apps\/[^/]+\/proxy/, "");
     if (!rest.startsWith("/api/")) return error(404, "only the app's /api/ paths are proxied");
@@ -309,11 +314,16 @@ export function createPeerRoutes(opts: PeerApiOptions): Routes {
     // An app on this hub reading a peer app's API; the peer bounds the call with its own timeout.
     // A legacy peer of that name wins; otherwise a connection whose Space has that label and shares the app.
     "/api/peers/:peer/apps/:app/proxy/*": {
-      GET: (req, server) => {
+      GET: async (req, server) => {
         const named = hub.get(req.params.peer ?? "");
         const legacy = named && !named.config?.connection;
         const connection = !legacy ? opts.connections?.find(req.params.peer ?? "", req.params.app ?? "") : undefined;
         if (connection) return connectionProxy(req, server, connection);
+        // A connection peer reached through its `apps` scope keeps the connection's caller rule.
+        if (named && !legacy) {
+          const refused = await foreignCaller(req, req.params.app ?? "");
+          if (refused) return refused;
+        }
         if (!wantsWebSocket(req)) return proxy(PROXY_TIMEOUT_MS)(req, server);
         // A socket carries no token here, like the panel routes; an app's server sends no Origin,
         // and a page on another site must not reach a peer app through the operator's browser.

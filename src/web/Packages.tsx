@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { getJson, sendJson } from "./api.ts";
 import { useLang } from "./i18n.ts";
 import { pollWhileVisible } from "./poll.ts";
+import { requestId } from "./shortcuts.ts";
 
 type Runtime = { state: string; kind: string; mode?: string; declaredMode?: string; unit?: string; pid?: number; startedAt?: string; error?: string };
 type App = { app: string; title: string; version: string; url: string; page?: boolean; state?: string; runtime?: Runtime; offline?: { features: string[]; online: string[] }; sourceIncluded?: boolean };
@@ -70,7 +71,7 @@ export default function Packages({ onChange }: { onChange?: () => void }) {
   };
   const upload = async () => {
     if (!file || pending) return;
-    const operation = { id: crypto.randomUUID(), upgrade }; remember(operation);
+    const operation = { id: requestId(), upgrade }; remember(operation);
     setProgress(t("packages.working"));
     const response = await fetch("/api/panel/packages", { method: "POST", body: file, headers: { "content-type": "application/octet-stream", "idempotency-key": operation.id, ...(unsigned ? { "x-space-allow-unsigned": "true" } : {}), ...(upgrade ? { "x-space-upgrade": "true" } : {}) } });
     const result = await response.json() as { ok: boolean; error?: string; change?: { error?: string; state?: string }; operation?: { error?: string; state?: string } };

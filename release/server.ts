@@ -27,7 +27,7 @@ export function included(path: string): boolean {
   return INCLUDE.some((p) => (p.endsWith("/") ? path.startsWith(p) : path === p));
 }
 
-export type ReleaseInfo = { product: "ai-space"; edition: "server" | "local"; version: string; commit: string; os: string; arch: string; bun: string };
+export type ReleaseInfo = { product: "ai-space"; edition: "server"; version: string; commit: string; os: string; arch: string; bun: string };
 
 /** The system in an archive's name: `linux`, `macos` or `windows`. */
 export const releaseOs = (platform: string = process.platform): string => (platform === "darwin" ? "macos" : platform === "win32" ? "windows" : platform);
@@ -47,16 +47,16 @@ export async function run(cmd: string[], cwd: string): Promise<string> {
 }
 
 /**
- * The release tree both editions run from, at `stage`: the committed files, production
- * dependencies, `runtime/bun` and `RELEASE.json`. The Server puts `install.sh` beside it and tars
- * it; the Local edition puts it inside the Mac app (release/local.ts).
+ * The release tree the Server runs from, at `stage`: the committed files, production
+ * dependencies, `runtime/bun` and `RELEASE.json`. `buildServer` puts the installer beside it and
+ * packs it.
  */
-export async function stageRelease(opts: { root?: string; stage: string; edition: ReleaseInfo["edition"] }): Promise<ReleaseInfo> {
+export async function stageRelease(opts: { root?: string; stage: string }): Promise<ReleaseInfo> {
   const root = opts.root ?? SPACE_ROOT;
   const os = releaseOs();
   const info: ReleaseInfo = {
     product: "ai-space",
-    edition: opts.edition,
+    edition: "server",
     version: await readVersion(root),
     commit: (process.env.GITHUB_SHA || (await run(["git", "rev-parse", "HEAD"], root))).trim(),
     os,
@@ -88,7 +88,7 @@ export async function buildServer(opts: { root?: string; out: string }): Promise
   const os = releaseOs();
   const name = archiveName({ version: await readVersion(root), os, arch: process.arch });
   const stage = join(out, name);
-  await stageRelease({ root, stage, edition: "server" });
+  await stageRelease({ root, stage });
   // Each system's archive carries the installer that system can run.
   const installer = process.platform === "win32" ? "install.ps1" : "install.sh";
   await cp(join(root, "release", installer), join(stage, installer));

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { detectPtyBackend, ptyHelper, spawnPty } from "./pty.ts";
 
-// The C forkpty helper the Local edition ships as runtime/space-pty, built here with the host's C
+// The C forkpty helper (runtime/space-pty when a release carries it), built here with the host's C
 // compiler; skipped where there is none.
 
 // A cold CI runner can take longer than the default 5 s to start the compiler in beforeAll.

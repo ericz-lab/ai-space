@@ -34,7 +34,6 @@ space peer    ls | rename | migrate
 space connection ls | create | grant | enable | disable | rm
 space router  show | sync
 space api     <METHOD> <path> [body]  the escape hatch: one raw call with the token added
-space local   status | install | start | stop | restart | remove-service
 space service status | install | start | stop | restart | remove | workspace
 space upgrade | uninstall | open
 space init | setup | start | install-defaults | codex-upgrade
@@ -69,7 +68,6 @@ Rules:
 | --- | --- | --- |
 | `space auth status` / `init [--password-stdin]` / `reset-password [--password-stdin]` / `revoke-sessions [--yes]` / `device-add <name>` / `devices` / `device-revoke <id> [--yes]` | the owner's password, sessions and device credentials of the built-in sign-in ([auth.md](auth.md)); the password is asked without echo or read from stdin, never an argument | disk (`space.db`), works without ai-space |
 | `space app create NAME [--title T] [--description D]` / `space app build NAME` | apps made inside the Space: the source in `app-src/NAME` from the template, packed and installed or upgraded ([app-studio.md](app-studio.md)) | `/api/studio/*` |
-| `space local status [--claude P] [--codex P] [--dsh P]` / `install [--migrate] [--device <name>] [--default-model <runtime/tier>] [--wait\|--now] [--claude P] [--codex P] [--dsh P]` / `start` / `stop` / `restart` / `remove-service` | the Local edition's installation on this Mac, what its app runs; `--claude`/`--codex`/`--dsh` name agent CLIs over the search, a first install needs `--default-model`, and an upgrade while the Space is busy is refused unless `--wait` (until idle) or `--now` (drain it) ([local.md](local.md)) | disk and launchd, works without ai-space |
 | `space service status` / `install [--root DIR] [--bun PATH]` / `start` / `stop` / `restart` / `remove` / `workspace` | ai-space's own background service on this machine: the systemd user unit on Linux, the LaunchAgent on a Mac; `install` is what `deploy/install.sh` runs, `restart` is for after an `.env` edit ([release.md](release.md#the-background-service)) | disk and systemd or launchd, works without ai-space |
 | `space upgrade [--version X] [--check] [--force]` / `space uninstall [--workspace] [--yes] [--dry-run]` | a release installation: install the newest release over it (rollback when it does not answer), or remove the services, the `space` command and the program; the workspace stays unless `--workspace` ([release.md](release.md#one-command-install)) | the release's files, disk, the service manager |
 | `space open [--print]` | open the panel in the browser, or print its address | none |
@@ -164,7 +162,7 @@ src/cli/*.test.ts         every verb: the call it makes, the table it prints, th
 
 Install: `deploy/install.sh` links `~/.local/bin/space` to `bin/space` of the checkout (the unit and the profile already put `~/.local/bin` on `PATH`, [install.md](install.md) step 1). `package.json` has `"bin": { "space": "bin/space" }`, so a laptop checkout is `bun link` away, and `bun run space …` works without it. The generated workspace `AGENTS.md` ([guide.ts](../src/space/guide.ts)) shows the `space` spellings, the `notify` and `space-app` skills lead with them, and the older documents that still say `bun src/index.ts …` are not wrong: those words are aliases.
 
-URL and token resolution follows what the process already has. URL: `--url`, then `SPACE_API_URL` (set in a task's command and in every app's `space.env`), then `SPACE_HOST` and `SPACE_PORT` from the workspace `.env`, then `http://127.0.0.1:8700`. Token: `--token`, then `SPACE_APP_TOKEN` (a task's command), then `SPACE_API_TOKEN` from the environment or the workspace `.env`. The CLI reads that `.env` only for these values and only when they are not already set, so a run from anywhere on the machine works without `cd`.
+URL and token resolution follows what the process already has. URL: `--url`, then `SPACE_API_URL` (set in a task's command and in every app's `space.env`), then `SPACE_HOST` and `SPACE_PORT` from the workspace `.env`, then `http://127.0.0.1:8700`. Token: `--token`, then `SPACE_API_TOKEN` from the environment or the workspace `.env`, then, for a space on loopback under `SPACE_AUTH=builtin`, `<workspace>/run/operator-token`; `SPACE_APP_TOKEN` (a task's command) is presented only on the routes that take an app's identity. A `--url` that names another machine never gets the workspace `.env`'s token: pass `--token`, or set `SPACE_API_TOKEN` for that call. The CLI reads that `.env` only for these values and only when they are not already set, so a run from anywhere on the machine works without `cd`.
 
 ## What shipped
 

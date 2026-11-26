@@ -3,9 +3,9 @@ import { closeSync, existsSync, mkdirSync, openSync } from "node:fs";
 import { join } from "node:path";
 
 /**
- * One Space service per workspace (docs/editions.md#ai-space-local). `start` takes an exclusive
+ * One Space service per workspace (docs/release.md#the-background-service). `start` takes an exclusive
  * `flock` (on Windows, a handle opened with no sharing) on `<workspace>/run/service.lock` for the life of the process; a second service on the
- * same workspace, from any edition or launcher, finds it held and refuses to boot instead of
+ * same workspace, from any launcher, finds it held and refuses to boot instead of
  * starting a second scheduler. The kernel drops the lock when the process ends, however it ends,
  * so a crash never leaves a stale lock. `run/service.json` says who holds it, for the message.
  */

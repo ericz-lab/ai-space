@@ -1,7 +1,7 @@
 /*
  * pty_helper.py in C, for a machine with no usable python3: a clean Mac without the Command Line
- * Tools, where /usr/bin/python3 only offers to install them. The Local edition ships it built as
- * runtime/space-pty (release/local.ts). Same protocol, same exit status:
+ * Tools, where /usr/bin/python3 only offers to install them. src/space/terminal/pty.ts uses it when
+ * a release carries it built as runtime/space-pty. Same protocol, same exit status:
  *
  *   space-pty <command> [args...]      PTY_COLS, PTY_ROWS: the first size
  *   stdin   frames: kind (1 byte), length (4 bytes big-endian), payload

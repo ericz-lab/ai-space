@@ -49,7 +49,6 @@ cp AISpace/Info.plist "$APP/Contents/Info.plist"
 # The release pipeline numbers each build (CFBundleVersion); the version itself is the plist's.
 if [ -n "${BUILD_NUMBER:-}" ]; then plutil -replace CFBundleVersion -string "$BUILD_NUMBER" "$APP/Contents/Info.plist"; fi
 cp AISpace/Resources/AppIcon.icns AISpace/Resources/Logo.png "$APP/Contents/Resources/"
-cp AISpace/Resources/Claude.svg AISpace/Resources/Codex.svg AISpace/Resources/AgentIcons-LICENSE.txt "$APP/Contents/Resources/"
 cp "$PET_SHEET" "$APP/Contents/Resources/"
 # shellcheck disable=SC2086
 cp $BUILTIN_ICONS "$APP/Contents/Resources/"

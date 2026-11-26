@@ -1,20 +1,12 @@
 import SwiftUI
 
-/// The window with no saved Space. The Local edition sets up the service it carries
-/// (LocalViews.swift); the desktop app offers two entries, the AI Space on this Mac (installed
-/// first when there is none, behind one progress bar) or one on another machine
-/// (Services/FirstLaunch.swift).
+/// The window with no saved Space: two entries, the AI Space on this Mac (installed first when
+/// there is none, behind one progress bar) or one on another machine (Services/FirstLaunch.swift).
 struct FirstLaunchView: View {
     @ObservedObject var model: AppModel
 
     var body: some View {
-        Group {
-            if model.local.available {
-                LocalSetupView(model: model, local: model.local)
-            } else {
-                WelcomeView(model: model, first: model.firstLaunch)
-            }
-        }
+        WelcomeView(model: model, first: model.firstLaunch)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         // The window's ground: a range of mountains in faint binary digits along the bottom.
         .background(alignment: .bottom) { RidgeView().frame(height: 200) }

@@ -142,7 +142,6 @@ struct SettingsPage: View {
         switch section {
         case .general:
             spaces
-            if model.local.available { LocalSettingsSection(model: model, local: model.local) }
             general
             FloatingBallSettings(connection: connection, loader: loader, prefs: prefs)
             DeskPetSettings(prefs: prefs)

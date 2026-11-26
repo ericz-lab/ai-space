@@ -3,8 +3,9 @@ import { mkdir, mkdtemp, realpath, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SPACE_ROOT } from "./config.ts";
-import { MANAGED_BY, OWNERSHIP_FILE } from "./local.ts";
 import {
+  LOCAL_MANAGED_BY,
+  OWNERSHIP_FILE,
   SERVER_LABEL,
   SERVER_PLIST_HEAD,
   SERVER_UNIT,
@@ -108,7 +109,8 @@ describe("the LaunchAgent", () => {
     expect(text).toContain(`<key>Label</key>${plistString(SERVER_LABEL)}`);
     expect(text).toContain(`    ${plistString(u.bun)}\n    ${plistString(join(u.root, "src", "index.ts"))}\n  </array>`);
     expect(text).toContain("<key>SPACE_HOME</key><string>/Users/u/My Space &amp; co</string>");
-    expect(text).toContain(`<key>PATH</key><string>${u.root}/runtime:${join("/Users/u", ".bun", "bin")}:${join("/Users/u", ".local", "bin")}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>`);
+    // The user tool directories (host-tools.ts) where agent CLIs are installed, which launchd leaves out.
+    expect(text).toContain(`<key>PATH</key><string>${u.root}/runtime:/Users/u/.bun/bin:/Users/u/.local/bin:/Users/u/.claude/local:/Users/u/.npm-global/bin:/Users/u/.volta/bin:/Users/u/.cargo/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>`);
     expect(text).toContain(`<key>StandardOutPath</key><string>${join("/Users/u/My Space &amp; co", "logs", "space.log")}</string>`);
     expect(text).toContain("<key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>");
     // Not one of the apps' LaunchAgents: the supervisor's sweep never takes it for its own.
@@ -177,21 +179,17 @@ describe("install", () => {
     expect(await Bun.file(join(mac.units, `${SERVER_LABEL}.plist`)).exists()).toBe(false);
   });
 
-  test("leaves a workspace of the AI Space app alone; restart drives the app's service", async () => {
-    const { d, ran, ws, units } = await deps("linux", undefined, { SPACE_LOCAL_AGENTS: "" });
+  test("leaves a workspace of the retired Local edition's app alone", async () => {
+    const { d, ws, units } = await deps("linux");
     await mkdir(ws, { recursive: true });
-    await Bun.write(join(ws, OWNERSHIP_FILE), JSON.stringify({ managedBy: MANAGED_BY, installedAt: "2026-01-01T00:00:00Z", version: "1.0.0", release: "1.0.0-abc" }));
+    await Bun.write(join(ws, OWNERSHIP_FILE), JSON.stringify({ managedBy: LOCAL_MANAGED_BY, installedAt: "2026-01-01T00:00:00Z", version: "1.0.0", release: "1.0.0-abc" }));
     expect(serviceInstall(d)).rejects.toMatchObject({ code: "local-edition" });
     expect(serviceRemove(d)).rejects.toMatchObject({ code: "local-edition" });
     expect(planUninstall(d)).rejects.toMatchObject({ code: "local-edition" });
     expect(await Bun.file(join(units, SERVER_UNIT)).exists()).toBe(false);
-    // The app's unit lives where the app wrote it; here that is the test's directory.
-    const local = { ...d, env: { ...d.env, SPACE_LOCAL_AGENTS: units } };
-    await mkdir(units, { recursive: true });
-    await Bun.write(join(units, "ai-space-local.service"), "[Unit]\n");
-    const s = await serviceRestart(local);
-    expect(ran).toContain("systemctl --user restart -- ai-space-local.service");
-    expect(s).toMatchObject({ kind: "local", name: "ai-space-local.service", logs: "journalctl --user -u ai-space-local" });
+    // Another file of that name is not the app's mark.
+    await Bun.write(join(ws, OWNERSHIP_FILE), JSON.stringify({ managedBy: "someone-else" }));
+    expect((await serviceInstall(d)).installed).toBe(true);
   });
 });
 

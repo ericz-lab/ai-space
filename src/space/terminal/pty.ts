@@ -8,8 +8,8 @@ import { whichUsable } from "../host-tools.ts";
  * handle: `Bun.Terminal` where the runtime has it, and otherwise a small
  * wrapper around `forkpty`: `pty_helper.py` on the standard `pty` module,
  * which every Linux server has, or the same program in C (`pty_helper.c`,
- * shipped built as `runtime/space-pty` by the Local edition, for a Mac with
- * no working python3). Windows has no `forkpty`: there the wrapper is
+ * used when a release carries it built as `runtime/space-pty`, for a Mac
+ * with no working python3; the Server archive does not build it). Windows has no `forkpty`: there the wrapper is
  * `conpty_helper.ts`, the same protocol over a pseudoconsole (ConPTY), run by
  * this Bun as a process of its own. Output arrives as bytes; input and resizes
  * go in; a kill hangs the process up and, if it stays, kills it.
@@ -72,7 +72,7 @@ export function hasConPty(osRelease: string): boolean {
   return (major ?? 0) > 10 || ((major ?? 0) === 10 && (build ?? 0) >= 17763);
 }
 
-/** Where a release ships the built helper: `<release>/runtime/space-pty`. */
+/** Where a release would carry the built helper: `<release>/runtime/space-pty`. */
 export const BUNDLED_PTY_HELPER = resolve(import.meta.dir, "..", "..", "..", "runtime", "space-pty");
 
 /** The built forkpty helper, if one is there and executable: `SPACE_PTY_HELPER`, else the release's. */

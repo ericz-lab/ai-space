@@ -68,14 +68,30 @@ export async function createLinkApp(ws: Workspace, app: LinkApp): Promise<string
   return dir;
 }
 
+/** What a runtime is asked about a link: read it, answer with the identity fields as one JSON object. */
+export function linkPrompt(link: string): string {
+  return `Analyse this link: ${link}
+Read it with WebFetch, then output exactly one JSON object and nothing else:
+{"name":"short kebab-case name (lowercase letters, digits, dashes)","title":"display name, a few words","icon":"absolute URL of the site's own icon (<link rel=icon>, /favicon.svg or /favicon.ico, verified reachable) or, failing that, one fitting emoji","description":"one sentence saying what it is","repo":"its https clone URL if it is a code repository, else empty string","url":"the link itself if it is a page or service a browser can open, else empty string"}`;
+}
+
+/** The JSON object in a runtime's answer about a link, its name made a valid app name; the caller validates the rest. */
+export function parseLinkAnswer(text: string): Record<string, unknown> {
+  const m = text.match(/\{[\s\S]*\}/);
+  if (!m) throw new Error("the runtime returned no JSON");
+  const obj = JSON.parse(m[0]) as Record<string, unknown>;
+  if (typeof obj.name === "string") obj.name = obj.name.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^[-.]+|[-.]+$/g, "");
+  return obj;
+}
+
 /**
- * Ask the claude runtime to read a link and propose the identity fields.
+ * Ask the claude CLI directly to read a link and propose the identity fields: the fallback of a
+ * caller that has no model service at hand (the entry point passes one that goes through the
+ * space's runtimes, so a machine without claude resolves links too).
  * Returns whatever JSON object the answer contains; the caller validates it.
  */
 export async function resolveLinkWithAgent(link: string, opts: { bin?: string[]; timeoutMs?: number } = {}): Promise<Record<string, unknown>> {
-  const prompt = `Analyse this link: ${link}
-Read it with WebFetch, then output exactly one JSON object and nothing else:
-{"name":"short kebab-case name (lowercase letters, digits, dashes)","title":"display name, a few words","icon":"absolute URL of the site's own icon (<link rel=icon>, /favicon.svg or /favicon.ico, verified reachable) or, failing that, one fitting emoji","description":"one sentence saying what it is","repo":"its https clone URL if it is a code repository, else empty string","url":"the link itself if it is a page or service a browser can open, else empty string"}`;
+  const prompt = linkPrompt(link);
   const cmd = opts.bin ?? ["claude", "-p", "--output-format", "json", "--allowedTools", "WebFetch"];
   const proc = Bun.spawn([...cmd, prompt], { stdin: "ignore", stdout: "pipe", stderr: "pipe", env: process.env });
   const timer = setTimeout(() => proc.kill(), opts.timeoutMs ?? 180_000);
@@ -89,11 +105,7 @@ Read it with WebFetch, then output exactly one JSON object and nothing else:
   } catch {
     /* plain text answer */
   }
-  const m = text.match(/\{[\s\S]*\}/);
-  if (!m) throw new Error("the runtime returned no JSON");
-  const obj = JSON.parse(m[0]) as Record<string, unknown>;
-  if (typeof obj.name === "string") obj.name = obj.name.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^[-.]+|[-.]+$/g, "");
-  return obj;
+  return parseLinkAnswer(text);
 }
 
 async function exists(path: string): Promise<boolean> {

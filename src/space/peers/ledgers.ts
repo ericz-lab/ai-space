@@ -51,6 +51,8 @@ export class PeerLedgers implements PeerLedgerSource {
         };
         try {
           const r = await client.request(url, { signal: AbortSignal.timeout(this.opts.timeoutMs ?? LEDGER_TIMEOUT_MS) });
+          // An answer not read holds its stream over a package connection until it idles out.
+          if (r.status === 404 || r.status === 401 || r.status === 403) await r.body?.cancel().catch(() => {});
           if (r.status === 404) return fallback("this peer runs an older ai-space without the ledger route");
           if (r.status === 401 || r.status === 403) return fallback("token rejected");
           if (!r.ok) return fallback(await httpError(r));

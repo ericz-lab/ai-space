@@ -79,7 +79,7 @@ export function newWorkspaceEnv(env: Record<string, string | undefined>, opts: {
 
 /**
  * The package gateway's port for a new workspace: `SPACE_PACKAGE_PORT` from the environment, else
- * two above the panel's (8702 next to 8700, as the Local edition picks), else any free one.
+ * two above the panel's (8702 next to 8700), else any free one.
  */
 export function newPackagePort(env: Record<string, string | undefined>, free: (port: number) => boolean, any: () => number): number {
   const given = Number(env.SPACE_PACKAGE_PORT?.trim());

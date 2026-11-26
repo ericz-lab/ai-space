@@ -7,7 +7,7 @@ import { parseRuntimesYaml } from "../space/runtimes/config.ts";
 import { readWorkspaceEnv, workspacePaths } from "../space/workspace.ts";
 import { initDeps } from "./lifecycle.ts";
 import { runCli } from "./testing.ts";
-import type { Runtimes } from "../space/local.ts";
+import type { Runtimes } from "../space/runtimes/discover.ts";
 
 const original = initDeps.findRuntimes;
 const roots: string[] = [];
@@ -82,7 +82,7 @@ describe("init on a new workspace", () => {
     expect((await readWorkspaceEnv(workspacePaths(home))).SPACE_DEFAULT_APPS).toBe("notes=/nonexistent/notes.git");
   });
 
-  test("a runtime in the environment, an existing runtimes.yaml or the Local edition: no search", async () => {
+  test("a runtime in the environment or an existing runtimes.yaml: no search", async () => {
     const asked = found({ claude: "/opt/bin/claude" });
     const a = await workspace();
     await init(a, { SPACE_MODEL_BIN: "/opt/bin/wrapper" });
@@ -90,14 +90,11 @@ describe("init on a new workspace", () => {
     await mkdir(b, { recursive: true });
     await writeFile(join(b, "runtimes.yaml"), "runtimes:\n  mine:\n    kind: claude-code\n");
     await init(b);
-    const c = await workspace();
-    await init(c, { SPACE_EDITION: "local" });
     expect(asked).toEqual([]);
     expect(await Bun.file(join(a, "runtimes.yaml")).exists()).toBe(false);
     expect(await Bun.file(join(b, "runtimes.yaml")).text()).toBe("runtimes:\n  mine:\n    kind: claude-code\n");
-    expect(await Bun.file(join(c, "runtimes.yaml")).exists()).toBe(false);
     // The .env defaults do not depend on the search.
-    expect((await readWorkspaceEnv(workspacePaths(c))).SPACE_DEFAULT_APPS).toBe("none");
+    expect((await readWorkspaceEnv(workspacePaths(a))).SPACE_DEFAULT_APPS).toBe("none");
   });
 });
 

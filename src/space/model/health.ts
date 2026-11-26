@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { pathOf, whichUsable, withUserToolDirs } from "../host-tools.ts";
-import { dshAppCandidates, isHarnessAppCli } from "../local.ts";
+import { dshAppCandidates, isHarnessAppCli } from "../runtimes/discover.ts";
 import { findMagpie } from "../runtimes/magpie.ts";
 import { spawnCollect } from "../runtimes/process.ts";
 import type { OptionAvailability } from "../runtimes/registry.ts";

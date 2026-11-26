@@ -6,7 +6,7 @@ Spec version: `1`. An app states the version it targets with `spec: 1` at the to
 
 Time-related fields and behavior follow [Time and timezone conventions](time.md): distinguish instants from calendar dates, declare schedule zones, and use consistent user-timezone context across web, CLI and AI inputs. The document separates requirements for new work from existing implementation gaps.
 
-Status: the `tasks`, `storage` and `notify` sections, the top-level identity fields, `agents` (chat), `widgets`, the panel, the workspace layout and the `space.env` hand-over are implemented. `skills` mounting, the JSON Schema, `validate` and `new-app` are specified here first and implemented next; the [status table](#implementation-status) at the end tracks it.
+Status: the `tasks`, `storage` and `notify` sections, the top-level identity fields, `agents` (chat), `widgets`, the panel, the workspace layout and the `space.env` hand-over are implemented. `skills` mounting, the JSON Schema and `validate` are specified here first and implemented next; the [status table](#implementation-status) at the end tracks it.
 
 ## What an app is
 
@@ -581,7 +581,7 @@ Commit messages follow Conventional Commits, as in ai-space itself.
 | Step | Command | What happens |
 | --- | --- | --- |
 | Create | `space app new <name> [--dir D] [--title T] [--port N] [--no-github]` (also `bun run new-app`) | Copies the `space-app` skill's `templates/`, fills in the name, title and port, `git init` and first commit, private GitHub repository under `SPACE_GITHUB_OWNER` when configured, registers nothing else: the directory under `apps/` is the registration. The shared skill [`space-app`](../skills/space-app/SKILL.md) covers adopting an existing project and every later change. |
-| Validate | `bun run validate [<dir>]` | Parses `space.yaml` against the schema and the semantic rules (unique ports, referenced files exist, placeholders resolvable). Exit code 1 with one line per problem. |
+| Validate (planned) | `bun run validate [<dir>]` | Parses `space.yaml` against the schema and the semantic rules (unique ports, referenced files exist, placeholders resolvable). Exit code 1 with one line per problem. |
 | Deploy | `space app deploy <name> --git-dir <workspace>/repos/<name>.git --rev main` on the host, the body of the post-receive hook | Checks out the revision, runs the manifest's [`deploy`](#deploy) commands (install, type check, tests, build), and only when all pass syncs and restarts the service; a failure restores the previous tree and leaves the service running. |
 | Sync | automatic on boot and on `POST /api/apps/sync` | Discovers every `apps/*/space.yaml`, provisions storage, registers tasks, starts services, publishes agents and widgets. Idempotent. |
 | Pause / archive | edit `status:` and sync | Tasks and service stop; storage stays. |

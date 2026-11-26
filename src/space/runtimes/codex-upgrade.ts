@@ -207,8 +207,8 @@ export async function codexUpgrade(opts: UpgradeOptions): Promise<UpgradeResult>
 
   if (opts.dryRun) return result;
   if (opts.restart) {
-    // With an injected runner (tests), the Server's systemd unit as before; otherwise whichever
-    // service runs this workspace: systemd or launchd, the Server's unit or the AI Space app's.
+    // With an injected runner (tests), the Server's systemd unit as before; otherwise the
+    // service that runs this workspace, under systemd, launchd or the Task Scheduler.
     const restart = opts.restartService ?? (opts.run ? async () => {
       const r = await run(["systemctl", "--user", "restart", "ai-space"], { timeoutMs: 60_000 });
       if (r.code !== 0) throw new Error(r.stderr.trim() || `exit ${r.code}`);

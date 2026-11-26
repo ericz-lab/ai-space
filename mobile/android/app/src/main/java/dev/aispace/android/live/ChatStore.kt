@@ -399,7 +399,12 @@ class ChatStore(
                         stream = api.events("GET", "$base/runs/${SpacePath.escape(run)}/events?after=$lastSeq").messages
                     }
                     stream.first { message ->
-                        message.id?.let { lastSeq = it }
+                        // A reopened stream may replay what was already applied.
+                        val seq = message.id
+                        if (seq != null && seq <= lastSeq) return@first false
+                        seq?.let { lastSeq = it }
+                        // The limit is on reconnects in a row, not over a long turn.
+                        tries = 0
                         reply = reply.applying(message.data)
                         show()
                         reply.finished

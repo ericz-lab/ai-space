@@ -2,8 +2,7 @@ import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SPACE_ROOT } from "../space/config.ts";
-import { readOwnership, readRelease } from "../space/local.ts";
-import { ServiceError, type ServiceStatus, planUninstall, realServiceDeps, releasePrefix, runUninstall, releaseInstaller, serviceInstall, serviceRemove, serviceRestart, serviceStart, serviceStatus, serviceStop, serviceWorkspace } from "../space/service.ts";
+import { ServiceError, type ServiceStatus, ownedByLocalApp, planUninstall, readRelease, realServiceDeps, releasePrefix, runUninstall, releaseInstaller, serviceInstall, serviceRemove, serviceRestart, serviceStart, serviceStatus, serviceStop, serviceWorkspace } from "../space/service.ts";
 import { noMore, parseArgs } from "./args.ts";
 import { type Ctx, type Noun, UsageError } from "./types.ts";
 
@@ -20,7 +19,7 @@ const deps = (ctx: Ctx, over: { root?: string; bun?: string } = {}) => ({ ...rea
 
 function show(ctx: Ctx, s: ServiceStatus): void {
   ctx.print.kv([
-    ["service", `${s.name} (${s.manager}${s.kind === "local" ? ", the AI Space app's" : ""})`],
+    ["service", `${s.name} (${s.manager})`],
     ["state", !s.installed ? "not installed" : s.running ? `running, pid ${s.pid}` : `${s.enabled ? "stopped" : "stopped, off at login"} (${s.detail})`],
     ["file", s.file],
     ["workspace", s.workspace],
@@ -113,7 +112,7 @@ const upgrade = async (ctx: Ctx, argv: string[]) => {
   const d = deps(ctx);
   const here = await readRelease(await realpath(SPACE_ROOT).catch(() => SPACE_ROOT));
   const prefix = await releasePrefix(SPACE_ROOT);
-  if (here?.edition === "local" || (await readOwnership(await serviceWorkspace(d)))) throw new UsageError("this ai-space was installed by the AI Space app (the Local edition): update it from the app");
+  if (await ownedByLocalApp(await serviceWorkspace(d))) throw new UsageError("this workspace belongs to the AI Space app (the retired Local edition), which may run its own background service on it; remove that service from the app first");
   if (!here || !prefix) throw new UsageError(`${SPACE_ROOT} is a checkout, not a release: update it with git pull, then ${d.platform === "win32" ? "space service install" : "bash deploy/install.sh"}`);
   const want = typeof flags.version === "string" ? flags.version.replace(/^v/, "") : undefined;
   const base = downloadBase(ctx.io.env, want);

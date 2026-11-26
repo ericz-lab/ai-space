@@ -93,6 +93,8 @@ function parseConsumes(raw: unknown, ctx: string): EventConsumption[] {
     if (trigger.debounceMs !== undefined || trigger.maxWaitMs !== undefined) throw new Error(`${where}: debounce and maxWait apply to task subscriptions only; http and stream deliver every event`);
     if (c.http !== undefined) {
       const { method, path } = parseHttp(c.http, `${where}.http`);
+      // A delivery always carries the event as its body, which a GET cannot.
+      if (method === "GET") throw new Error(`${where}.http: an event is delivered with a body; use POST, PUT, PATCH or DELETE`);
       return { ...base, kind: "http", method, path };
     }
     return { ...base, kind: "stream" };

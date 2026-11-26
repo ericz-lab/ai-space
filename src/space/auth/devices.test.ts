@@ -6,7 +6,7 @@ import { SESSION_COOKIE, composeRoutes, gateRoutes } from "./gate.ts";
 import { AuthService } from "./service.ts";
 import { AuthStore } from "./store.ts";
 
-// Device credentials: the Local edition's Mac app holds one instead of the owner's password.
+// Device credentials: a client on the machine holds one instead of the owner's password.
 
 type H = (req: Request) => Response | Promise<Response>;
 

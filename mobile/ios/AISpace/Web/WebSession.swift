@@ -307,7 +307,11 @@ extension WebSession: WKUIDelegate {
     /// Camera and microphone for the Space's own pages only; iOS still asks the operator.
     func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin, initiatedByFrame frame: WKFrameInfo,
                  type: WKMediaCaptureType, decisionHandler: @escaping (WKPermissionDecision) -> Void) {
-        decisionHandler(Self.url(of: origin).map(hosts().contains) == true ? .prompt : .deny)
+        // Both the page and the frame that asks: a foreign frame inside a Space page gets neither.
+        let own = hosts()
+        let page = Self.url(of: origin).map(own.contains) == true
+        let asking = Self.url(of: frame.securityOrigin).map(own.contains) == true
+        decisionHandler(page && asking ? .prompt : .deny)
     }
 
     func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo,

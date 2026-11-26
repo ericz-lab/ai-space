@@ -32,11 +32,16 @@ fi
 DEST="$PREFIX/releases/$VERSION"
 mkdir -p "$PREFIX/releases"
 
-# Copy the release into place unless this very build is already there.
+# Copy the release into place unless this very build is already there. Another build of the same
+# version (the one that may be running) is moved aside, not deleted: it comes back if this one fails.
+REPLACED=""
 if [ "$SRC" != "$DEST" ] && [ "$(field commit "$DEST/RELEASE.json" 2>/dev/null || true)" != "$COMMIT" ]; then
-  rm -rf "$DEST.new"
+  rm -rf "$DEST.new" "$DEST.old"
   cp -a "$SRC" "$DEST.new"
-  rm -rf "$DEST"
+  if [ -d "$DEST" ]; then
+    mv "$DEST" "$DEST.old"
+    REPLACED="$DEST.old"
+  fi
   mv "$DEST.new" "$DEST"
 fi
 
@@ -50,16 +55,27 @@ echo "ai-space $VERSION ($COMMIT) in $DEST"
 
 if BUN="$PREFIX/current/runtime/bun" bash "$PREFIX/current/deploy/install.sh"; then
   # Keep the three newest releases, and always the one that runs and the one before it.
+  if [ -n "$REPLACED" ]; then rm -rf "$REPLACED"; fi
   cd "$PREFIX/releases"
   keep="$(ls -1t | head -n3; echo "$VERSION"; if [ -n "$PREV" ]; then basename "$PREV"; fi)"
   for r in *; do
-    case "$r" in *.new) continue ;; esac
+    case "$r" in *.new|*.old) continue ;; esac
     printf '%s\n' "$keep" | grep -qxF "$r" || rm -rf "$r"
   done
   exit 0
 fi
 
 echo "ai-space $VERSION did not come up" >&2
+if [ -n "$REPLACED" ] && [ -d "$REPLACED" ]; then
+  echo "putting the earlier build of $VERSION back" >&2
+  rm -rf "$DEST"
+  mv "$REPLACED" "$DEST"
+  if [ "$PREV" = "releases/$VERSION" ]; then
+    BUN="$PREFIX/current/runtime/bun" bash "$PREFIX/current/deploy/install.sh" || true
+    echo "the earlier build of $VERSION runs again; the workspace data was not touched" >&2
+    exit 1
+  fi
+fi
 if [ -n "$PREV" ] && [ "$PREV" != "releases/$VERSION" ] && [ -d "$PREFIX/$PREV" ]; then
   echo "rolling back to $PREV" >&2
   switch "$PREV"

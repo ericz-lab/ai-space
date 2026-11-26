@@ -1,7 +1,7 @@
 import { chmod, rename } from "node:fs/promises";
 import { join } from "node:path";
 import { isOperator } from "../auth.ts";
-import { isHarnessAppCli } from "../local.ts";
+import { isHarnessAppCli } from "../runtimes/discover.ts";
 import { RUNTIMES_FILE, parseRuntimesYaml, runtimesFromEnv } from "../runtimes/config.ts";
 import { MAGPIE_CALLER_KEY, MAGPIE_MODEL_PATTERN, type MagpieInfo, findMagpie, suggestMagpieTiers } from "../runtimes/magpie.ts";
 import type { RuntimeRegistry } from "../runtimes/registry.ts";

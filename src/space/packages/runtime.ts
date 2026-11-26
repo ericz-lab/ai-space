@@ -242,7 +242,12 @@ export class PackageRuntime {
       const s = this.apps.get(app)!;
       const launch = s.app.manifest.launch;
       if (launch?.kind !== "static") throw new Error("application has no static entry");
-      const decoded = decodeURIComponent(pathname);
+      let decoded: string;
+      try {
+        decoded = decodeURIComponent(pathname);
+      } catch {
+        return new Response("Not found", { status: 404 });
+      }
       if (!decoded.startsWith("/") || decoded.includes("\\") || /[\x00-\x1f]/.test(decoded) || decoded.split("/").some((p) => p === "." || p === "..")) return new Response("Not found", { status: 404 });
       const relative = `${launch.root}/${decoded === "/" ? launch.index : decoded.slice(1)}`;
       if (!s.app.index.files.some((f) => f.path === relative)) return new Response("Not found", { status: 404 });

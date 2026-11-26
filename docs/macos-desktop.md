@@ -1,8 +1,8 @@
 # Native macOS desktop proposal
 
-Status: in progress in `desktop/macos/` (see [Native-first client](#native-first-client) and [Build and run](#build-and-run)). Hub and Peer configuration remains a proposal; the managed local installation is implemented ([local.md](local.md)).
+Status: in progress in `desktop/macos/` (see [Native-first client](#native-first-client) and [Build and run](#build-and-run)). Hub and Peer configuration remains a proposal. The app is a client only: it never bundles, starts or updates a Space (a Local edition that did was built and retired on 2026-11-24).
 
-Build a Mac application with SwiftUI and AppKit for the desktop interface, WKWebView for the existing React panel, and the existing Bun service for all Space operations. Ship a client for an already running Space first. Add a managed local installation only after the client works reliably.
+Build a Mac application with SwiftUI and AppKit for the desktop interface, WKWebView for the existing React panel, and the existing Bun service for all Space operations. The app is a client of an already running Space, on this Mac or elsewhere.
 
 The motivation is a persistent Mac entry point with native window behavior, workspace selection and desktop integration, while keeping browser access and server deployments working. The first release has a native shell and web content. A fully native SwiftUI panel is a separate, optional later project.
 
@@ -12,15 +12,15 @@ Proposed initial target: macOS 14 or later, Apple Silicon, distributed directly 
 
 | Area | First desktop release | Later |
 | --- | --- | --- |
-| Connections | Existing local Space; remote HTTPS Hub with its existing peers after access validation | Initialize and manage a bundled local Space |
+| Connections | Existing local Space; remote HTTPS Hub with its existing peers after access validation | None |
 | Hub and Peer configuration | Native saved Hub connections; existing Peer topology and status | Add, test, edit, remove and rotate Peer connections through new operator APIs |
 | Native interface | Main window, menu commands, connection settings, status and reconnect screen | Menu bar status, global shortcut, notifications |
 | Space interface | Existing launcher, agents, chat, tasks, inbox, settings and terminal | Selected SwiftUI screens if usability justifies them |
 | Apps | Open app links in the default browser | Isolated in-app windows for selected apps |
-| Backend | Use the operator's existing installation | Signed Bun runtime and packaged Space resources |
-| Updates | Manual replacement of the signed desktop app | Coordinated application and managed backend updates |
+| Backend | Use the operator's existing installation | None: the app carries no service |
+| Updates | Manual replacement of the signed desktop app | None for the service, which updates itself |
 
-The first release does not install agent CLIs, change service supervision, migrate an existing workspace, or change a server's configuration. (Since then the desktop app offers, at first launch on a Mac without an AI Space, to run AI Space's own installer: [Connections and first launch](#connections-and-first-launch).) Remote-only use must work without Bun or a local Space installation. Remote Hub and Peer configuration is an explicit follow-on milestone in this proposal, independent of the managed local installation.
+The first release does not install agent CLIs, change service supervision, migrate an existing workspace, or change a server's configuration. (Since then the desktop app offers, at first launch on a Mac without an AI Space, to run AI Space's own installer: [Connections and first launch](#connections-and-first-launch).) Remote-only use must work without Bun or a local Space installation. Remote Hub and Peer configuration is an explicit follow-on milestone in this proposal.
 
 ## Architecture and ownership
 
@@ -42,7 +42,6 @@ ai-space.app
 | Native shell | Window lifecycle, selected connection, desktop permissions and narrowly scoped native actions |
 | React panel | Current Space workflows, application state and existing API clients |
 | Bun service | Workspace data, agent processes, scheduled work, app supervision and authorization |
-| macOS service manager | Managed backend lifecycle in the later bundled installation |
 
 Keep business operations in Space. The desktop app must not write `space.db`, interpret app manifests independently, implement another scheduler, or read remote files as local paths.
 
@@ -54,7 +53,7 @@ Apple's [WKWebView](https://developer.apple.com/documentation/webkit/wkwebview) 
 
 A connection stores a stable client identifier, display name and panel URL. Desktop preferences belong under the application's own Application Support directory, separate from the Space workspace.
 
-**First launch** (the desktop app, which carries no service; the Local edition's first run is in [local.md](local.md)). With no saved Space the welcome view shows two entries and takes neither by itself (`Services/FirstLaunch.swift`, `Views/FirstLaunchView.swift`):
+**First launch** (the desktop app carries no service). With no saved Space the welcome view shows two entries and takes neither by itself (`Services/FirstLaunch.swift`, `Views/FirstLaunchView.swift`):
 
 - **Connect to Local AI Space** (primary): the AI Space on this Mac. Under it one line says what the click will do, from a look the app makes at launch: "Found on this Mac", or "Not on this Mac yet: it is downloaded and installed first". The look saves nothing.
 - **Connect to a Remote AI Space…** (secondary) is the address form below.
@@ -72,7 +71,7 @@ A click on **Connect to Local AI Space** looks again. **Found:** the Space is sa
 
 Removing every saved Space later shows the two entries again without adding one back.
 
-What the app installs this way is the standard AI Space, the same as the command in a terminal gives: a LaunchAgent `ai.space.server` of the user's own, on `127.0.0.1:8700`, with the workspace `~/.ai-space`. It is an external installation in the terms of [Managed local installation](#managed-local-installation): the desktop app never bundles, upgrades, stops or uninstalls it, and removing the app leaves AI Space in place (`space uninstall` removes it; running the one-command installer again upgrades it).
+What the app installs this way is the standard AI Space, the same as the command in a terminal gives: a LaunchAgent `ai.space.server` of the user's own, on `127.0.0.1:8700`, with the workspace `~/.ai-space`. The desktop app never bundles, upgrades, stops or uninstalls it, and removing the app leaves AI Space in place (`space uninstall` removes it; running the one-command installer again upgrades it).
 
 A Space on this Mac can also be added by hand: the form suggests `http://127.0.0.1:8700` and lets the operator change it. A missing service leads to retry and setup guidance, not an automatic second backend.
 
@@ -174,49 +173,9 @@ Keep web functionality usable without the bridge through feature detection. Reus
 | Mac sleep or network change | Reconnect on wake; execution and missed schedules remain the backend's responsibility |
 | Logout or shutdown | Local user services cannot be promised to keep running |
 
-Quitting the UI and stopping Space are distinct operations. The first release has no Stop Space action. A later managed installation may offer it with explicit information about active work and with graceful shutdown.
+Quitting the UI and stopping Space are distinct operations. The app has no Stop Space action.
 
 Desktop presence does not make a laptop an always-on server. Do not prevent sleep by default or promise execution during sleep. Work that must continue independently of the Mac belongs on a server. Reopening the UI must reuse the existing background-run recovery behavior rather than treating an interrupted stream as a new task.
-
-## Managed local installation
-
-This is the Local edition of [editions.md](editions.md); the client-only release is the Client edition.
-
-**Implemented** ([local.md](local.md)): the app carries the service in `Resources/space`
-(`release/local.ts`) and drives it through `space local … --json` run with the Bun in its bundle
-(`Desktop/LocalManager.swift`, `Services/LocalEdition.swift`). On first launch with no saved Space it
-offers Set Up, or, when this Mac already has an ai-space it did not install, Connect to It or Take It
-Over (`Views/LocalViews.swift`). Both screens list the agent CLIs found (Claude Code, Codex), with
-how to install each and Choose… for one installed elsewhere, and the default model from every tier of
-every CLI found (the same setting as Settings → Models); Set Up stays off until a CLI is there and a
-model is chosen. A managed Space without a default model gets a sheet asking for one. Settings → General has "AI Space on This Mac": state, installed and bundled versions, Update, Start,
-Stop, Restart, Repair, Open Log, Remove Background Service. The saved Space is marked `managed`; the
-app signs in to it with a device credential kept in the Keychain, exchanged for a session cookie in
-that Space's web data whenever the cookie is missing or a page says sign-in is required.
-
-The decisions below were taken as follows. The background helper is a LaunchAgent the app writes to
-`~/Library/LaunchAgents/ai.space.local.plist` and loads with `launchctl`, running the release
-copied out to Application Support, not an `SMAppService` agent: `SMAppService` requires the
-program inside the app bundle, and a service run from inside the bundle breaks when the app is
-moved, replaced during an update, or deleted. Its state, a disabled label and the repair path are
-shown in Settings; macOS lists it under Login Items as a background item.
-
-What follows is the design as it was written before the implementation.
-
-This is a separate milestone. First build a release prototype that launches the current server from packaged resources on a clean Mac with no Bun on PATH. Verify Bun HTML imports, public assets, chat-widget builds, shared skills, PTY support, SQLite and runtime adapters. Do not assume copying one TypeScript entry point or compiling one binary packages every runtime resource.
-
-Retain `$SPACE_HOME` or `~/.ai-space` as the workspace contract. Keep the installed runtime and release files separate from apps, databases, logs and configuration. Moving or replacing the desktop app must not lose workspace data.
-
-Define two explicit ownership modes:
-
-- **External:** the operator installed the service, in a terminal or through the desktop app's first-launch offer ([Connections and first launch](#connections-and-first-launch)), which runs the same installer. The desktop app connects to it and does not stop, upgrade or replace it.
-- **Managed:** the desktop installation owns a registered helper and its backend release. It may start, repair and upgrade that installation through explicit lifecycle operations.
-
-Never infer ownership from a PID or an occupied port. Before managed mode ships, add a versioned service identity and readiness contract, installation ownership metadata and a per-workspace exclusion mechanism. Concurrent launches must not start two schedulers against the same workspace. If an external installation already uses that workspace, require an explicit handover instead of silently adopting it.
-
-Evaluate [SMAppService](https://developer.apple.com/documentation/servicemanagement/smappservice) for the app-owned background helper. It manages login items and helper services on macOS 13 and later. The registration's status, user approval, disabling in System Settings and repair path must be visible. Existing `space.<app>` LaunchAgents supervise individual apps; they do not by themselves provide a desktop-owned installation of the Space server.
-
-Agent runtimes remain separate dependencies. Report configured and missing executables with repair guidance. Resolve executable paths deliberately because GUI applications and background services do not inherit an interactive terminal's shell environment. Do not install or upgrade a CLI implicitly while launching the window.
 
 ## Packaging and upgrades
 
@@ -224,11 +183,11 @@ Use Xcode and Apple's native build tools for the desktop target while retaining 
 
 Distribute directly with Developer ID signing, Hardened Runtime and notarization, following [Apple's distribution guidance](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution). The initial design targets distribution outside the Mac App Store and does not assume App Sandbox compatibility with arbitrary agent subprocesses and workspace access.
 
-Validate signing and the minimum necessary entitlements for bundled Bun and helper executables in the packaging prototype. Downloaded runtime and app updates need integrity verification. A successful debug launch is not the release acceptance test.
+Validate signing and the minimum necessary entitlements on the signed build. A successful debug launch is not the release acceptance test.
 
-The client-only release uses manual updates and never updates a connected service, including one installed from its first launch. Later managed updates must coordinate the helper, Bun runtime and server resources, defer disruptive restarts while work is active, and preserve workspace data. Back up before a database migration. Binary rollback alone is insufficient after an incompatible schema change; recovery must use a compatible migration path or an explicit backup restore.
+The app uses manual updates and never updates a connected service, including one installed from its first launch.
 
-Uninstalling the desktop UI preserves workspace data. Managed mode needs a Remove Background Service action before deleting the application bundle. Deleting apps, databases or credentials is a separate, explicit operation.
+Uninstalling the desktop UI preserves workspace data and leaves any Space on this Mac running. Deleting apps, databases or credentials is a separate, explicit operation.
 
 ## Implementation sequence
 
@@ -238,9 +197,7 @@ Uninstalling the desktop UI preserves workspace data. Managed mode needs a Remov
 | 1 — Desktop client | Native connection settings, lifecycle, navigation policy, errors and signed distribution | A clean Mac can connect to an existing Space; remote-only use needs no Bun; quitting leaves server work intact |
 | 1b — Hub and Peer configuration | Shared Peer settings, operator API, Hub-side connection tests and live reconciliation | Adding, editing and removing a Peer changes only the selected Hub; credentials remain redacted; stale data and failed changes are handled correctly |
 | 2 — Desktop conveniences | Menu bar entry, optional shortcut and notification integration | Features remain optional; denied permissions and reconnects work; notifications do not duplicate the web or chat channels |
-| 3 — Managed local service | Packaged runtime, first-run setup, helper ownership and repair | Clean installation needs no developer checkout; one backend per workspace; external installations remain intact |
-| 4 — Managed upgrades | Coordinated updates and recovery | Active-work handling, migration failure and helper replacement are exercised on signed builds |
-| 5 — Selected native screens | SwiftUI replacements chosen from observed usability problems | Native and web clients share API behavior; accessibility improves without duplicating business logic |
+| 3 — Selected native screens | SwiftUI replacements chosen from observed usability problems | Native and web clients share API behavior; accessibility improves without duplicating business logic |
 
 Stage 0 is a decision gate. If WKWebView cannot support a required terminal, authentication or rendering workflow acceptably, resolve that gap or narrow the supported release before building more native UI. No resource-usage or schedule estimate is promised before this prototype is measured.
 
@@ -270,9 +227,9 @@ desktop/macos/
                          fetch-deps.sh (SwiftTerm for the Xcode project), icons.swift
 ```
 
-Add `src/web/desktop.ts` only when a real bridge consumer exists. Keep backend identity and managed lifecycle changes in the relevant Space modules. Add reproducible desktop build and test entry points to `package.json` that invoke Apple tools on macOS; existing Bun commands continue to work without Xcode on servers.
+Add `src/web/desktop.ts` only when a real bridge consumer exists. Add reproducible desktop build and test entry points to `package.json` that invoke Apple tools on macOS; existing Bun commands continue to work without Xcode on servers.
 
-Open an implementation issue or state the motivation in the PR description before starting the native feature. Split the client, bridge and managed installation into independently reviewable changes.
+Open an implementation issue or state the motivation in the PR description before starting the native feature. Split the client and the bridge into independently reviewable changes.
 
 ## Validation and acceptance
 
@@ -287,11 +244,11 @@ The desktop release matrix covers these workflows on a signed build:
 - Peer removal without remote data deletion; credential replacement without disclosure; token rotation's effect on all consuming Hubs; a sleeping Mac Peer while the remote Hub continues operating.
 - Keyboard navigation, VoiceOver, text scaling, light and dark appearance, English and Chinese.
 
-Use swift-testing (which runs from the Command Line Tools as well as Xcode) for meaningful native policy and lifecycle tests and Bun tests for changed Space behavior. Run the repository's full required validation before each implementation push. Add managed-mode tests for duplicate startup, helper approval denial, logout, failed upgrade, recovery and uninstall only when that milestone is implemented.
+Use swift-testing (which runs from the Command Line Tools as well as Xcode) for meaningful native policy and lifecycle tests and Bun tests for changed Space behavior. Run the repository's full required validation before each implementation push.
 
 Measure cold launch to usable panel, idle memory across the app and WebKit processes, and behavior under a long chat and terminal session. Record the machine, OS and whether the independent Bun service is included. Compare against the same workload in Safari; native packaging alone is not evidence of lower resource use.
 
-The first release is complete when an operator can reliably open an existing Space as a Mac application, perform the current web workflows, and close or quit the UI without disrupting server work. An installer that provisions a new Space is the managed-service milestone, not an implicit part of the first release. (The first-launch offer added later runs AI Space's own installer and manages nothing afterwards.)
+The first release is complete when an operator can reliably open an existing Space as a Mac application, perform the current web workflows, and close or quit the UI without disrupting server work. The first-launch offer added later runs AI Space's own installer and manages nothing afterwards.
 
 ## Build and run
 
@@ -310,11 +267,11 @@ These commands are not part of `bun run check`; servers and Linux never need the
 
 ## Native-first client
 
-The first build was a panel in a window: a browser that could only open ai-space. The operator's direction (2026-10-08) is that the desktop app must not be another browser, so the native layer now carries what a browser cannot, and pulls forward items this document had placed in stages 2 and 5:
+The first build was a panel in a window: a browser that could only open ai-space. The operator's direction (2026-10-08) is that the desktop app must not be another browser, so the native layer now carries what a browser cannot, and pulls forward items this document had placed in stages 2 and 3:
 
 | Native | What it does | Space routes it uses |
 | --- | --- | --- |
-| Main window | The iPhone client's layout (mobile/ios/README.md): pages side by side, moved through with a sideways trackpad swipe, the page dots in the toolbar or ⌥⌘← and ⌥⌘→. Home is the library of every app, agent and widget (the pointer over a library tile shows its state, peer and description; a screen's tiles show none) under the command box ([panel.md#omnibox](panel.md#omnibox)), which the first screen, where the window opens, carries too (⌘F focuses it there; while it holds a query that page shows the matches instead of the screen): what is typed filters the library, best names first (`OmniboxRules.swift`, the web panel's rules); when the Space reads the text as a shortcut it can run (`POST /api/shortcuts/resolve`: arithmetic, a conversion, an action named at its start such as `待办 明天下午3点 写周报`), that comes first and Return opens the panel's Shortcuts page on it with its form filled from the text (`/?page=shortcuts&run=<text>`, `Services/ShortcutOffer.swift`); otherwise Return opens the best match when its name holds the whole query and else asks Space Assistant in a new native conversation, ⌘Return always asks, and a question asked while the assistant still answers another one starts a conversation of its own beside it (as it does beside a conversation holding an unsent draft or pictures, which keeps them); when Space Assistant cannot be asked yet (still loading, signed out, offline, none on the Space) the box keeps the text and says why under it; a microphone, shown when `GET /api/voice` says the Space can transcribe, records a clip (AAC, at most 90 s) and puts the transcript into the field, as it does in every chat's message field (`VoiceInput.swift`, `POST /api/voice/transcribe`); then the screens, copied from the panel once and kept on this Mac (right-click for Add to Screen, New Screen, Edit, Copy the Panel's Layout, Delete); The panel's own windows are tiles as on the web panel (src/web/screens.ts `BUILTINS`): App Store, Inbox, Shortcuts, Terminal and Settings follow the apps in the library's Apps section and pin to a screen as `builtin:<name>`, each with the icon the Space serves for it ([Home screen and built-in tiles](#home-screen-and-built-in-tiles)); App Store and Shortcuts open as the panel's own pages in a tab. Settings opens over the launcher (not a page of the pager), sectioned as the web panel's, its sections listed on the left and the last one shown remembered: General (the saved Spaces, AI Space on This Mac, widgets, language, the Inbox, Chat, Terminal and Web Panel pages), Appearance (mode and theme), Models (the default model, App models, the agent CLIs on each machine with Check Again and, for one found here that no runtime uses, Add to runtimes.yaml; in every model menu a choice that is not signed in or whose machine is offline is greyed with the reason, and a saved choice no longer offered stays, marked), Automation (overviews of Scheduled tasks and of Events and calls), Fix this (随手改 in Chinese; the feature the routes and [feedback.md](feedback.md) still call feedback: the Fix this button on app pages and the Fix Engineer, as the panel's, read and changed through the same `GET`/`PUT /api/panel/feedback/settings`: the main switch, off until the owner turns it on, what happens to what is sent (fix it right away, or record it and fix later), machine, model and effort, each app's switch and each peer's apps, and what was sent lately with Fix now, Fix again and Fix the waiting ones), Usage (overviews of Model usage over the last day and App usage over the last week), Status (the Space's status, peers, services and backups), Packages (Apps and connections) and Account (Sign Out, the version). An overview's More, and a section's row, open the page inside the pane with Back to the section; Inbox, Chat and Terminal open over the launcher. An app, a page of the Space or the web panel comes up over the launcher with Back to Space (⇧⌘H) in the toolbar; the window opens on the home screen, the first screen of pinned tiles | `/api/apps`, `/api/agents`, `/api/widgets`, `/api/peers`, the panel layout, `/api/router`, `/api/voice`, the settings routes |
+| Main window | The iPhone client's layout (mobile/ios/README.md): pages side by side, moved through with a sideways trackpad swipe, the page dots in the toolbar or ⌥⌘← and ⌥⌘→. Home is the library of every app, agent and widget (the pointer over a library tile shows its state, peer and description; a screen's tiles show none) under the command box ([panel.md#omnibox](panel.md#omnibox)), which the first screen, where the window opens, carries too (⌘F focuses it there; while it holds a query that page shows the matches instead of the screen): what is typed filters the library, best names first (`OmniboxRules.swift`, the web panel's rules); when the Space reads the text as a shortcut it can run (`POST /api/shortcuts/resolve`: arithmetic, a conversion, an action named at its start such as `待办 明天下午3点 写周报`), that comes first and Return opens the panel's Shortcuts page on it with its form filled from the text (`/?page=shortcuts&run=<text>`, `Services/ShortcutOffer.swift`); otherwise Return opens the best match when its name holds the whole query and else asks Space Assistant in a new native conversation, ⌘Return always asks, and a question asked while the assistant still answers another one starts a conversation of its own beside it (as it does beside a conversation holding an unsent draft or pictures, which keeps them); when Space Assistant cannot be asked yet (still loading, signed out, offline, none on the Space) the box keeps the text and says why under it; a microphone, shown when `GET /api/voice` says the Space can transcribe, records a clip (AAC, at most 90 s) and puts the transcript into the field, as it does in every chat's message field (`VoiceInput.swift`, `POST /api/voice/transcribe`); then the screens, copied from the panel once and kept on this Mac (right-click for Add to Screen, New Screen, Edit, Copy the Panel's Layout, Delete); The panel's own windows are tiles as on the web panel (src/web/screens.ts `BUILTINS`): App Store, Inbox, Shortcuts, Terminal and Settings follow the apps in the library's Apps section and pin to a screen as `builtin:<name>`, each with the icon the Space serves for it ([Home screen and built-in tiles](#home-screen-and-built-in-tiles)); App Store and Shortcuts open as the panel's own pages in a tab. Settings opens over the launcher (not a page of the pager), sectioned as the web panel's, its sections listed on the left and the last one shown remembered: General (the saved Spaces, widgets, language, the Inbox, Chat, Terminal and Web Panel pages), Appearance (mode and theme), Models (the default model, App models, the agent CLIs on each machine with Check Again and, for one found here that no runtime uses, Add to runtimes.yaml; in every model menu a choice that is not signed in or whose machine is offline is greyed with the reason, and a saved choice no longer offered stays, marked), Automation (overviews of Scheduled tasks and of Events and calls), Fix this (随手改 in Chinese; the feature the routes and [feedback.md](feedback.md) still call feedback: the Fix this button on app pages and the Fix Engineer, as the panel's, read and changed through the same `GET`/`PUT /api/panel/feedback/settings`: the main switch, off until the owner turns it on, what happens to what is sent (fix it right away, or record it and fix later), machine, model and effort, each app's switch and each peer's apps, and what was sent lately with Fix now, Fix again and Fix the waiting ones), Usage (overviews of Model usage over the last day and App usage over the last week), Status (the Space's status, peers, services and backups), Packages (Apps and connections) and Account (Sign Out, the version). An overview's More, and a section's row, open the page inside the pane with Back to the section; Inbox, Chat and Terminal open over the launcher. An app, a page of the Space or the web panel comes up over the launcher with Back to Space (⇧⌘H) in the toolbar; the window opens on the home screen, the first screen of pinned tiles | `/api/apps`, `/api/agents`, `/api/widgets`, `/api/peers`, the panel layout, `/api/router`, `/api/voice`, the settings routes |
 | Space pages | Inbox, chat (in the main window beside a sidebar with New Conversation, the agents to switch to, one entry per agent however many machines it runs on, a working one marked, and the shown agent's conversations: the ones open on this Mac and not stored yet, then its recent sessions, each marked while a turn runs in it, here or on another client, and picked without stopping the others; an agent on several machines has a machine menu above the conversation, remembered per agent on this Mac, each machine keeping its own conversation, an offline one shown and not sent to), scheduled tasks, model usage (the Space named, a model run elsewhere as `machine:model`, a hub's peers' calls with a note for each peer whose figures are stale or missing) and app usage, app models (on a hub each peer's apps under its name, with that peer's choices, saved on the peer), events, packages and a terminal (SwiftTerm), drawn natively from the same files the iPhone client uses | the routes of each page, docs/terminal.md |
 | Agent chat | Native conversations, several per agent at once (`AgentChats`, rules in `Services/ChatRoster.swift`): New Conversation opens another one while a turn still runs, showing another one never stops a turn, a turn of the agent started on the web panel or another device becomes a conversation of its own, and idle conversations beyond the four shown last are let go (a stored one opens again from the history). The one on show is shared by the main window and Quick Chat, drawn as the iPhone's (replies on the solid surface, the person's in the accent, a column of about 72 characters); a dropped stream reattaches after the last event; Stop ends the run (it shows Stopping… until the turn ends, and a stop the Space did not take says so in the thread); an action the permission tier does not cover waits as an approval card (Allow / Deny) and a message written during a turn joins it; a failed turn shows its reason in the thread (rate limit, sign-in, time-out, a runtime that exited without a word, with the Space's own text under it) and Try Again sends the message once more; what the agent's tools did shows as chat cards under the reply, in the main window and Quick Chat, drawn by the iPhone client's shared `Views/ChatCardsView.swift` ([chat-cards.md](chat-cards.md): the five styles, the state read each time a card is shown, Undo on the latest live reply only, read-only otherwise, an item's link opening as an app's tab) | `POST /api/agents/:app/:agent/chat` (`interactive: true`), `/runs/:id/events?after=`, `/runs/:id/stop`, `/runs/:id/steer`, `/runs/:id/approvals/:rid`, `/api/agents/runs`, `POST /api/agents/cards/state` and `/action` (a peer's agent: `/api/peers/:peer/agents/cards/*`) |
 | Quick Chat | A floating panel over any app on a global shortcut (⌥Space by default, Carbon hot key, no Accessibility permission) or a section of the floating ball, drawn to Design Studio's spec (design 12): 380 points wide, rounded glass, a 40-point header with the agent and its list (⌘J), New Conversation (⌘N, also while a turn runs: that turn carries on in the conversation left, listed in the main window's sidebar) and Close (Esc) as 20-point round buttons; Open in Main Window stays on ⌘O. With no conversation it is the header and the field (96 points); it grows upward with the replies to 420 points and then scrolls. Pasted or dropped pictures wait as 44-point thumbnails above the field; the permission is the one last chosen in the main window. A click elsewhere closes it, except for its own file picker or a sheet. When another app already holds the chosen shortcut, Settings › General says so under the picker | as above |
@@ -354,7 +311,7 @@ Checked on macOS 27 against a scratch Space: the panel reports ready; the sideba
 
 Names first, since the Mac's menus and the panel's documents use "home" for different pages. The **library** is the leftmost page (`Pager.home`; the Space menu calls it Home). The **home screen** (主屏幕) is the first screen of pinned tiles to its right (`Screens.home`; the page dots call it Main), and the screens after it are Screen 2, 3…. The rules below are `Services/Builtins.swift` and `Services/DesktopScreens.swift`, tested in `AISpaceTests/DesktopScreensTests.swift`.
 
-- **Where the window opens.** On the home screen: at launch, after a first install (the desktop app's found or installed Space, the Local edition's own), and when another Space is picked. When the home screen is empty and a later screen is not, on the first screen that holds something (`DesktopScreens.opening`); never on the library, and never on an empty screen while another holds the tiles. A window still on the home screen when the Space's layout is first copied moves by the same rule.
+- **Where the window opens.** On the home screen: at launch, after a first install (the Space found or installed on this Mac), and when another Space is picked. When the home screen is empty and a later screen is not, on the first screen that holds something (`DesktopScreens.opening`); never on the library, and never on an empty screen while another holds the tiles. A window still on the home screen when the Space's layout is first copied moves by the same rule.
 - **Built-in tiles.** The five of the panel (`builtin:store`, `inbox`, `shortcuts`, `terminal`, `settings`), in that order. A tile shows the icon the Space serves for it: `builtins` of `/api/apps`, which is the active icon pack's file when the pack covers the tile ([panel.md](panel.md#icon-packs)) and the panel's own artwork otherwise, so a hub with an icon pack looks the same here as in a browser. The app carries the panel's five drawings (`src/web/public/store.svg`, `inbox.svg`, `shortcuts.svg`, `terminal.svg`, `settings.svg`, copied by `scripts/build.sh` and `project.yml`, never redrawn) and shows them until the Space's icon has loaded or when it cannot be read; no system symbol stands in for them. Inbox and Terminal carry the same icon on their rows in Settings › General. Inbox, Terminal and Settings are drawn by the app; App Store (`/?page=store`) and Shortcuts (`/?page=shortcuts`) are the panel's [built-in pages](panel.md#built-in-pages) in a tab of the main window, beside the open apps, and are not counted as an app's use.
 - **The first layout.** The first catalogue of a Space copies the panel's screens once (`ScreenStore`, shared with the iPhone, whose copy keeps Settings alone of the built-in tiles); the Mac then puts the panel's other built-in tiles back in their places (`DesktopScreens.keepingBuiltins`), and so does Copy the Panel's Layout. A Space that has stored no screens yet is seeded as the panel seeds it: the first eight apps, the five built-in tiles, the first four agents and widgets. A layout this Mac copied before it drew those tiles keeps what it has; they are in the library to pin.
 - **First apps.** A Space with no catalog app shows the panel's first-use card on the home screen ([app-catalog.md](app-catalog.md#the-app-store)): **Open the App Store** opens it (`/?page=store`), **Not now** hides the card for that Space on this Mac. It reads `GET /api/app-catalog` once per sign-in.

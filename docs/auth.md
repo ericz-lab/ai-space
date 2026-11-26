@@ -77,9 +77,8 @@ Known names are: any IP address, `localhost` and `*.localhost`, `SPACE_PANEL_HOS
 
 ## Device credentials
 
-A client that is its own device, the Local edition's Mac app, holds a device credential instead of
-the owner's password ([local.md](local.md#signing-in)). `space auth device-add <name>` on the
-machine (or `space local install --device <name>`) makes one and prints the token (`spd_…`) once;
+A client that is its own device holds a device credential instead of the owner's password.
+`space auth device-add <name>` on the machine makes one and prints the token (`spd_…`) once;
 `auth_devices` keeps its SHA-256, a name, and when it was made and last seen. Under `builtin` a
 bearer device token passes the gate as the owner, with or without an owner password set. `POST
 /api/auth/device/session` with it opens an ordinary session for the device's web view and sets the
@@ -125,4 +124,4 @@ Under `external` the routes other than `session` answer 404.
 
 - **App hostnames.** Under the router ([router.md](router.md)) an app's own hostname goes from the proxy straight to the app's port, without passing ai-space. The built-in sign-in does not protect those yet, so a space that publishes app hostnames still needs Access in front of them. Stage 2 adds a check route for the proxy (`forward_auth`) and a cookie the app hostnames share. Until then this document does not claim a space can go without an access layer.
 - **Apps reading `app-read` routes** must send their `SPACE_APP_TOKEN`; an app that relied on loopback with no token gets a 401 under `builtin`.
-- The installer's default (`builtin` for a new space), migration of existing spaces, device credentials for the Mac and iPhone clients connecting to a remote Space, more accounts and roles: stages 2 and 3 of #181. The Local edition's device credential is done (above).
+- The installer's default (`builtin` for a new space), migration of existing spaces, device credentials for the Mac and iPhone clients connecting to a remote Space, more accounts and roles: stages 2 and 3 of #181. A device credential made on the machine is done (above).

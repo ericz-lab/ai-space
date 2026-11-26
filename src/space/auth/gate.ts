@@ -89,7 +89,7 @@ export async function check(req: Request, policy: Policy, opts: GateOptions): Pr
   const presented = bearer(req);
   if (presented) {
     if (tokenEquals(presented, opts.operatorToken)) return undefined;
-    // A device credential (the Local edition's app) is the owner on that device.
+    // A device credential (`space auth device-add`) is the owner on that device.
     if (opts.auth.verifyDevice(presented)) {
       markOwner(req);
       return undefined;

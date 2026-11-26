@@ -231,7 +231,10 @@ export class PeerClient {
       await r.body?.cancel().catch(() => {});
       return 0;
     }
-    if (!r.ok) throw new Error(`events: HTTP ${r.status}`);
+    if (!r.ok) {
+      await r.body?.cancel().catch(() => {});
+      throw new Error(`events: HTTP ${r.status}`);
+    }
     const body = (await r.json()) as { ok?: boolean; events?: PeerEvent[]; latestId?: number; next?: number };
     if (body.ok !== true || !Array.isArray(body.events)) throw new Error("events: not an event list");
     const latest = typeof body.latestId === "number" ? body.latestId : undefined;

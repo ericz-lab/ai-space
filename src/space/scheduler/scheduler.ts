@@ -146,7 +146,7 @@ export class Scheduler {
     this.timer = null;
   }
 
-  /** The ids of the tasks with a run in flight (docs/local.md#updates). */
+  /** The ids of the tasks with a run in flight (GET /api/space/activity, src/space/activity.ts). */
   running(): string[] {
     return [...this.inflight.keys()];
   }
@@ -450,10 +450,11 @@ export class Scheduler {
     }
   }
 
-  /** Force a run now. Returns false when the task is already running. */
+  /** Force a run now. Returns false when the task is already running, or the scheduler is shutting down. */
   runNow(id: string): boolean {
     const task = this.store.getTask(id);
     if (!task) throw new Error(`unknown task: ${id}`);
+    if (this.draining) return false;
     if (task.state.runningAt !== undefined || this.inflight.has(id)) return false;
     this.launch(task, "manual");
     return true;

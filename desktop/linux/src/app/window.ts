@@ -18,7 +18,6 @@ import { ChatPage } from "./chat-page.ts";
 import { lang, openExternally, prefs, savePrefs, t, tw } from "./env.ts";
 import { type Builtin, HomePage } from "./home.ts";
 import { InboxPage } from "./inbox.ts";
-import type { LocalManager } from "./local-manager.ts";
 import type { AppModel, Space } from "./model.ts";
 import { WindowPet, desktopPetAvailable, petInWindow } from "./pet.ts";
 import { showSettings } from "./settings.ts";
@@ -62,7 +61,6 @@ export class MainWindow {
   constructor(
     readonly app: any,
     private readonly model: AppModel,
-    private readonly local: LocalManager,
   ) {
     this.window = new Adw.ApplicationWindow({ application: app, title: t("appName"), default_width: prefs.window.width, default_height: prefs.window.height, width_request: 360, height_request: 400 });
     if (prefs.window.maximized) this.window.maximize();
@@ -162,7 +160,7 @@ export class MainWindow {
     const manage = new Gtk.Button({ label: t("manageSpaces"), css_classes: ["flat"] });
     manage.connect("clicked", () => {
       spacePop.popdown();
-      showSettings(this.window, this.model, this.local);
+      showSettings(this.window, this.model);
     });
     spaceColumn.append(manage);
     spacePop.set_child(spaceColumn);
@@ -302,7 +300,7 @@ export class MainWindow {
     const space = this.model.current;
     if (!space) {
       if (!this.welcome) {
-        this.welcome = new WelcomePage(this.model, this.local, () => this.showSpace());
+        this.welcome = new WelcomePage(this.model, () => this.showSpace());
         const box = new Adw.ToolbarView({ content: this.welcome.widget });
         box.add_top_bar(new Adw.HeaderBar());
         this.root.add_named(box, "welcome");
@@ -414,10 +412,8 @@ export class MainWindow {
     if (!space) return;
     const s = space.state.kind;
     // Signing in happens on the panel's own page; the app looks again once it loads.
-    if (s === "signin") {
-      if (space.conn.managed) void this.local.signIn(space, true).then((ok) => (ok ? this.model.refresh(space) : this.openPanel(space)));
-      else this.openPanel(space);
-    } else if (s === "unreachable") void this.model.refresh(space);
+    if (s === "signin") this.openPanel(space);
+    else if (s === "unreachable") void this.model.refresh(space);
     else if (s === "incompatible") Gio.AppInfo.launch_default_for_uri(space.conn.url, null);
   }
 
@@ -476,7 +472,7 @@ export class MainWindow {
     const page = builtinPage(name);
     if (name === "inbox") this.show("inbox");
     else if (name === "terminal") this.show("terminal");
-    else if (name === "settings") showSettings(this.window, this.model, this.local);
+    else if (name === "settings") showSettings(this.window, this.model);
     // The web panel, and the App Store and Shortcuts, which only the panel has: its page of that name.
     else if (space && page) this.openPanel(space, page, name === "store" ? tw("store.title") : name === "shortcuts" ? t("shortcuts") : undefined);
   }

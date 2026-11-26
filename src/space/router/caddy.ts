@@ -37,8 +37,9 @@ export class CaddyBackend {
     const f = Bun.file(this.opts.file);
     if ((await f.exists()) && (await f.text()) === text) return false;
     await mkdir(dirname(this.opts.file), { recursive: true });
-    await Bun.write(this.opts.file, text);
-    await chmod(this.opts.file, 0o600); // it holds the router key
+    // It holds the router key: created owner-only, and an older file's mode is corrected.
+    await Bun.write(this.opts.file, text, { mode: 0o600 });
+    await chmod(this.opts.file, 0o600);
     return true;
   }
 

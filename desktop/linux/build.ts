@@ -1,5 +1,5 @@
 /**
- * `bun desktop/linux/build.ts [--out <dir>] [--local]`: the Linux client as a directory that runs
+ * `bun desktop/linux/build.ts [--out <dir>]`: the Linux client as a directory that runs
  * where it lies (default desktop/linux/build/ai-space):
  *
  *   main.js                 the app (src/main.ts bundled for GJS; gi:// imports stay external)
@@ -15,15 +15,13 @@
  *   share/                  the desktop entry and AppStream metadata, for install.sh
  *   bin/ai-space            the launcher (desktop/linux/ai-space.sh): `gjs -m main.js`
  *   install.sh              installs it for this user (desktop/linux/install.sh)
- *   VERSION.json            version, commit, edition
- *   space/                  --local only: the Local edition's release tree (release/server.ts
- *                           stageRelease) with runtime/bun and runtime/space-pty
+ *   VERSION.json            version, commit
  */
 import { chmod, cp, mkdir, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { SPACE_ROOT } from "../../src/space/config.ts";
 import { readVersion } from "../../src/space/version.ts";
-import { run, stageRelease } from "../../release/server.ts";
+import { run } from "../../release/server.ts";
 import { BUILTIN_ART } from "./src/core/screens.ts";
 
 const HERE = join(SPACE_ROOT, "desktop", "linux");
@@ -35,10 +33,9 @@ async function bundle(entry: string, outfile: string, opts: { format: "esm" | "i
   await Bun.write(outfile, await r.outputs[0]!.text());
 }
 
-export async function buildLinux(opts: { out?: string; local?: boolean; root?: string } = {}): Promise<{ dir: string; version: string; commit: string; edition: "client" | "local" }> {
+export async function buildLinux(opts: { out?: string; root?: string } = {}): Promise<{ dir: string; version: string; commit: string }> {
   const root = opts.root ?? SPACE_ROOT;
   const dir = resolve(opts.out ?? join(HERE, "build", "ai-space"));
-  const edition = opts.local ? "local" : "client";
   await rm(dir, { recursive: true, force: true });
   await mkdir(join(dir, "terminal"), { recursive: true });
 
@@ -69,19 +66,13 @@ export async function buildLinux(opts: { out?: string; local?: boolean; root?: s
 
   const version = await readVersion(root);
   const commit = (process.env.GITHUB_SHA || (await run(["git", "rev-parse", "HEAD"], root).catch(() => ""))).trim();
-  await Bun.write(join(dir, "VERSION.json"), `${JSON.stringify({ version, commit, edition }, null, 2)}\n`);
-
-  if (opts.local) {
-    const space = join(dir, "space");
-    await stageRelease({ root, stage: space, edition: "local" });
-    await run(["cc", "-O2", "-Wall", "-o", join(space, "runtime", "space-pty"), join(root, "src", "space", "terminal", "pty_helper.c")], root);
-  }
-  console.error(`[linux] ${edition} ${version} → ${dir}`);
-  return { dir, version, commit, edition };
+  await Bun.write(join(dir, "VERSION.json"), `${JSON.stringify({ version, commit }, null, 2)}\n`);
+  console.error(`[linux] ${version} → ${dir}`);
+  return { dir, version, commit };
 }
 
 if (import.meta.main) {
   const argv = process.argv.slice(2);
   const i = argv.indexOf("--out");
-  console.log((await buildLinux({ ...(i >= 0 && argv[i + 1] ? { out: argv[i + 1] } : {}), local: argv.includes("--local") })).dir);
+  console.log((await buildLinux(i >= 0 && argv[i + 1] ? { out: argv[i + 1] } : {})).dir);
 }

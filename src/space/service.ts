@@ -3,7 +3,7 @@ import { lstat, mkdir, readdir, readlink, realpath, rm, stat } from "node:fs/pro
 import { homedir } from "node:os";
 import { basename, dirname, join, normalize, resolve, sep } from "node:path";
 import { SPACE_ROOT } from "./config.ts";
-import { LOCAL_LABEL, LOCAL_UNIT, localPaths, readOwnership, readRelease } from "./local.ts";
+import { userToolDirs } from "./host-tools.ts";
 import { Launchctl } from "./services/launchd.ts";
 import { type Runner, type ServiceManager, type UnitState, spawnCollect } from "./services/manager.ts";
 import { plistString } from "./services/plist.ts";
@@ -27,13 +27,40 @@ import { readHolder, workspaceLocked } from "./instance.ts";
  *   <workspace>\logs\space.log
  *
  * Both run `<bun> src/index.ts` from the code's directory (a checkout, or a release's `current`)
- * with `SPACE_HOME` set to the workspace. A workspace the AI Space app installed (the Local
- * edition, `installation.json`) keeps the app's service: `restart` drives that one, and `install`
- * and `remove` refuse it.
+ * with `SPACE_HOME` set to the workspace. A workspace the retired Local edition's app installed
+ * (`installation.json`, see `ownedByLocalApp`) is refused by `install`, `remove` and `uninstall`,
+ * as deploy/install.sh and release/install.sh refuse it: that app may still run its own service on it.
  */
 
 export const SERVER_LABEL = "ai.space.server";
 export const SERVER_UNIT = "ai-space.service";
+
+/**
+ * The file the Local edition's app (retired on 2026-11-24, docs/editions.md) wrote into a workspace
+ * it installed, with `"managedBy": "ai-space-local"`. While it is there, that app's own background
+ * service may run the workspace, and a second service on it would fight over it.
+ */
+export const OWNERSHIP_FILE = "installation.json";
+export const LOCAL_MANAGED_BY = "ai-space-local";
+
+export async function ownedByLocalApp(workspace: string): Promise<boolean> {
+  try {
+    return ((await Bun.file(join(workspace, OWNERSHIP_FILE)).json()) as { managedBy?: unknown }).managedBy === LOCAL_MANAGED_BY;
+  } catch {
+    return false;
+  }
+}
+
+/** `RELEASE.json` at the top of a release tree (release/server.ts). */
+export type ReleaseInfo = { product: string; edition: string; version: string; commit: string; os?: string; arch?: string; bun?: string };
+
+export async function readRelease(dir: string): Promise<ReleaseInfo | undefined> {
+  try {
+    return (await Bun.file(join(dir, "RELEASE.json")).json()) as ReleaseInfo;
+  } catch {
+    return undefined;
+  }
+}
 
 export type ServicePlatform = "darwin" | "linux" | "win32";
 
@@ -166,9 +193,13 @@ export function renderServerUnit(template: string, u: UnitInput): string {
 /** The first two lines of the LaunchAgent; `remove` deletes no plist without them. */
 export const SERVER_PLIST_HEAD = '<?xml version="1.0" encoding="UTF-8"?>\n<!-- Written by ai-space (space service install). Removed by: space service remove. -->';
 
-/** launchd gives a job `/usr/bin:/bin:/usr/sbin:/sbin` only: the Bun's directory and where agent CLIs usually are go first. */
+/**
+ * launchd gives a job `/usr/bin:/bin:/usr/sbin:/sbin` only, not a terminal's shell profile: the
+ * Bun's directory and the user tool directories where agent CLIs are installed
+ * (host-tools.ts `userToolDirs`) go first.
+ */
 export function launchPath(u: Pick<UnitInput, "bun" | "home">): string {
-  const dirs = [dirname(u.bun), join(u.home, ".bun", "bin"), join(u.home, ".local", "bin"), "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"];
+  const dirs = [dirname(u.bun), `${u.home}/.bun/bin`, ...userToolDirs(u.home, "darwin"), "/usr/bin", "/bin", "/usr/sbin", "/sbin"];
   return [...new Set(dirs)].join(":");
 }
 
@@ -218,9 +249,9 @@ export class ServiceError extends Error {
   }
 }
 
-/** One background service under its manager: the Server's, or the Local edition's when the workspace is the app's. */
+/** ai-space's background service under its manager. */
 type Handle = {
-  kind: "server" | "local";
+  kind: "server";
   name: string;
   file: string;
   /** What this module asks of a manager; the Task Scheduler supervises no app, so it answers the app questions with nothing. */
@@ -287,18 +318,18 @@ function taskHandle(d: ServiceDeps, file: string, workspace: string): Handle {
   };
 }
 
-function handle(d: ServiceDeps, kind: "server" | "local", unitDir: string, file: string, logs: string): Handle {
+function handle(d: ServiceDeps, unitDir: string, file: string, logs: string): Handle {
   if (d.platform === "win32") return taskHandle(d, file, dirname(logs));
   if (d.platform === "darwin") {
-    const label = kind === "server" ? SERVER_LABEL : LOCAL_LABEL;
+    const label = SERVER_LABEL;
     // A stop waits for the drain: longer than the plist's ExitTimeOut, after which launchd kills.
-    const lc = new Launchctl({ run: d.run, unitDir, logDir: logs, uid: d.uid, stopWaitMs: kind === "server" ? 370_000 : 35_000 });
-    return { kind, name: label, file, manager: lc, restart: () => lc.restart(label), enableNow: () => lc.enableNow(label), disableNow: () => lc.disableNow(label), show: () => lc.show(label) };
+    const lc = new Launchctl({ run: d.run, unitDir, logDir: logs, uid: d.uid, stopWaitMs: 370_000 });
+    return { kind: "server", name: label, file, manager: lc, restart: () => lc.restart(label), enableNow: () => lc.enableNow(label), disableNow: () => lc.disableNow(label), show: () => lc.show(label) };
   }
-  const unit = kind === "server" ? SERVER_UNIT : LOCAL_UNIT;
+  const unit = SERVER_UNIT;
   const sd = new Systemctl({ run: d.run, unitDir });
   return {
-    kind,
+    kind: "server",
     name: unit,
     file,
     manager: sd,
@@ -317,20 +348,15 @@ function handle(d: ServiceDeps, kind: "server" | "local", unitDir: string, file:
   };
 }
 
-/** The service that runs this machine's workspace: the app's when `installation.json` says the workspace is its, the Server's otherwise. */
+/** The service that runs this machine's workspace. */
 async function current(d: ServiceDeps): Promise<{ h: Handle; p: ServicePaths }> {
   const p = await servicePaths(d);
-  // There is no Local edition on Windows: no workspace here is an app's.
-  if (d.platform !== "win32" && (await readOwnership(p.workspace))) {
-    const lp = localPaths({ ...d.env, SPACE_HOME: p.workspace }, d.home, d.platform);
-    return { h: handle(d, "local", lp.unitDir, lp.unitFile, lp.logs), p };
-  }
-  return { h: handle(d, "server", p.unitDir, p.unitFile, p.logs), p };
+  return { h: handle(d, p.unitDir, p.unitFile, p.logs), p };
 }
 
 export type ServiceStatus = {
-  /** `server`: this module's unit. `local`: the AI Space app's (the Local edition). */
-  kind: "server" | "local";
+  /** Always `server`; kept for the callers that read it. */
+  kind: "server";
   manager: "systemd" | "launchd" | "task-scheduler";
   name: string;
   file: string;
@@ -365,7 +391,8 @@ export async function serviceStatus(d: ServiceDeps): Promise<ServiceStatus> {
 
 async function server(d: ServiceDeps, verb: string): Promise<{ h: Handle; p: ServicePaths }> {
   const c = await current(d);
-  if (c.h.kind === "local") throw new ServiceError("local-edition", `${c.p.workspace} belongs to the AI Space app (the Local edition), which runs its own background service: ${verb} it from the app, or with \`space local\``);
+  // There was no Local edition on Windows.
+  if (d.platform !== "win32" && (await ownedByLocalApp(c.p.workspace))) throw new ServiceError("local-edition", `${c.p.workspace} belongs to the AI Space app (the retired Local edition), which may run its own background service on it; nothing was changed. Remove that service from the app, then delete ${join(c.p.workspace, OWNERSHIP_FILE)} to ${verb} the Server here`);
   return c;
 }
 

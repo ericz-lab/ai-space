@@ -116,8 +116,9 @@ export class ClaudeLive implements LiveProcess {
     first: ChatTurn,
     extra: string[] = [],
     private readonly maxWakes = LIVE_MAX_WAKES,
+    fingerprint: (turn: ChatTurn) => string = claudeLiveFingerprint,
   ) {
-    this.fingerprint = claudeLiveFingerprint(first);
+    this.fingerprint = fingerprint(first);
     this.sid = first.sessionId ?? null;
     this.model = first.model;
     this.mode = modeOf(first);
