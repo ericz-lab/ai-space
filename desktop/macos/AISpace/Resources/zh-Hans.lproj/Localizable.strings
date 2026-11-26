@@ -737,3 +737,35 @@
 "closed from another panel" = "已从另一个面板关闭";
 "closed: ai-space stopped" = "已关闭：ai-space 已停止";
 "connection lost" = "连接已断开";
+
+/* Widget cards: views, copy, actions (src/web/messages.ts widget.*) */
+"Copy" = "复制";
+"Copied" = "已复制";
+"checked" = "已勾选";
+"unchecked" = "未勾选";
+"Views" = "视图";
+"Pages" = "分页";
+"Page %lld of %lld" = "第 %lld 页，共 %lld 页";
+"Failed: %@" = "失败：%@";
+"sign-in needed" = "需要登录";
+"Out of date · %@" = "数据已过期 · %@";
+"Refresh now" = "立即刷新";
+"Refreshing…" = "正在刷新…";
+
+/* Widget layout (src/web/messages.ts layout.*) */
+"Widget layout" = "小组件布局";
+"Align" = "对齐";
+"Move every edge to the nearest twelfth of the width and even out row heights that are close" = "把每条边移到最近的十二分之一宽度处，并让相近的行高一致";
+"Center" = "居中";
+"Center rows that do not fill the width" = "未占满宽度的行居中";
+"Split evenly" = "平分";
+"Give the cards of every row equal widths and every row the same height" = "每行的卡片等宽，所有行等高";
+"Reset" = "重置";
+"Return every card on this screen to its default size" = "本屏所有卡片恢复默认大小";
+"Return every card on this screen to its default size?" = "让本屏所有卡片恢复默认大小？";
+"Undo" = "撤销";
+"The layout could not be saved, so the change was undone" = "布局未能保存，已撤回这次更改";
+"This Space keeps widget sizes only, so the nearest size was saved" = "这个 Space 只保存小组件尺寸，已改存最接近的尺寸";
+"Width: drag, or Left and Right arrows (8 points, Shift for 1). Shift-drag re-flows the cards after it; hold Option to stop snapping" = "宽度：拖动，或按左右方向键（8 点，按住 Shift 为 1 点）。按住 Shift 拖动时后面的卡片重新排布；按住 Option 不吸附";
+"Row height: drag, or Up and Down arrows (8 points, Shift for 1); hold Option to stop snapping" = "行高：拖动，或按上下方向键（8 点，按住 Shift 为 1 点）；按住 Option 不吸附";
+"Width and height: drag, or the arrow keys (8 points, Shift for 1); hold Option to stop snapping" = "宽度和高度：拖动，或按方向键（8 点，按住 Shift 为 1 点）；按住 Option 不吸附";
