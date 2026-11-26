@@ -29,16 +29,16 @@ struct DictationRulesTests {
         #expect(!DictationRules.restores(.clipboardOnly, changeCount: 7, written: 7))
     }
 
-    @Test func theCapsuleShowsTheEndOfALongTranscript() {
-        #expect(DictationRules.tail("  short  ") == "short")
+    @Test func theOverlayShowsTheEndOfALongTranscript() {
+        #expect(DictationRules.tail("  short  ", units: 120) == "short")
         let words = (1...40).map { "word\($0)" }.joined(separator: " ")
-        let tail = DictationRules.tail(words, limit: 60)
+        let tail = DictationRules.tail(words, units: 60)
         #expect(tail.hasPrefix("…word"))
         #expect(tail.hasSuffix("word40"))
         #expect(tail.count <= 61)
         // No spaces: cut anywhere, the end kept.
         let chinese = String(repeating: "说", count: 200) + "完"
-        #expect(DictationRules.tail(chinese, limit: 50) == "…" + String(repeating: "说", count: 49) + "完")
+        #expect(DictationRules.tail(chinese, units: 100) == "…" + String(repeating: "说", count: 49) + "完")
     }
 
     @Test func aClipIsAPlainWAV() {
@@ -76,11 +76,6 @@ struct DictationCaptureTests {
         #expect(!DictationRules.ends(.capture, recording: nil))
     }
 
-    @Test func theCapsuleNamesTheKeyToLetGo() {
-        #expect(DictationRules.listeningHint(.field) == "Listening… let go of fn to finish")
-        #expect(DictationRules.listeningHint(.capture) == "Listening… let go of right ⌥ to finish")
-    }
-
     @Test func theChosenTargetWhileItIsThereElseTheFirst() {
         let targets = [target("decree/issue", "Decree"), target("david/keep/note", "Keep")]
         #expect(DictationRules.captureTarget(targets, chosen: "david/keep/note")?.id == "david/keep/note")
@@ -107,10 +102,11 @@ struct DictationCaptureTests {
     }
 
     @Test func whatTheCapsuleSays() {
-        #expect(DictationRules.sentNote(title: "Decree", label: "Decree #3") == "Sent to Decree · Decree #3")
-        #expect(DictationRules.sentNote(title: "Decree", label: nil) == "Sent to Decree")
-        #expect(DictationRules.sentNote(title: "Decree", label: "  ") == "Sent to Decree")
+        #expect(DictationRules.keptTitle(title: "Decree", label: "Decree #3") == "Kept in Decree · Decree #3")
+        #expect(DictationRules.keptTitle(title: "Decree", label: nil) == "Kept in Decree")
+        #expect(DictationRules.keptTitle(title: "Decree", label: "  ") == "Kept in Decree")
         #expect(DictationRules.failedNote(title: "Decree", reason: "offline") == "Could not send to Decree (offline). The text is on the clipboard.")
+        #expect(DictationRules.failedNote(title: "Decree", reason: "The network connection was lost. ") == "Could not send to Decree (The network connection was lost). The text is on the clipboard.")
         #expect(DictationRules.noTargetNote(space: "seoul") == "No app on seoul takes spoken notes.")
     }
 
@@ -125,5 +121,83 @@ struct DictationCaptureTests {
         #expect(DictationRules.kept(answer))
         #expect(!DictationRules.kept(DictationRules.CaptureAnswer(ok: false)))
         #expect(DictationRules.kept(nil))
+    }
+}
+
+/// The large voice overlay: what it says for each key and phase, and how long a result stays.
+struct DictationOverlayTests {
+    @Test func theBadgeTellsTheKeysApart() {
+        #expect(DictationRules.badgeTitle(.field, target: nil) == "Voice input")
+        #expect(DictationRules.badgeTitle(.field, target: "Decree") == "Voice input")
+        #expect(DictationRules.badgeDetail(.field) == "into the current field")
+        #expect(DictationRules.badgeTitle(.capture, target: "Decree") == "Note to Decree")
+        // Before the Space named the app.
+        #expect(DictationRules.badgeTitle(.capture, target: nil) == "Spoken note")
+        #expect(DictationRules.badgeDetail(.capture) == nil)
+        #expect(DictationRules.keyCap(.field) == "fn")
+        #expect(DictationRules.keyCap(.capture) == "right ⌥")
+    }
+
+    @Test func theFooterSaysWhatLettingGoDoesThenWhatIsHappening() {
+        #expect(DictationRules.footer(.starting, destination: .field, target: nil) == "let go to insert")
+        #expect(DictationRules.footer(.listening, destination: .field, target: nil) == "let go to insert")
+        #expect(DictationRules.footer(.listening, destination: .capture, target: "Decree") == "let go to send to Decree")
+        #expect(DictationRules.footer(.starting, destination: .capture, target: nil) == "let go to send")
+        #expect(DictationRules.footer(.transcribing, destination: .capture, target: "Decree") == "Transcribing…")
+        #expect(DictationRules.footer(.sending, destination: .capture, target: "Decree") == "Sending to Decree…")
+        #expect(DictationRules.footer(.kept(label: "Decree #3"), destination: .capture, target: "Decree") == nil)
+        #expect(DictationRules.footer(.note("x", clipboard: false), destination: .field, target: nil) == nil)
+    }
+
+    @Test func theTimerWarnsInTheLastTenSeconds() {
+        #expect(DictationRules.maxRecordingSeconds == 90)
+        #expect(!DictationRules.timerWarns(elapsed: 0))
+        #expect(!DictationRules.timerWarns(elapsed: 79))
+        #expect(DictationRules.timerWarns(elapsed: 80))
+        #expect(DictationRules.timerWarns(elapsed: 90))
+        #expect(DictationRules.elapsedLabel(7) == "0:07")
+        #expect(DictationRules.elapsedLabel(65) == "1:05")
+        #expect(DictationRules.elapsedLabel(90) == "1:30")
+        #expect(DictationRules.elapsedLabel(-3) == "0:00")
+    }
+
+    @Test func howLongEachResultStays() {
+        #expect(DictationRules.shows(.kept(label: nil)) == 2.5)
+        #expect(DictationRules.shows(.note("x", clipboard: false)) == 4)
+        #expect(DictationRules.shows(.note("x", clipboard: true)) == 6)
+        for phase: DictationRules.OverlayPhase in [.starting, .listening, .transcribing, .sending] {
+            #expect(DictationRules.shows(phase) == nil)
+        }
+    }
+
+    @Test func theTailFitsFourLinesOfLargeType() {
+        let short = "Remind me to call the bank"
+        #expect(DictationRules.tail(short, units: DictationRules.overlayUnits) == short)
+        let long = String(repeating: "word ", count: 60) + "end"
+        let tail = DictationRules.tail(long, units: 160)
+        #expect(tail.hasPrefix("…"))
+        #expect(tail.hasSuffix("end"))
+        #expect(tail.count <= 161)
+        // Cut at a word.
+        #expect(tail.dropFirst().hasPrefix("word"))
+        // A wide character counts twice: 160 units hold 80 of them.
+        let chinese = String(repeating: "说", count: 120)
+        #expect(DictationRules.tail(chinese, units: 160) == "…" + String(repeating: "说", count: 80))
+    }
+
+    @Test func theMeterLevel() {
+        #expect(DictationRules.meterLevel(rms: 0) == 0)
+        #expect(DictationRules.meterLevel(rms: 1) == 1)
+        // −30 dB, halfway between silence (−50) and full (−10).
+        #expect(abs(DictationRules.meterLevel(rms: 0.0316) - 0.5) < 0.01)
+        // Rises fast, falls slowly.
+        #expect(DictationRules.smooth(previous: 0, sample: 1) == 0.7)
+        #expect(DictationRules.smooth(previous: 1, sample: 0) == 0.75)
+        let levels = DictationRules.push(Array(repeating: 0, count: 36), 0.5)
+        #expect(levels.count == 36)
+        #expect(levels.last == 0.5)
+        #expect(DictationRules.push([], 2, count: 3) == [0, 0, 1])
+        #expect(DictationRules.meterBars == 36)
+        #expect(DictationRules.levelInterval >= 0.05)
     }
 }

@@ -27,12 +27,121 @@ enum DictationRules {
         released == recording
     }
 
-    /// What the capsule says while it listens: which key to let go of.
-    static func listeningHint(_ destination: Destination) -> String {
+    // MARK: The voice overlay (DictationOverlay.swift draws it; what it says and for how long is here)
+
+    /// What the overlay shows, from the press to the result.
+    enum OverlayPhase: Equatable {
+        /// Pressed: the Space is being asked and the microphone opened.
+        case starting
+        case listening
+        /// Released: the final text is on its way.
+        case transcribing
+        /// A note on its way to its app.
+        case sending
+        /// The app kept the note, naming it `label` when it says.
+        case kept(label: String?)
+        /// Anything gone wrong or worth saying; `clipboard`: the text was left on the clipboard.
+        case note(String, clipboard: Bool)
+    }
+
+    /// The mode badge's title, which tells the two keys apart: "Voice input", or "Note to <app>"
+    /// once the app is known.
+    static func badgeTitle(_ destination: Destination, target: String?) -> String {
         switch destination {
-        case .field: return String(localized: "Listening… let go of fn to finish")
-        case .capture: return String(localized: "Listening… let go of right ⌥ to finish")
+        case .field: return String(localized: "Voice input")
+        case .capture: return target.map { String(localized: "Note to \($0)") } ?? String(localized: "Spoken note")
         }
+    }
+
+    /// The badge's second line: where fn's text goes. A note's app is in the title already.
+    static func badgeDetail(_ destination: Destination) -> String? {
+        destination == .field ? String(localized: "into the current field") : nil
+    }
+
+    /// The key cap in the footer.
+    static func keyCap(_ destination: Destination) -> String {
+        destination == .field ? "fn" : String(localized: "right ⌥")
+    }
+
+    /// The footer: what letting go does, then what is happening; nil once there is a result.
+    static func footer(_ phase: OverlayPhase, destination: Destination, target: String?) -> String? {
+        switch phase {
+        case .starting, .listening:
+            switch destination {
+            case .field: return String(localized: "let go to insert")
+            case .capture: return target.map { String(localized: "let go to send to \($0)") } ?? String(localized: "let go to send")
+            }
+        case .transcribing: return String(localized: "Transcribing…")
+        case .sending: return target.map { String(localized: "Sending to \($0)…") } ?? String(localized: "Sending…")
+        case .kept, .note: return nil
+        }
+    }
+
+    /// The longest recording (LiveVoice stops by itself then), and when the timer warns of it.
+    static let maxRecordingSeconds = 90
+    static func timerWarns(elapsed: Int) -> Bool { elapsed >= maxRecordingSeconds - 10 }
+
+    /// The elapsed timer: `0:07`, `1:25`.
+    static func elapsedLabel(_ seconds: Int) -> String {
+        let s = max(0, seconds)
+        return "\(s / 60):" + (s % 60 < 10 ? "0" : "") + "\(s % 60)"
+    }
+
+    /// How long a result stays: a kept note 2.5 s, a note 4 s, 6 s when the text waits on the
+    /// clipboard. The other phases stay until the next one.
+    static func shows(_ phase: OverlayPhase) -> TimeInterval? {
+        switch phase {
+        case .kept: return 2.5
+        case .note(_, let clipboard): return clipboard ? 6 : 4
+        case .starting, .listening, .transcribing, .sending: return nil
+        }
+    }
+
+    /// How much of the live transcript the overlay shows: four lines of its large type, about
+    /// 40 Latin characters or 20 wide ones a line. A wide character counts twice.
+    static let overlayUnits = 160
+
+    /// The end of `text` within `units` (a CJK character counts 2): what is being said, cut at a
+    /// word when one ends near the cut (a language without spaces is cut anywhere).
+    static func tail(_ text: String, units: Int) -> String {
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        var used = 0
+        var start = text.endIndex
+        while start > text.startIndex {
+            let before = text.index(before: start)
+            let cost = wide(text[before]) ? 2 : 1
+            if used + cost > units { break }
+            used += cost
+            start = before
+        }
+        guard start > text.startIndex else { return text }
+        var kept = text[start...]
+        if let space = kept.prefix(max(1, units / 6)).firstIndex(of: " ") { kept = kept[kept.index(after: space)...] }
+        return "…" + kept
+    }
+
+    /// The meter's bars, and how often the level moves them (at most 20 times a second).
+    static let meterBars = 36
+    static let levelInterval: TimeInterval = 0.05
+
+    /// A buffer's RMS (0…1 of full scale) as the meter's 0…1: −50 dB is silence, −10 dB full.
+    static func meterLevel(rms: Double) -> Double {
+        let db = 20 * log10(max(rms, 0.000_01))
+        return min(1, max(0, (db + 50) / 40))
+    }
+
+    /// Smoothing: a louder sample is taken almost at once, a quieter one eased toward, so the
+    /// bars rise with a syllable and settle rather than flicker.
+    static func smooth(previous: Double, sample: Double) -> Double {
+        let weight = sample > previous ? 0.7 : 0.25
+        return previous + (sample - previous) * weight
+    }
+
+    /// The meter's history: the newest level on the right, the oldest dropped.
+    static func push(_ levels: [Double], _ level: Double, count: Int = meterBars) -> [Double] {
+        let all = levels + [min(1, max(0, level))]
+        let kept = Array(all.suffix(count))
+        return Array(repeating: 0, count: max(0, count - kept.count)) + kept
     }
 
     /// The app a spoken note goes to: the one chosen for this Space when it still takes text,
@@ -77,18 +186,20 @@ enum DictationRules {
         error is URLError
     }
 
-    /// The capsule after the target kept the note: its title, and its own name for what was kept.
-    static func sentNote(title: String, label: String?) -> String {
+    /// The overlay after the target kept the note: its title, and its own name for what was kept.
+    static func keptTitle(title: String, label: String?) -> String {
         let label = label?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return label.isEmpty ? String(localized: "Sent to \(title)") : String(localized: "Sent to \(title) · \(label)")
+        return label.isEmpty ? String(localized: "Kept in \(title)") : String(localized: "Kept in \(title) · \(label)")
     }
 
-    /// The capsule after sending failed: the note is on the clipboard instead, so nothing said is lost.
+    /// The overlay after sending failed: the note is on the clipboard instead, so nothing said is lost.
     static func failedNote(title: String, reason: String) -> String {
-        String(localized: "Could not send to \(title) (\(reason)). The text is on the clipboard.")
+        // The reason sits in parentheses: its own closing full stop would read twice.
+        let reason = reason.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: ".。"))
+        return String(localized: "Could not send to \(title) (\(reason)). The text is on the clipboard.")
     }
 
-    /// The capsule before recording when the Space has nowhere to send a note.
+    /// The overlay before recording when the Space has nowhere to send a note.
     static func noTargetNote(space: String) -> String {
         String(localized: "No app on \(space) takes spoken notes.")
     }
@@ -109,16 +220,6 @@ enum DictationRules {
     /// A transcript left for the person to paste is never taken away.
     static func restores(_ delivery: Delivery, changeCount: Int, written: Int) -> Bool {
         delivery != .clipboardOnly && changeCount == written
-    }
-
-    /// How much of a long live transcript the capsule shows: its end, which is what is being said,
-    /// cut at a word when one ends near the cut (a language without spaces is cut anywhere).
-    static func tail(_ text: String, limit: Int = 120) -> String {
-        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard text.count > limit else { return text }
-        var kept = text.suffix(limit)
-        if let space = kept.prefix(limit / 6).firstIndex(of: " ") { kept = kept[kept.index(after: space)...] }
-        return "…" + kept
     }
 
     /// Mono 16 kHz PCM16 as a WAV file: the live recording sent as a clip when the live route
