@@ -1,8 +1,10 @@
+import { Database } from "bun:sqlite";
 import { join } from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
 import { parseManifest } from "../space/scheduler/manifest.ts";
 import type { AppRegistry } from "../space/panel/registry.ts";
 import { WidgetFeed, type WidgetView } from "../space/panel/widgets.ts";
+import { LayoutStore, orderBy, withLayout } from "../space/panel/layout.ts";
 import type { WidgetInfo } from "./api.ts";
 import { translate } from "./i18n.ts";
 import { PreviewSources, liveCards, previewCards } from "./widget-preview-fixtures.ts";
@@ -14,6 +16,11 @@ import { type PreviewData, PreviewApp } from "./widget-preview-app.tsx";
  * refresh) over in-memory sources, so what responds here is what responds on the panel.
  *
  *   bun src/web/widget-preview.tsx          http://127.0.0.1:18937/?theme=dark|light&lang=en|zh&opacity=0-100
+ *
+ * The cards sit in the panel's widget area (WidgetArea.tsx); the control bar's Edit button turns on
+ * its edit mode. The layout (frames, alignment, order) lives in this process's memory behind the
+ * panel's own `GET`/`PUT /api/panel/layout`, validated by the real `LayoutStore`, so it survives a
+ * reload and not a restart.
  */
 export function previewOpacity(value: string | null): number {
   return value !== null && value.trim() && Number.isFinite(Number(value))
@@ -59,10 +66,17 @@ export function previewFeed(sources = new PreviewSources()): { feed: WidgetFeed;
   return { feed: new WidgetFeed(registry, { fetch }), icons, peerOf: new Map([[PEER_CARD, "david"]]) };
 }
 
-/** The feed's cards as the panel lists them; the peer card gets its peer's id and loses any action, as merge.ts does. */
-async function previewWidgets(p: ReturnType<typeof previewFeed>): Promise<WidgetInfo[]> {
-  const all = await p.feed.all();
-  return all.map((w) => asPeer(w, p.peerOf.get(w.app)) as unknown as WidgetInfo);
+/**
+ * The feed's cards as the panel lists them: the peer card gets its peer's id and loses any action, as
+ * merge.ts does; the layout's order, sizes and frames apply as in GET /api/widgets.
+ */
+async function previewWidgets(p: ReturnType<typeof previewFeed>, layout?: LayoutStore): Promise<WidgetInfo[]> {
+  const all = (await p.feed.all()).map((w) => asPeer(w, p.peerOf.get(w.app)));
+  if (!layout) return all as unknown as WidgetInfo[];
+  const lay = layout.read();
+  const shown = all.map((w) => withLayout(lay, w));
+  // Until a card is moved the feed's order stands (orderBy alone would sort the rest by name).
+  return (lay.order.widgets.length ? orderBy(shown, lay.order.widgets, (w) => w.id) : shown) as unknown as WidgetInfo[];
 }
 
 function asPeer(w: WidgetView, peer: string | undefined): WidgetView {
@@ -71,11 +85,11 @@ function asPeer(w: WidgetView, peer: string | undefined): WidgetView {
   return { ...(rest as WidgetView), id: `${peer}/${w.id}`, peer };
 }
 
-export async function previewPage(url: URL, preview = previewFeed()): Promise<string> {
+export async function previewPage(url: URL, preview = previewFeed(), layout?: LayoutStore): Promise<string> {
   const opacity = previewOpacity(url.searchParams.get("opacity"));
   const scheme = url.searchParams.get("theme") === "light" ? "light" : "dark";
   const lang = url.searchParams.get("lang") === "zh" ? "zh" : "en";
-  const data: PreviewData = { lang, scheme, widgets: await previewWidgets(preview), autoRefresh: AUTO_REFRESH, everyMs: AUTO_EVERY_MS };
+  const data: PreviewData = { lang, scheme, widgets: await previewWidgets(preview, layout), align: layout?.read().widgetAlign ?? "start", autoRefresh: AUTO_REFRESH, everyMs: AUTO_EVERY_MS };
   // JSON inside a script element: `<` is escaped so no text can close the element.
   const json = JSON.stringify(data).replace(/</g, "\\u003c");
   return `<!doctype html>
@@ -95,6 +109,7 @@ export async function previewPage(url: URL, preview = previewFeed()): Promise<st
     <label for="widget-opacity">${translate(lang, "appearance.opacity")}</label>
     <input id="widget-opacity" type="range" min="0" max="100" step="1" value="${opacity}" aria-valuetext="${opacity}%">
     <output for="widget-opacity" id="opacity-value">${opacity}%</output>
+    <button type="button" id="edit-toggle" aria-pressed="false">${translate(lang, "layout.edit")}</button>
   </div>
   <script type="application/json" id="preview-data">${json}</script>
   <script type="module" src="/preview.js"></script>
@@ -141,27 +156,40 @@ if (import.meta.main) {
   };
   const js = await bundleClient();
   const preview = previewFeed();
+  const layout = new LayoutStore(new Database(":memory:"));
   const json = (body: unknown, status = 200) => Response.json(body, { status, headers: { "cache-control": "no-store" } });
   // The answers of the panel's routes (src/space/panel/api.ts), over the same feed.
-  const answer = (r: Awaited<ReturnType<WidgetFeed["act"]>>) => (r.ok ? json({ ok: true, widget: r.widget, ...(r.message !== undefined ? { message: r.message } : {}) }) : json({ ok: false, error: r.error }, r.status));
+  const answer = (r: Awaited<ReturnType<WidgetFeed["act"]>>, lay: LayoutStore) => (r.ok ? json({ ok: true, widget: withLayout(lay.read(), r.widget), ...(r.message !== undefined ? { message: r.message } : {}) }) : json({ ok: false, error: r.error }, r.status));
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: Number(process.env.WIDGET_PREVIEW_PORT ?? 18937),
     routes: {
-      "/api/widgets": { GET: async () => json({ ok: true, widgets: await previewWidgets(preview) }) },
+      "/api/widgets": { GET: async () => json({ ok: true, widgets: await previewWidgets(preview, layout) }) },
+      "/api/panel/layout": {
+        GET: () => json({ ok: true, layout: layout.read() }),
+        PUT: async (req) => {
+          const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
+          if (!body || typeof body !== "object") return json({ ok: false, error: "body must be a JSON object" }, 400);
+          try {
+            return json({ ok: true, layout: layout.update(body) });
+          } catch (e) {
+            return json({ ok: false, error: (e as Error).message }, 400);
+          }
+        },
+      },
       "/api/widgets/:app/:name/action": {
         POST: async (req) => {
           const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
           if (!body || typeof body !== "object") return json({ ok: false, error: "body must be { action, value? }" }, 400);
           // A slow app, so the sending state can be seen.
           await Bun.sleep(350);
-          return answer(await preview.feed.act(req.params.app, req.params.name, body));
+          return answer(await preview.feed.act(req.params.app, req.params.name, body), layout);
         },
       },
       "/api/widgets/:app/:name/refresh": {
         POST: async (req) => {
           await Bun.sleep(250);
-          return answer(await preview.feed.refresh(req.params.app, req.params.name));
+          return answer(await preview.feed.refresh(req.params.app, req.params.name), layout);
         },
       },
       "/api/apps/:app/icon": (req) => {
@@ -176,7 +204,7 @@ if (import.meta.main) {
       const file = files[url.pathname];
       if (file) return new Response(Bun.file(file));
       if (url.pathname !== "/") return new Response("Not found", { status: 404 });
-      return new Response(await previewPage(url, preview), { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } });
+      return new Response(await previewPage(url, preview, layout), { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } });
     },
   });
   console.log(`Widget preview: ${server.url}`);

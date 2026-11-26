@@ -1502,7 +1502,7 @@ html:has(.overlay:not(.off)) { overflow: hidden; }
 .widget.s1x2, .widget.s2x2 { grid-row: span 2; }
 @media (max-width: 700px) { .widget.s2x1, .widget.s2x2 { grid-column: auto; } }
 .widget.s1x2 iframe { min-height: 340px; }
-/* Edit mode: the current size in the head, and a grip in the bottom-right corner that resizes by dragging. */
+/* Edit mode: the card's size in px in the head, and a grip in the bottom-right corner that resizes by dragging. */
 .widget-size { margin-left: auto; flex: none; font-size: 11px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
 .widget.resizing .widget-size { color: var(--accent); }
 .widget-grip {
@@ -1512,7 +1512,7 @@ html:has(.overlay:not(.off)) { overflow: hidden; }
     linear-gradient(135deg, transparent 0 55%, var(--accent) 55% 65%, transparent 65% 75%, var(--accent) 75% 85%, transparent 85%);
   opacity: 0.8;
 }
-.widget-grip:hover, .widget.resizing .widget-grip { opacity: 1; }
+.widget-grip:hover, .widget-grip:focus-visible, .widget.resizing .widget-grip { opacity: 1; }
 .widget > .tile-del { top: -9px; right: -9px; }
 .widget.resizing { outline: 2px solid var(--accent); outline-offset: 4px; }
 .widget iframe { width: 100%; border: 0; border-radius: 10px; min-height: 160px; flex: 1; background: transparent; }
@@ -1814,6 +1814,39 @@ a.wb-tank-cell:hover { background: var(--glass-strong); }
 }
 .tile[data-drop="before"]::after, .widget[data-drop="before"]::after { left: -8px; }
 .tile[data-drop="after"]::after, .widget[data-drop="after"]::after { right: -8px; }
+
+/* The stepless widget area (WidgetArea.tsx, widget-layout.ts): every card placed at its box, the
+   area as tall as its rows; below 700px one column of cards sized by their content. */
+.widgets.flow { display: block; position: relative; }
+.widgets.flow > .widget.framed { position: absolute; }
+.widgets.column { display: flex; flex-direction: column; gap: 20px; }
+.widget.framed { min-width: 0; min-height: 0; }
+.widget.framed > .wb { overflow: hidden auto; }
+.widget.framed > .widget-list { flex: 1; min-height: 0; overflow-y: auto; }
+.widget.framed > iframe { min-height: 0; }
+/* Edit mode: a handle on the right edge, one on the bottom edge and the corner grip; 12px+ to hit. */
+.wl-handle { position: absolute; z-index: 3; touch-action: none; outline: none; }
+.wl-x { top: 14px; bottom: 22px; right: -10px; width: 14px; cursor: col-resize; }
+.wl-y { left: 14px; right: 22px; bottom: -10px; height: 14px; cursor: row-resize; }
+.wl-x::after, .wl-y::after {
+  content: ""; position: absolute; border-radius: 2px; background: var(--accent);
+  opacity: 0; transition: opacity 0.15s ease;
+}
+.wl-x::after { top: 50%; left: 5px; width: 4px; height: 40px; max-height: 100%; transform: translateY(-50%); }
+.wl-y::after { left: 50%; top: 5px; height: 4px; width: 40px; max-width: 100%; transform: translateX(-50%); }
+.widget.framed:hover .wl-x::after, .widget.framed:hover .wl-y::after { opacity: 0.45; }
+.wl-x:hover::after, .wl-y:hover::after, .wl-x:focus-visible::after, .wl-y:focus-visible::after, .widget.resizing .wl-handle::after { opacity: 1; }
+.wl-handle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+.widget.resizing { transition: none; }
+.wl-guide { position: absolute; z-index: 4; pointer-events: none; background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+.wl-guide-x { top: -12px; bottom: -12px; width: 1px; margin-left: -0.5px; }
+.wl-guide-y { left: -12px; right: -12px; height: 1px; margin-top: -0.5px; }
+.wl-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 16px; }
+.wl-toolbar .btn2 { padding: 6px 14px; font-size: 13px; }
+.wl-toolbar .btn2.on { background: var(--text); color: var(--inverse); border-color: transparent; }
+.wl-confirm { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; color: var(--text); }
+.wl-undo { margin-left: auto; }
+.wl-error { font-size: 13px; color: var(--danger); }
 
 /* Health dot on an app tile (service declared a health path). */
 

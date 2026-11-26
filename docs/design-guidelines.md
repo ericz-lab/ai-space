@@ -130,7 +130,7 @@ Use the scale **4, 8, 12, 16, 20, 24, 32, 48, 56 px**. 20 and 56 are already in 
 | Page padding | `clamp(40px, 8vh, 80px)` top, `clamp(24px, 5vw, 64px)` sides; phone: 28 px top, 20 px sides |
 | Section gap | 56 px; phone 40 px |
 | Launcher grid | 96 px columns, gap 28 px rows × 20 px columns; phone `minmax(76px, 1fr)`, 22 × 10 px |
-| Widget grid | `minmax(min(320px, 100%), 1fr)`, gap 20 px |
+| Widget area | stepless rows of cards, gap 20 px; a card `w × (W + 20) − 20` px wide, 200 px to the area, 140–900 px tall; one column below 700 px (docs/panel.md#resize-a-widget). The library's previews keep the `minmax(min(320px, 100%), 1fr)` grid |
 | Panel head | 14 px × 16 px |
 | Settings rows | 8 px × 10 px |
 | Modal | 24 px |
