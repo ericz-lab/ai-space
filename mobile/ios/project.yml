@@ -1,4 +1,5 @@
-# XcodeGen spec for AISpace.xcodeproj; run `bun run ios:xcode` after adding or moving files.
+# XcodeGen spec for AISpace.xcodeproj; run `bun run ios:xcode` after a fresh clone and after adding or moving
+# files; the generated project is git-ignored.
 # The iPhone and Simulator builds need Xcode (`xcodebuild`, see README.md). scripts/test.sh and
 # scripts/build.sh need only the Command Line Tools: the tests run on the Mac, and the app
 # builds for Mac Catalyst from the same sources.

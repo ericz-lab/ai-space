@@ -52,7 +52,7 @@ What differs is how each one is packaged, installed, started and updated.
 
 1. **One codebase, one version.** A release tag builds both. The version lives in
    `package.json`; the native projects carry copies that `bun run set-version <x.y.z>` rewrites and
-   a test keeps equal. Which clients work with which services is decided by the API level the
+   a test keeps equal (for the Apple clients, in `project.yml`; the Xcode projects are generated). Which clients work with which services is decided by the API level the
    service reports ([Service identity](#service-identity)), checked when connecting, not assumed.
 2. **Program and data are separate.** The workspace stays `$SPACE_HOME` or `~/.ai-space`
    ([machines.md](machines.md)): apps, databases, logs, configuration and credentials. The program

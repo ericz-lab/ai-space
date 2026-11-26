@@ -1,5 +1,5 @@
-# XcodeGen spec for AISpace.xcodeproj; run `bun run desktop:xcode` after adding or moving files
-# (it fetches SwiftTerm first).
+# XcodeGen spec for AISpace.xcodeproj; run `bun run desktop:xcode` after a fresh clone and after adding or
+# moving files (it fetches SwiftTerm first); the generated project is git-ignored.
 # scripts/build.sh and scripts/test.sh build the same sources with swiftc and need no Xcode.
 name: AISpace
 options:
