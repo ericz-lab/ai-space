@@ -2,7 +2,7 @@ import type { ServerWebSocket } from "bun";
 import type { FailureKind } from "../model/failure.ts";
 import type { WsAttachment, WsData } from "../terminal/service.ts";
 import type { LiveSession, SpeechService } from "./service.ts";
-import { languageHint, ProviderError, SpeechError, TAG_PATTERN, PROVIDER_NAME_PATTERN, type LiveTarget, type SpeechAdapter, type SpeechCaller } from "./types.ts";
+import { languageHint, MAX_CONTEXT_CHARS, ProviderError, SpeechError, speechContext, TAG_PATTERN, PROVIDER_NAME_PATTERN, type LiveTarget, type SpeechAdapter, type SpeechCaller } from "./types.ts";
 
 /**
  * One live dictation session (docs/speech.md#live-protocol) between the client's socket and a
@@ -30,7 +30,7 @@ export function liveAttachment(opts: { service: SpeechService; caller: SpeechCal
   const connect = opts.connect ?? defaultConnect;
   let client: ServerWebSocket<WsData> | undefined;
   let session: LiveSession | undefined;
-  let start: { type: "start"; language: string } & typeof FORMAT;
+  let start: { type: "start"; language: string; context?: string } & typeof FORMAT;
   let caller = opts.caller;
   let index = 0;
   let up: WebSocket | undefined;
@@ -194,7 +194,11 @@ export function liveAttachment(opts: { service: SpeechService; caller: SpeechCal
           caller = { ...caller, tag: msg.tag };
         }
         if (msg.provider !== undefined && (typeof msg.provider !== "string" || !PROVIDER_NAME_PATTERN.test(msg.provider))) return refuse("invalid_request", "provider must be a provider name");
-        start = { type: "start", ...FORMAT, language: languageHint(lang) };
+        if (msg.context !== undefined && (typeof msg.context !== "string" || msg.context.length > MAX_CONTEXT_CHARS)) return refuse("invalid_request", `context must be text of at most ${MAX_CONTEXT_CHARS} characters`);
+        // Live is the person's own dictation: the Space's terms first (docs/speech.md#terms). With none and no
+        // context of the client's, no context key at all, so the provider gets the start it always got.
+        const context = speechContext(opts.service.terms, typeof msg.context === "string" ? msg.context : "");
+        start = { type: "start", ...FORMAT, language: languageHint(lang), ...(context ? { context } : {}) };
         try {
           session = opts.service.live(caller, typeof msg.provider === "string" ? { provider: msg.provider } : {});
         } catch (e) {

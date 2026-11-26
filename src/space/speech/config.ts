@@ -3,6 +3,7 @@ import { parseHeaders } from "../peers/config.ts";
 import { MAGPIE_CALLER_KEY, magpieAddress } from "../runtimes/magpie.ts";
 import {
   KIND_CAPABILITIES,
+  MAX_CONTEXT_CHARS,
   PROVIDER_NAME_PATTERN,
   ROLE_CAPABILITY,
   SPEECH_KINDS,
@@ -30,6 +31,7 @@ import {
  *       openai: { kind: openai-compatible, url: https://api.openai.com/v1, apiKeyEnv: OPENAI_API_KEY }
  *     fallback: { asr: [openai] }
  *     voices: { narrator: { gpu: en-Frank_man, openai: onyx } }
+ *     terms: [skill, ai-space, Claude Code]   # the person's words a recognizer gets wrong
  *
  * A file of its own, not a section of runtimes.yaml: an older ai-space refuses an unknown key there
  * and would lose its runtimes on a rollback. Keys stay in the environment: `apiKeyEnv` names the
@@ -73,7 +75,7 @@ export function parseProvidersYaml(text: string, env: Record<string, string | un
 export function parseSpeech(raw: unknown, env: Record<string, string | undefined> = process.env): { config: SpeechConfig; warnings: string[] } {
   const ctx = `${PROVIDERS_FILE}: speech`;
   if (!isRecord(raw)) throw new Error(`${ctx} must be a mapping`);
-  for (const key of Object.keys(raw)) if (!["default", "providers", "fallback", "voices"].includes(key)) throw new Error(`${ctx} has unknown key "${key}"`);
+  for (const key of Object.keys(raw)) if (!["default", "providers", "fallback", "voices", "terms"].includes(key)) throw new Error(`${ctx} has unknown key "${key}"`);
   if (!isRecord(raw.providers) || Object.keys(raw.providers).length === 0) throw new Error(`${ctx}.providers must be a non-empty mapping`);
 
   const warnings: string[] = [];
@@ -155,7 +157,30 @@ export function parseSpeech(raw: unknown, env: Record<string, string | undefined
       voices[voice] = out;
     }
   }
-  return { config: { providers, default: def, fallback, voices, off }, warnings };
+  const terms = parseTerms(raw.terms, `${ctx}.terms`);
+  return { config: { providers, default: def, fallback, voices, off, ...(terms.length ? { terms } : {}) }, warnings };
+}
+
+/**
+ * `terms:` (docs/speech.md#terms): the names and words the person says that a recognizer would
+ * otherwise get wrong, sent as one `, `-joined text, so a term holds no comma or line break and the
+ * whole stays within the recognizer's context limit. A term twice is refused, as a fallback entry is.
+ */
+function parseTerms(raw: unknown, where: string): string[] {
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw)) throw new Error(`${where} must be a list of words: terms: [skill, ai-space]`);
+  const out: string[] = [];
+  for (const entry of raw) {
+    // A bare number or yes/no is read by YAML as something else; quoted it stays as written.
+    if (typeof entry !== "string" || !entry.trim()) throw new Error(`${where}: ${JSON.stringify(entry)} must be a word or a name (quote it when YAML reads it as a number or a boolean)`);
+    const term = entry.trim();
+    if (/[,，\r\n]/.test(term)) throw new Error(`${where}: "${term}" holds a comma or a line break; give each term as its own entry`);
+    if (out.some((t) => t.toLowerCase() === term.toLowerCase())) throw new Error(`${where} lists ${term} twice`);
+    out.push(term);
+  }
+  const length = out.join(", ").length;
+  if (length > MAX_CONTEXT_CHARS) throw new Error(`${where} is ${length} characters joined; at most ${MAX_CONTEXT_CHARS}: keep it to the words that actually go wrong`);
+  return out;
 }
 
 function parseProvider(name: string, kind: SpeechKind, raw: Record<string, unknown>, env: Record<string, string | undefined>): { spec: ProviderSpec; off?: string } {

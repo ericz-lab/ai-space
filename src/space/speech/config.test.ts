@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { builtinSpeech, loadSpeech, parseProvidersYaml } from "./config.ts";
 import { parseAppSpeechSpec } from "./spec.ts";
+import { speechContext } from "./types.ts";
 import { parseManifest } from "../scheduler/manifest.ts";
 
 const FULL = `
@@ -154,5 +155,62 @@ describe("the manifest's speech section", () => {
     expect(() => parseAppSpeechSpec({ "local-only": "yes" })).toThrow("must be true or false");
     expect(parseManifest("name: notes\nspeech: { local-only: true }\n", "/apps/notes").speech).toEqual({ localOnly: true });
     expect(parseManifest("name: notes\n", "/apps/notes").speech).toBeUndefined();
+  });
+});
+
+describe("terms (docs/speech.md#terms)", () => {
+  const ONE = "speech:\n  providers:\n    gpu: { kind: voice-studio }\n";
+  const parse = (terms: string) => parseProvidersYaml(`${ONE}  terms: ${terms}\n`, {}).config;
+
+  test("a list of words, trimmed; missing, null or empty is none; the built-in default has none", () => {
+    expect(parse("[skill, ' ai-space ', agent, Claude Code, \"2049\"]").terms).toEqual(["skill", "ai-space", "agent", "Claude Code", "2049"]);
+    expect(parseProvidersYaml(`${ONE}  terms:\n    - skill\n    - 随手改\n`, {}).config.terms).toEqual(["skill", "随手改"]);
+    expect(parseProvidersYaml(ONE, {}).config).not.toHaveProperty("terms");
+    expect(parse("[]")).not.toHaveProperty("terms");
+    expect(parse("null")).not.toHaveProperty("terms");
+    expect(builtinSpeech()).not.toHaveProperty("terms");
+  });
+
+  test("bad shapes and the 300-character limit are refused with the reason", () => {
+    expect(() => parse("skill")).toThrow("providers.yaml: speech.terms must be a list of words");
+    expect(() => parse("[skill, '']")).toThrow('speech.terms: "" must be a word or a name');
+    expect(() => parse("[skill, 3090]")).toThrow("speech.terms: 3090 must be a word or a name (quote it");
+    expect(() => parse("[skill, { a: b }]")).toThrow("must be a word or a name");
+    expect(() => parse("['skill, agent']")).toThrow('speech.terms: "skill, agent" holds a comma or a line break; give each term as its own entry');
+    expect(() => parse('["two\\nlines"]')).toThrow("holds a comma or a line break");
+    expect(() => parse("[Skill, skill]")).toThrow("speech.terms lists skill twice");
+    // 30 terms of 8 characters: 30 * 8 + 29 * 2 = 298 fits, a 31st does not.
+    const words = Array.from({ length: 31 }, (_, i) => `word${String(i).padStart(4, "0")}`);
+    expect(parse(`[${words.slice(0, 30).join(", ")}]`).terms).toHaveLength(30);
+    expect(() => parse(`[${words.join(", ")}]`)).toThrow("speech.terms is 308 characters joined; at most 300: keep it to the words that actually go wrong");
+  });
+});
+
+describe("speechContext: the Space's terms and the client's context", () => {
+  test("nothing gives nothing; either alone is itself", () => {
+    expect(speechContext([], "")).toBe("");
+    expect(speechContext([], "  ")).toBe("");
+    expect(speechContext(["skill", "ai-space"], "")).toBe("skill, ai-space");
+    expect(speechContext([], "a meeting about GPUs")).toBe("a meeting about GPUs");
+  });
+
+  test("the terms first, then the client's context without the terms it repeats", () => {
+    expect(speechContext(["skill", "ai-space"], "Claude Code")).toBe("skill, ai-space, Claude Code");
+    expect(speechContext(["skill", "ai-space"], "AI-Space, Claude Code，SKILL")).toBe("skill, ai-space, Claude Code");
+    expect(speechContext(["skill"], "Skill")).toBe("skill");
+  });
+
+  test("never longer than the limit: the terms whole, the client's part cut at a separator", () => {
+    const terms = ["a".repeat(100), "b".repeat(100)]; // 202 characters joined
+    const merged = speechContext(terms, `one, two, ${"c".repeat(90)}, three`);
+    expect(merged).toBe(`${terms.join(", ")}, one, two`);
+    // A part that does not fit is taken by whole words, never cut inside one.
+    expect(speechContext(terms, "alpha beta gamma " + "d".repeat(90))).toBe(`${terms.join(", ")}, alpha beta gamma`);
+    expect(speechContext(terms, "e".repeat(120))).toBe(terms.join(", "));
+    for (const own of ["x ".repeat(150), "y, ".repeat(100), "z".repeat(300)]) expect(speechContext(terms, own).length).toBeLessThanOrEqual(300);
+    // Terms that fill the limit leave no room for the client's part.
+    const full = Array.from({ length: 30 }, (_, i) => `word${String(i).padStart(4, "0")}`);
+    expect(speechContext(full, "more")).toBe(full.join(", "));
+    expect(speechContext([], "f".repeat(301))).toBe("");
   });
 });

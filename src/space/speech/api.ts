@@ -3,7 +3,7 @@ import { wantsWebSocket } from "../terminal/api.ts";
 import { type Connect, liveAttachment } from "./live.ts";
 import { MAX_SPEAK_CHARS, type SpeechService } from "./service.ts";
 import { SPEECH_WINDOWS, type SpeechWindow } from "./store.ts";
-import { languageHint, PROVIDER_NAME_PATTERN, SpeechError, TAG_PATTERN, VOICE_PATTERN, type SpeechCaller } from "./types.ts";
+import { languageHint, MAX_CONTEXT_CHARS, PROVIDER_NAME_PATTERN, SpeechError, speechContext, TAG_PATTERN, VOICE_PATTERN, type SpeechCaller } from "./types.ts";
 
 /**
  * HTTP surface of the speech layer (docs/speech.md#contract):
@@ -19,7 +19,7 @@ import { languageHint, PROVIDER_NAME_PATTERN, SpeechError, TAG_PATTERN, VOICE_PA
  * and the panel's older routes, now through the same layer (docs/speech.md#compatibility):
  *
  *   GET  /api/voice                     { ok, transcribe }
- *   POST /api/voice/transcribe          as /api/speech/transcribe, tag voice-input
+ *   POST /api/voice/transcribe          as /api/speech/transcribe, tag voice-input, the Space's terms in its context
  *   GET  /api/voice/realtime            as /api/speech/live, tag voice-input
  *
  * An app's `SPACE_APP_TOKEN` calls as that app; the operator token, the owner's session and the panel
@@ -36,7 +36,7 @@ export type SpeechApiOptions = {
 
 /** OpenAI's limit, the largest a provider here takes. */
 export const MAX_TRANSCRIBE_BYTES = 25 * 1024 * 1024;
-export const MAX_CONTEXT_CHARS = 300;
+export { MAX_CONTEXT_CHARS };
 const MAX_VOICES = 8;
 const SPEAK_VOICE = new RegExp(`^(?:[a-z0-9][a-z0-9._-]*/)?${VOICE_PATTERN.source.slice(1, -1)}$`, "u");
 
@@ -54,7 +54,12 @@ export function createSpeechRoutes(opts: SpeechApiOptions): Routes {
     return who === undefined ? undefined : who === OPERATOR ? "space" : who.app;
   };
 
-  const transcribe = (defaultTag: string): Handler => async (req) => {
+  /**
+   * `terms`: the Space's terms join the caller's context (docs/speech.md#terms). Only for the person's
+   * own dictation (`/api/voice/transcribe`, voice input's clip fallback); a file an app transcribes
+   * through `/api/speech/transcribe` is not what the person said, so it gets only its own context.
+   */
+  const transcribe = (defaultTag: string, terms = false): Handler => async (req) => {
     const app = await callerOf(req);
     if (!app) return fail(401, "unauthorized");
     const length = Number(req.headers.get("content-length") ?? 0);
@@ -76,8 +81,9 @@ export function createSpeechRoutes(opts: SpeechApiOptions): Routes {
     const raw = field("language");
     if (!/^[A-Za-z-]{0,16}$/.test(raw)) return fail(400, "language must be a language code such as zh or en");
     const language = languageHint(raw);
-    const context = field("context");
-    if (context.length > MAX_CONTEXT_CHARS) return fail(400, `context is at most ${MAX_CONTEXT_CHARS} characters`);
+    const own = field("context");
+    if (own.length > MAX_CONTEXT_CHARS) return fail(400, `context is at most ${MAX_CONTEXT_CHARS} characters`);
+    const context = terms ? speechContext(service.terms, own) : own;
     const tag = field("tag") || defaultTag;
     if (!TAG_PATTERN.test(tag)) return fail(400, "tag must be a short name");
     const provider = field("provider");
@@ -162,7 +168,7 @@ export function createSpeechRoutes(opts: SpeechApiOptions): Routes {
     "/api/voice": {
       GET: () => json({ ok: true, transcribe: service.canTranscribe() }),
     },
-    "/api/voice/transcribe": { POST: transcribe("voice-input") },
+    "/api/voice/transcribe": { POST: transcribe("voice-input", true) },
     "/api/voice/realtime": { GET: live("voice-input") },
   };
 }
