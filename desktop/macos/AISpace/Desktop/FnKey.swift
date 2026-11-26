@@ -2,24 +2,28 @@ import AppKit
 import ApplicationServices
 import Carbon.HIToolbox
 
-/// Holding the fn (Globe) key in any app (docs/macos-desktop.md#voice-input). A Carbon hot key
-/// cannot be a bare modifier, so this watches key events: the global monitor sees other apps'
-/// keys only while AI Space is trusted for Accessibility, the local one sees its own windows.
-/// FnHoldRules decides what a press means. Installed only while the setting is on.
+/// Holding a modifier key alone in any app (docs/macos-desktop.md#voice-input): fn (Globe) to
+/// talk into the field, right ⌥ to send a spoken note to an app; one instance per key, named for
+/// the first. A Carbon hot key cannot be a bare modifier, so this watches key events: the global
+/// monitor sees other apps' keys only while AI Space is trusted for Accessibility, the local one
+/// sees its own windows. HoldKey says which events are the key's, FnHoldRules decides what a
+/// press means. Installed only while the setting is on.
 @MainActor
 final class FnKey {
+    private let key: HoldKey
     private let began: () -> Void
     private let ended: () -> Void
     private var rules = FnHoldRules()
     private var monitors: [Any] = []
     private var timer: Timer?
-    /// While fn is down: the modifier state read directly, for a release no monitor delivered.
+    /// While the key is down: its state read directly, for a release no monitor delivered.
     private var watch: Timer?
     private var seenDown = false
     /// While not trusted: notices the grant, since a global monitor made before it hears nothing.
     private var trustWatch: Timer?
 
-    init(began: @escaping () -> Void, ended: @escaping () -> Void) {
+    init(key: HoldKey = .fn, began: @escaping () -> Void, ended: @escaping () -> Void) {
+        self.key = key
         self.began = began
         self.ended = ended
     }
@@ -65,15 +69,14 @@ final class FnKey {
         trustWatch?.invalidate(); trustWatch = nil
         timer?.invalidate(); timer = nil
         stopWatching()
-        // A recording in progress ends as if fn came up.
+        // A recording in progress ends as if the key came up.
         if rules.fn(down: false, others: false) == .stop { ended() }
         rules.reset()
     }
 
     private func feed(_ type: NSEvent.EventType, key: UInt16, flags: NSEvent.ModifierFlags) {
-        if type == .flagsChanged, key == UInt16(kVK_Function) {
-            let others = !flags.intersection([.command, .option, .control, .shift]).isEmpty
-            run(rules.fn(down: flags.contains(.function), others: others))
+        if type == .flagsChanged, let read = self.key.reading(keyCode: key, flags: flags.rawValue) {
+            run(rules.fn(down: read.down, others: read.others))
         } else {
             run(rules.other())
         }
@@ -96,13 +99,13 @@ final class FnKey {
     }
 
     /// A release the monitors miss (secure input in a password field takes key events from them)
-    /// would leave the microphone on. The current modifier state is read every 0.1 s; it counts
-    /// only after it once showed fn down, so a system that never reports fn there changes nothing.
+    /// would leave the microphone on. The key's state is read every 0.1 s; it counts only after it
+    /// once showed the key down, so a system that never reports it there changes nothing.
     private func startWatching() {
         stopWatching()
         watch = Self.schedule(0.1, repeats: true) { [weak self] in
             guard let self else { return }
-            if NSEvent.modifierFlags.contains(.function) { self.seenDown = true }
+            if self.isDown() { self.seenDown = true }
             else if self.seenDown { self.run(self.rules.fn(down: false, others: false)) }
         }
     }
@@ -112,6 +115,15 @@ final class FnKey {
         let timer = Timer(timeInterval: interval, repeats: repeats) { _ in MainActor.assumeIsolated { action() } }
         RunLoop.main.add(timer, forMode: .common)
         return timer
+    }
+
+    /// fn from the modifier state, as always; right ⌥ by its key code, since the modifier state
+    /// says only that some ⌥ is down.
+    private func isDown() -> Bool {
+        switch key.poll {
+        case .functionFlag: return NSEvent.modifierFlags.contains(.function)
+        case .keyState: return CGEventSource.keyState(.combinedSessionState, key: CGKeyCode(key.keyCode))
+        }
     }
 
     private func stopWatching() {

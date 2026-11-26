@@ -9,7 +9,7 @@ struct AISpaceApp: App {
     var body: some Scene {
         Settings {
             TabView {
-                GeneralSettings(prefs: prefs, store: delegate.model.store)
+                GeneralSettings(prefs: prefs, store: delegate.model.store, model: delegate.model)
                     .tabItem { Label("General", systemImage: "gearshape") }
                 ConnectionSettings(model: delegate.model, store: delegate.model.store)
                     .tabItem { Label("Connections", systemImage: "network") }
@@ -39,7 +39,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private lazy var quickChat = QuickChat(model: model)
     private lazy var hotKey = HotKey { [weak self] in self?.quickChat.toggle() }
     private lazy var dictation = Dictation(model: model)
-    private lazy var fnKey = FnKey(began: { [weak self] in self?.dictation.begin() }, ended: { [weak self] in self?.dictation.end() })
+    private lazy var fnKey = FnKey(began: { [weak self] in self?.dictation.begin(.field) }, ended: { [weak self] in self?.dictation.end(.field) })
+    private lazy var captureKey = FnKey(key: .rightOption, began: { [weak self] in self?.dictation.begin(.capture) }, ended: { [weak self] in self?.dictation.end(.capture) })
     private lazy var floatingBall = FloatingBall(model: model) { [weak self] agent, text, near in self?.quickChat.show(agent: agent, text: text, near: near) }
     private lazy var deskPet = DeskPet(model: model)
     private var watchers: Set<AnyCancellable> = []
@@ -79,6 +80,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             if Preferences.shared.quickChatTaken != taken { Preferences.shared.quickChatTaken = taken }
         }.store(in: &watchers)
         Preferences.shared.$voiceInput.sink { [weak self] on in self?.fnKey.set(enabled: on) }.store(in: &watchers)
+        Preferences.shared.$voiceCapture.sink { [weak self] on in self?.captureKey.set(enabled: on) }.store(in: &watchers)
         Preferences.shared.$floatingBall.sink { [weak self] on in self?.floatingBall.set(visible: on) }.store(in: &watchers)
         // The desk pet over every app; in the window, LauncherPet draws it instead.
         Publishers.CombineLatest3(Preferences.shared.$pet, Preferences.shared.$petPlace, Preferences.shared.$petSize)

@@ -5,6 +5,13 @@ import SwiftUI
 struct GeneralSettings: View {
     @ObservedObject var prefs: Preferences
     @ObservedObject var store: ConnectionStore
+    @ObservedObject var model: AppModel
+    /// The Space's places for a spoken note (`GET /api/capture`, `textTargets`); nil until read.
+    @State private var captureTargets: [ScreenshotRules.Target]?
+    @State private var captureTargetsFailed = false
+
+    /// The Space that transcribes, and so the one whose apps get a note.
+    private var listening: Connection? { model.selected ?? store.defaultConnection }
 
     var body: some View {
         Form {
@@ -34,6 +41,19 @@ struct GeneralSettings: View {
             }
             if prefs.voiceInput, FnKey.systemActsOnGlobeKey {
                 Text("macOS acts on this key too. Set System Settings → Keyboard → “Press 🌐 key to” to “Do Nothing”, or letting go of fn may also open the emoji picker, change the input source or start Dictation.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            Toggle("Hold right ⌥ to capture", isOn: $prefs.voiceCapture)
+                .onChange(of: prefs.voiceCapture) { _, on in
+                    if on, !AXIsProcessTrusted() { AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": true] as CFDictionary) }
+                }
+            Text("Hold the right ⌥ key in any app and say something: when you let go, the words are sent to an app of the Space as a note, and typed nowhere. A tap, or ⌥ with another key, works as before. Seeing the key in other apps needs AI Space allowed in System Settings → Privacy & Security → Accessibility.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            if prefs.voiceCapture, let space = listening {
+                captureDestination(space)
+            }
+            if prefs.voiceCapture, !AXIsProcessTrusted() {
+                Text("AI Space is not allowed under Accessibility yet, so right ⌥ is seen only while AI Space is in front.")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             Picker("Voice language", selection: $prefs.voiceLanguage) {
@@ -69,5 +89,39 @@ struct GeneralSettings: View {
         }
         .formStyle(.grouped)
         .frame(width: 520)
+        .task(id: "\(prefs.voiceCapture) \(listening?.id.uuidString ?? "")") { await loadCaptureTargets() }
+    }
+
+    /// Where right ⌥ sends a note: a picker when the Space has several places, else what there is.
+    @ViewBuilder private func captureDestination(_ space: Connection) -> some View {
+        if captureTargetsFailed {
+            Text("\(space.name) is not connected. Voice input needs the Space.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        } else if let targets = captureTargets {
+            if targets.isEmpty {
+                Text(verbatim: DictationRules.noTargetNote(space: space.name))
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            } else if targets.count == 1 {
+                Text("Notes go to \(targets[0].displayTitle()) on \(space.name).")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            } else {
+                Picker("Send to", selection: Binding(
+                    get: { DictationRules.captureTarget(targets, chosen: prefs.voiceCaptureTargets[space.id.uuidString])?.id ?? "" },
+                    set: { prefs.voiceCaptureTargets[space.id.uuidString] = $0 })) {
+                    ForEach(targets) { Text(verbatim: $0.displayTitle()).tag($0.id) }
+                }
+            }
+        }
+    }
+
+    private func loadCaptureTargets() async {
+        captureTargets = nil
+        captureTargetsFailed = false
+        guard prefs.voiceCapture, let space = listening else { return }
+        do {
+            captureTargets = try await model.loader(for: space).api.get("/api/capture", as: DictationRules.TextTargets.self).textTargets ?? []
+        } catch {
+            captureTargetsFailed = true
+        }
     }
 }

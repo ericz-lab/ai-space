@@ -4,7 +4,7 @@ import type { SpaceEvent } from "../scheduler/types.ts";
 import { type AppCapabilities, type Bus, CallError } from "./bus.ts";
 import { ConsumerError, type Consumers, consumerView, parseConsumerInput } from "./consumers.ts";
 import type { BusStore } from "./store.ts";
-import { type CallRecord, type Consumer, type Delivery, type DeliveryStatus, MAX_CALL_BODY_BYTES, MAX_CALL_TIMEOUT_MS, MAX_CONSUMER_STREAMS, consumerKey } from "./types.ts";
+import { CAPTURE_KINDS, type CallRecord, type CaptureKind, type Consumer, type Delivery, type DeliveryStatus, MAX_CALL_BODY_BYTES, MAX_CALL_TIMEOUT_MS, MAX_CONSUMER_STREAMS, consumerKey } from "./types.ts";
 import { OPERATOR as SPACE_OPERATOR, bearer, identify as identifyCaller, isOperator } from "../auth.ts";
 
 /**
@@ -21,11 +21,14 @@ import { OPERATOR as SPACE_OPERATOR, bearer, identify as identifyCaller, isOpera
  *                                           that is not here but on exactly one peer is reached through that peer
  *   POST /api/call/:peer/:app/:capability   the same, naming the peer; a peer known to be down answers 503 at once
  *   GET  /api/calls?app&caller&limit        call history, newest first
- *   GET  /api/capture                       { image, targets }: the capabilities that declare `capture: { kinds: [image] }`,
- *                                           here and on the peers, for the client to choose from (docs/events.md#capture)
+ *   GET  /api/capture                       { image, targets, text, textTargets }: the capabilities that declare `capture`,
+ *                                           here and on the peers, for the client to choose from (docs/events.md#capture):
+ *                                           `targets` those that take `image` (as before), `textTargets` those that take `text`
  *   POST /api/capture/image?to=<target>     multipart `file` (+ `text`, `via`, `id`), forwarded as the operator to the chosen
  *                                           target (`app/capability`, or `peer/app/capability`); without `to`, to
  *                                           ai-spark/capture-image as before
+ *   POST /api/capture/text?to=<target>      JSON { text, via?, id } (the Mac's spoken notes), forwarded as the operator to
+ *                                           the chosen target that takes `text`
  *   GET  /api/consumers                     external consumers (operator token)
  *   POST /api/consumers                     { name, subscriptions, calls } create one; the credential is in the answer, once
  *   GET  /api/consumers/:name               one consumer (operator token)
@@ -62,8 +65,15 @@ export type BusApiOptions = {
 
 export const IMAGE_CAPTURER = { app: "ai-spark", capability: "capture-image" };
 
-/** A place a client's picture can go, as `GET /api/capture` lists it; `id` is what `?to=` names. */
-export type CaptureTarget = { id: string; app: string; capability: string; peer?: string; title: string; i18n?: Record<string, { title: string }> };
+/** A place a client's capture can go, as `GET /api/capture` lists it; `id` is what `?to=` names. */
+export type CaptureTarget = { id: string; app: string; capability: string; peer?: string; title: string; i18n?: Record<string, { title: string }>; kinds: CaptureKind[] };
+
+/** The longest note `POST /api/capture/text` takes, in characters: minutes of speech, far below the bus limit. */
+export const MAX_CAPTURE_TEXT_CHARS = 20_000;
+/** Its whole JSON body, checked before it is read (a CJK character is three bytes, and escapes add more). */
+const MAX_CAPTURE_TEXT_BODY_BYTES = 128 * 1024;
+const CAPTURE_TEXT_VIA = ["voice", "type"];
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** What the bus routes need from the peer hub; `name` is this space's own name, prefixed onto forwarded callers. */
 export type RemoteBus = {
@@ -192,22 +202,35 @@ export function createBusRoutes(opts: BusApiOptions): Routes {
     return at === "local" ? callLocal(req, OPERATOR, cap.app, cap.capability) : callRemote(req, OPERATOR, at, cap.app, cap.capability);
   };
   const imageCapturer = opts.imageCapturer ?? IMAGE_CAPTURER;
-  /** Every capability that keeps a captured picture: this space's first, then each peer's. */
-  const captureTargets = (): CaptureTarget[] => {
+  /** Every capability that keeps a capture of this kind: this space's first, then each peer's. */
+  const captureTargets = (kind: CaptureKind): CaptureTarget[] => {
     // A peer's apps come as `<peer>/<app>` from the hub.
     const one = (a: AppCapabilities, peer?: string): CaptureTarget[] =>
-      a.provides.filter((c) => c.capture?.kinds.includes("image")).map((c) => ({
+      a.provides.filter((c) => c.capture?.kinds.includes(kind)).map((c) => ({
         id: `${a.app}/${c.name}`, app: peer && a.app.startsWith(`${peer}/`) ? a.app.slice(peer.length + 1) : a.app, capability: c.name, ...(peer ? { peer } : {}),
-        title: c.capture!.title, ...(c.capture!.i18n ? { i18n: c.capture!.i18n } : {}),
+        title: c.capture!.title, ...(c.capture!.i18n ? { i18n: c.capture!.i18n } : {}), kinds: c.capture!.kinds,
       }));
     return [...bus.capabilities().flatMap((a) => one(a)), ...(opts.remote?.capabilities() ?? []).flatMap((a) => one(a, a.peer))];
+  };
+  /** The chosen target of this kind, here or on its peer, as the operator; a `to` that takes another kind is refused. */
+  const forwardToTarget = (req: Request, to: string, kind: CaptureKind): Promise<Response> | Response => {
+    const target = captureTargets(kind).find((t) => t.id === to);
+    if (!target) {
+      const other = CAPTURE_KINDS.filter((k) => k !== kind).some((k) => captureTargets(k).some((t) => t.id === to));
+      return error(404, other ? `${to} does not take ${kind} (GET /api/capture lists what each target takes)` : `${to} is not a capture target here or on a peer (GET /api/capture lists them)`);
+    }
+    if (!target.peer) return callLocal(req, OPERATOR, target.app, target.capability);
+    const peer = opts.remote?.get(target.peer);
+    return peer ? callRemote(req, OPERATOR, peer, target.app, target.capability) : error(503, `peer ${target.peer} is not connected`);
   };
 
   return {
     "/api/capture": {
       GET: () => {
-        const targets = captureTargets();
-        return json({ ok: true, image: targets.length > 0 || providerAt(imageCapturer) !== undefined, targets });
+        // `targets` stays the image targets alone: the iPhone client lists it as places for a picture.
+        const targets = captureTargets("image");
+        const textTargets = captureTargets("text");
+        return json({ ok: true, image: targets.length > 0 || providerAt(imageCapturer) !== undefined, targets, text: textTargets.length > 0, textTargets });
       },
     },
 
@@ -215,11 +238,36 @@ export function createBusRoutes(opts: BusApiOptions): Routes {
       POST: (req) => {
         const to = new URL(req.url).searchParams.get("to");
         if (!to) return forwardAsOperator(req, imageCapturer);
-        const target = captureTargets().find((t) => t.id === to);
-        if (!target) return error(404, `${to} is not a capture target here or on a peer (GET /api/capture lists them)`);
-        if (!target.peer) return callLocal(req, OPERATOR, target.app, target.capability);
-        const peer = opts.remote?.get(target.peer);
-        return peer ? callRemote(req, OPERATOR, peer, target.app, target.capability) : error(503, `peer ${target.peer} is not connected`);
+        return forwardToTarget(req, to, "image");
+      },
+    },
+
+    // A note in words (the Mac's hold-to-capture key): checked here, then sent on as the operator.
+    "/api/capture/text": {
+      POST: async (req) => {
+        const to = new URL(req.url).searchParams.get("to");
+        if (!to) return error(400, "to is required: GET /api/capture lists the targets that take text");
+        const length = Number(req.headers.get("content-length") ?? 0);
+        if (length > MAX_CAPTURE_TEXT_BODY_BYTES) return error(413, `body is ${length} bytes; the limit is ${MAX_CAPTURE_TEXT_BODY_BYTES}`);
+        const raw = await req.arrayBuffer();
+        if (raw.byteLength > MAX_CAPTURE_TEXT_BODY_BYTES) return error(413, `body is ${raw.byteLength} bytes; the limit is ${MAX_CAPTURE_TEXT_BODY_BYTES}`);
+        let body: unknown;
+        try {
+          body = JSON.parse(new TextDecoder().decode(raw));
+        } catch {
+          return error(400, "the body must be JSON { text, via?, id }");
+        }
+        if (typeof body !== "object" || body === null || Array.isArray(body)) return error(400, "the body must be JSON { text, via?, id }");
+        const { text: rawText, via, id } = body as Record<string, unknown>;
+        const text = typeof rawText === "string" ? rawText.trim() : "";
+        if (!text) return error(400, "text is empty");
+        if (text.length > MAX_CAPTURE_TEXT_CHARS) return error(413, `text is ${text.length} characters; the limit is ${MAX_CAPTURE_TEXT_CHARS}`);
+        if (via !== undefined && !(typeof via === "string" && CAPTURE_TEXT_VIA.includes(via))) return error(400, `via must be ${CAPTURE_TEXT_VIA.join(" or ")}`);
+        if (typeof id !== "string" || !UUID.test(id)) return error(400, "id must be a UUID, the same on every retry");
+        const headers: Record<string, string> = { "content-type": "application/json" };
+        if (req.headers.get("accept")) headers.accept = req.headers.get("accept")!;
+        const forwarded = new Request(req.url, { method: "POST", headers, body: JSON.stringify({ text, ...(via !== undefined ? { via } : {}), id }), signal: req.signal });
+        return forwardToTarget(forwarded, to, "text");
       },
     },
 

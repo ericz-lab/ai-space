@@ -273,7 +273,7 @@ The panel probes `GET 127.0.0.1:<port><service.health>` (two-second timeout), ca
 | `DELETE /api/panel/icons/:pack` | a whole pack; an active one turns packs off |
 | `POST /api/panel/usage/open`, `GET /api/usage` | an open of a tile or library card (a beacon); opens and time in use per entry ([usage.md](usage.md)) |
 | `GET /api/voice`, `POST /api/voice/transcribe`, `WS /api/voice/realtime` | whether voice input can be transcribed, a recorded clip (multipart `file`), and a live stream: the older names of `/api/speech/*` with the tag `voice-input`, kept for the native clients ([speech.md](speech.md#compatibility)) |
-| `GET /api/capture`, `POST /api/capture/image?to=` | the places a picture can be kept (capabilities declaring `capture`, here and on peers), and a picture (multipart `file`, `text`, `via`, `id`) forwarded to the chosen one as the operator: the iPhone client's screenshots ([events.md](events.md#capture)) |
+| `GET /api/capture`, `POST /api/capture/image?to=`, `POST /api/capture/text?to=` | the places a picture or a note in words can be kept (capabilities declaring `capture`, here and on peers), a picture (multipart `file`, `text`, `via`, `id`) and a note (JSON `text`, `via`, `id`) forwarded to the chosen one as the operator: the iPhone client's screenshots and the Mac's spoken notes ([events.md](events.md#capture)) |
 | `GET /api/agents` | every agent the panel lists |
 | `POST /api/agents/:app/:agent/chat` | one chat turn as a background run, SSE |
 | `GET /api/agents/runs`, `GET /api/agents/:app/:agent/runs[/:id[/events]]`, `POST /api/agents/:app/:agent/runs/:id/stop`, `…/steer`, `…/approvals/:rid` | chat runs: list, one, replay and follow, stop, add a message, answer an approval ([Background runs](#background-runs)) |

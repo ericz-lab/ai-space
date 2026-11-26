@@ -26,7 +26,7 @@ import { CAPTURE_KINDS, type Capability, type CaptureKind, type CaptureSpec, DEF
  *     timeout: 2m
  *     callers: [portfolio]                       # default: every app on this space
  *     action: { ... }                            # optional: offered in the command box (shortcuts/spec.ts)
- *     capture: { kinds: [image], title, i18n? }  # optional: a place a client keeps a screenshot (docs/events.md#capture)
+ *     capture: { kinds: [image, text], title, i18n? }  # optional: a place a client keeps a screenshot or a spoken note (docs/events.md#capture)
  * ```
  *
  * Parsing is strict, like the rest of the manifest: an unknown key or a bad value rejects the app.
@@ -162,7 +162,7 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
-/** `capture: { kinds: [image], title, i18n?: { zh: { title } } }` on a capability. */
+/** `capture: { kinds: [image | text, …], title, i18n?: { zh: { title } } }` on a capability. */
 export function parseCaptureSpec(raw: unknown, ctx: string): CaptureSpec {
   if (!isRecord(raw)) throw new Error(`${ctx} must be a mapping with kinds / title / i18n`);
   for (const key of Object.keys(raw)) if (!["kinds", "title", "i18n"].includes(key)) throw new Error(`${ctx} has unknown key "${key}"`);

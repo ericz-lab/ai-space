@@ -46,6 +46,11 @@ final class Preferences: ObservableObject {
     /// Voice input in any app while fn is held (Dictation.swift): it watches every key press and
     /// wants Accessibility, so it is off until the operator turns it on.
     @Published var voiceInput: Bool { didSet { defaults.set(voiceInput, forKey: "voiceInputFn") } }
+    /// A spoken note sent to an app while right ⌥ is held (Dictation.swift, `.capture`): off until
+    /// the operator turns it on, for the same reason as fn.
+    @Published var voiceCapture: Bool { didSet { defaults.set(voiceCapture, forKey: "voiceCaptureRightOption") } }
+    /// Where right ⌥ sends a note on each Space: connection id → capture target id (`GET /api/capture`).
+    @Published var voiceCaptureTargets: [String: String] { didSet { defaults.set(voiceCaptureTargets, forKey: "voiceCaptureTargets") } }
     /// What voice input is transcribed in (VoiceLanguage): "" the app's language, "auto" detect, or a code.
     @Published var voiceLanguage: String { didSet { defaults.set(voiceLanguage, forKey: VoiceLanguage.defaultsKey) } }
     /// The agent Quick Chat last talked to, as `<connection id> <agent id>`.
@@ -102,6 +107,8 @@ final class Preferences: ObservableObject {
         notifications = defaults.object(forKey: "notifications") as? Bool ?? true
         quickChat = Shortcut(rawValue: defaults.string(forKey: "quickChat") ?? "") ?? .optionSpace
         voiceInput = defaults.bool(forKey: "voiceInputFn")
+        voiceCapture = defaults.bool(forKey: "voiceCaptureRightOption")
+        voiceCaptureTargets = defaults.dictionary(forKey: "voiceCaptureTargets") as? [String: String] ?? [:]
         voiceLanguage = defaults.string(forKey: VoiceLanguage.defaultsKey) ?? VoiceLanguage.sameAsApp
         // Voice input once had a Space of its own here; it follows the selected Space now.
         defaults.removeObject(forKey: "voiceInputSpace")

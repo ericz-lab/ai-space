@@ -96,7 +96,7 @@ A provider only has to trust requests that come from loopback and carry `x-space
 
 ## Capture
 
-A capability can offer itself as a place to keep what a client captures. Today that is a picture: the iPhone client's screenshots (mobile/ios/README.md#screenshots). Several apps may declare it; the client lists them and the operator picks one each time.
+A capability can offer itself as a place to keep what a client captures: a picture (`image`: the iPhone client's screenshots, mobile/ios/README.md#screenshots, and the Mac's Share Picture) or a note in words (`text`: the Mac's hold right ⌥ to capture, docs/macos-desktop.md#voice-input). Several apps may declare it; the client lists them and the operator picks one.
 
 ```yaml
 provides:
@@ -104,14 +104,26 @@ provides:
     http: { method: POST, path: /api/ideas/image }
     timeout: 30s
     capture:
-      kinds: [image]          # what it takes; only image so far
+      kinds: [image]          # what it takes: image, text, or both
       title: Spark            # the name in the client's picker
       i18n: { zh: { title: 灵光一闪 } }
 ```
 
-The target is called as `space` (so `callers`, when set, must include it) with a POST of multipart `file` (PNG or JPEG; the whole call is capped at 4 MiB), `text?` (the operator's words, may be absent), `via?` (`screenshot`, `share` or `pick`) and `id` (a UUID the client keeps across retries: a repeated `id` must answer the first result, not make a second). It answers `{ ok, url?, label? }`: the page of what was kept and a short name for it ("Spark #12"); anything else in the answer is the app's own.
+The target is called as `space` (so `callers`, when set, must include it) with a POST. For `image` that is multipart `file` (PNG or JPEG; the whole call is capped at 4 MiB), `text?` (the operator's words, may be absent), `via?` (`screenshot`, `share` or `pick`) and `id`. For `text` it is JSON `{ text, via?, id }`: `text` the note (trimmed, never empty, at most 20,000 characters), `via?` `voice` (spoken and transcribed) or `type`. In both, `id` is a UUID the client keeps across retries: a repeated `id` must answer the first result, not make a second. The target answers `{ ok, url?, label? }`: the page of what was kept and a short name for it ("Spark #12"); anything else in the answer is the app's own.
 
-`GET /api/capture` lists the targets of this space and its peers as `{ id, app, capability, peer?, title, i18n? }`; `POST /api/capture/image?to=<id>` forwards the client's request as the operator to that one, and refuses an id that is not a declared target. Both are panel routes: no token, writes held to the panel's origin.
+`GET /api/capture` lists the targets of this space and its peers:
+
+```json
+{
+  "ok": true,
+  "image": true,
+  "targets": [{ "id": "ai-spark/capture-image", "app": "ai-spark", "capability": "capture-image", "title": "Spark", "i18n": { "zh": { "title": "灵光一闪" } }, "kinds": ["image"] }],
+  "text": true,
+  "textTargets": [{ "id": "david/decree/issue", "app": "decree", "capability": "issue", "peer": "david", "title": "Decree", "kinds": ["text"] }]
+}
+```
+
+`targets` holds the targets that take `image` only, as clients older than `text` read it; `textTargets` the ones that take `text`. A target that takes both is in both lists, and `kinds` on each says what it takes. `POST /api/capture/image?to=<id>` and `POST /api/capture/text?to=<id>` forward the client's request as the operator to that one, here or through its peer; each refuses an id that is not a declared target or one that does not take its kind (404), and the text route refuses an empty or too long note, a `via` it does not know and an `id` that is not a UUID (400, 413) before anything is sent. All three are panel routes: no token, writes held to the panel's origin.
 
 ## Catalogue
 
