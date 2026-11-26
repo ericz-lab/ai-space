@@ -13,11 +13,14 @@ import {
   fracOf,
   framesWrite,
   heightCandidates,
+  keyStep,
   minFrac,
+  nudge,
   nearestSize,
   oldColumns,
   place,
   pxOf,
+  resizeTo,
   resolveFrames,
   setRowHeight,
   setWidth,
@@ -25,6 +28,7 @@ import {
   sizeClass,
   snapTo,
   splitEvenly,
+  startResize,
   tidy,
   type Frame,
   type Placed,
@@ -311,5 +315,51 @@ describe("rows per page", () => {
     expect(rowsThatFit(10, [30, 30, 30, 30], 2, 1, 26)).toBe(1);
     expect(rowsThatFit(-50, [30, 30, 30, 30], 2, 2, 26)).toBe(2);
     expect(rowsThatFit(100, [], 2, 1, 26)).toBe(1);
+  });
+});
+
+describe("a drag from the press (startResize, resizeTo) and the keys (nudge, keyStep)", () => {
+  const W = 1100;
+  const two: Frame[] = [{ w: 0.5, h: 300 }, { w: 0.5, h: 300 }, { w: 1 / 3, h: 400 }];
+
+  test("the right edge moves the boundary with the next card; Alt stops the snap, Shift re-flows", () => {
+    const s = startResize(two, W, "start", 0, "x");
+    const snapped = resizeTo(s, 5, 0);
+    // The edge starts on the area's half: a 5px move stays within 8px of it and snaps back.
+    near(snapped.frames[0]!.w, 0.5);
+    expect(snapped.guides.x.length).toBe(1);
+    const free = resizeTo(s, 5, 0, { free: true });
+    near(pxOf(free.frames[0]!.w, W), pxOf(0.5, W) + 5);
+    near(free.frames[0]!.w + free.frames[1]!.w, 1);
+    expect(free.guides.x).toEqual([]);
+    const reflow = resizeTo(s, 100, 0, { reflow: true, free: true });
+    near(pxOf(reflow.frames[0]!.w, W), pxOf(0.5, W) + 100);
+    near(reflow.frames[1]!.w, 0.5);
+  });
+
+  test("the bottom edge sets the row's height and snaps to another row's", () => {
+    const s = startResize(two, W, "start", 1, "y");
+    const r = resizeTo(s, 0, 96);
+    expect(r.frames[0]!.h).toBe(400);
+    expect(r.frames[1]!.h).toBe(400);
+    expect(r.frames[2]!.h).toBe(400);
+    expect(r.guides.y.length).toBe(2);
+    expect(resizeTo(s, 0, 96, { free: true }).frames[1]!.h).toBe(396);
+  });
+
+  test("the last card of a centred row grows twice the pointer's travel", () => {
+    const s = startResize(two, W, "center", 2, "x");
+    const r = resizeTo(s, 50, 0, { free: true });
+    near(pxOf(r.frames[2]!.w, W), pxOf(1 / 3, W) + 100);
+  });
+
+  test("the keys move a handle 8px, 1px with Shift, and only along its own axis", () => {
+    expect(keyStep("x", "right", false)).toEqual({ dx: 8, dy: 0 });
+    expect(keyStep("x", "down", false)).toEqual({ dx: 0, dy: 0 });
+    expect(keyStep("y", "up", true)).toEqual({ dx: 0, dy: -1 });
+    expect(keyStep("xy", "left", true)).toEqual({ dx: -1, dy: 0 });
+    const f = nudge(two, W, "start", 0, 8, 8);
+    near(pxOf(f[0]!.w, W), pxOf(0.5, W) + 8);
+    expect(f[1]!.h).toBe(308);
   });
 });

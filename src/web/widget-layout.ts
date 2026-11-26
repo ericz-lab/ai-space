@@ -2,8 +2,9 @@
 // fixed gap, wrapped into rows. Each card has a frame `{ w, h }`: `w` a fraction of the area's width,
 // `h` a height in px. A card `w` wide is `w * (W + GAP) - GAP` px in an area `W` wide, so fractions
 // that sum to 1 fill a row exactly with `GAP` between the cards at any width. Every card of a row
-// takes the row's height, the largest `h` in it, and rows are `GAP` apart. The page's bundle and the
-// tests share this file; it imports nothing.
+// takes the row's height, the largest `h` in it, and rows are `GAP` apart. The page's bundle, the
+// tests and the Linux client (desktop/linux/src/core/widget-area.ts, run by GJS) share this file; it
+// imports nothing and uses no browser global.
 
 export const GAP = 20;
 export const MIN_W = 200;
@@ -169,6 +170,130 @@ export function edgeCandidates(placed: Placed, W: number, i: number): number[] {
 export function heightCandidates(placed: Placed, i: number): number[] {
   const me = placed.boxes[i]!.row;
   return [...new Set(placed.rows.filter((_, r) => r !== me).map((row) => placed.boxes[row[0]!]!.height))];
+}
+
+/** Which of a card's handles: the right edge, the bottom edge, or the corner (both). */
+export type Edge = "x" | "y" | "xy";
+/** The snap lines to draw while an edge is dragged, in the area's coordinates. */
+export type Guides = { x: number[]; y: number[] };
+
+/** What a drag of card `i`'s edge starts from: the frames and the placement at the press. */
+export type ResizeStart = {
+  frames: Frame[];
+  W: number;
+  align: Align;
+  i: number;
+  edge: Edge;
+  box: Box;
+  /** The left edge of the card's row. */
+  off: number;
+  last: boolean;
+  /** The px width the card's row takes. */
+  used: number;
+  relEdges: number[];
+  absEdges: number[];
+  heights: number[];
+};
+
+export function startResize(frames: Frame[], W: number, align: Align, i: number, edge: Edge): ResizeStart {
+  const placed = place(frames, W, align);
+  const box = placed.boxes[i]!;
+  const row = placed.rows[box.row]!;
+  return {
+    frames,
+    W,
+    align,
+    i,
+    edge,
+    box,
+    off: placed.boxes[row[0]!]!.x,
+    last: row.at(-1) === i,
+    used: rowWidth(frames, row, W),
+    relEdges: edgeCandidates(placed, W, i),
+    absEdges: placed.boxes.flatMap((b, j) => (b.row === box.row || j === i ? [] : [b.x + b.width, b.x - GAP])),
+    heights: heightCandidates(placed, i),
+  };
+}
+
+/**
+ * The frames and snap lines after the pointer moved `dx`, `dy` px from the press. The width goes
+ * through setWidth (the boundary with the next card, or the row's free space; `reflow`, Shift,
+ * changes this card only), the height sets the row's; both snap unless `free` (Alt) is held.
+ */
+export function resizeTo(s: ResizeStart, dx: number, dy: number, mods: { reflow?: boolean; free?: boolean } = {}): { frames: Frame[]; guides: Guides } {
+  const { W, align, i, edge, box: b0 } = s;
+  let f = s.frames;
+  let snappedX = false;
+  let snappedH: number | null = null;
+  if (edge !== "y") {
+    const reflow = !!mods.reflow;
+    let want: number;
+    if ((s.last || reflow) && align === "center") {
+      // A centred row whose width changes keeps its middle: its right end moves half as far as the
+      // card grows, so the card grows twice the pointer's travel and snaps on the area's own lines.
+      want = b0.width + 2 * dx;
+      if (!mods.free) {
+        const used = s.used + 2 * dx;
+        const options = [...s.absEdges.map((x) => 2 * x - W), ...DIVISIONS.map((d) => pxOf(d, W))];
+        const snap = snapTo(used, options, 2 * SNAP_PX);
+        if (snap) {
+          want = b0.width + (snap.value - s.used);
+          snappedX = true;
+        }
+      }
+    } else {
+      want = b0.width + dx;
+      if (!mods.free) {
+        const left = b0.x - s.off;
+        const snap = snapTo(left + want, s.relEdges);
+        if (snap) {
+          want = snap.value - left;
+          snappedX = true;
+        }
+      }
+    }
+    f = setWidth(f, W, i, want, reflow);
+  }
+  if (edge !== "x") {
+    let h = b0.height + dy;
+    if (!mods.free) {
+      const snap = snapTo(h, s.heights);
+      if (snap) {
+        h = snap.value;
+        snappedH = h;
+      }
+    }
+    f = setRowHeight(f, i, h);
+  }
+  const p = place(f, W, align);
+  const b = p.boxes[i]!;
+  const guides: Guides = { x: [], y: [] };
+  if (snappedX) guides.x.push(b.x + b.width);
+  if (snappedH !== null) {
+    guides.y.push(b.y + b.height);
+    for (const r of p.rows) {
+      const rb = p.boxes[r[0]!]!;
+      if (rb.row !== b.row && rb.height === snappedH) guides.y.push(rb.y + rb.height);
+    }
+  }
+  return { frames: f, guides };
+}
+
+/** A handle moved from the keyboard: card `i`'s width by `dx` px (through setWidth), its row's height by `dy`. */
+export function nudge(frames: Frame[], W: number, align: Align, i: number, dx: number, dy: number): Frame[] {
+  const b = place(frames, W, align).boxes[i]!;
+  let f = frames;
+  if (dx) f = setWidth(f, W, i, b.width + dx);
+  if (dy) f = setRowHeight(f, i, b.height + dy);
+  return f;
+}
+
+/** The arrow key's step on a handle of `edge`: 8px, 1px with Shift; zero for a key the handle does not take. */
+export function keyStep(edge: Edge, key: "left" | "right" | "up" | "down", fine: boolean): { dx: number; dy: number } {
+  const step = fine ? 1 : 8;
+  if (edge !== "y" && (key === "left" || key === "right")) return { dx: key === "right" ? step : -step, dy: 0 };
+  if (edge !== "x" && (key === "up" || key === "down")) return { dx: 0, dy: key === "down" ? step : -step };
+  return { dx: 0, dy: 0 };
 }
 
 /**
