@@ -2,7 +2,8 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { createRoutes } from "../scheduler/api.ts";
 import { Scheduler } from "../scheduler/scheduler.ts";
 import { Store } from "../scheduler/store.ts";
-import { createBusRoutes } from "./api.ts";
+import { guardBrowserWrites } from "../auth.ts";
+import { MAX_CAPTURE_TEXT_CHARS, createBusRoutes } from "./api.ts";
 import { Bus } from "./bus.ts";
 import { BusStore } from "./store.ts";
 
@@ -224,24 +225,28 @@ describe("bus api", () => {
   });
 });
 
-describe("the panel's image capture", () => {
+describe("the panel's capture", () => {
   const sparkCapture = { kinds: ["image" as const], title: "Spark", i18n: { zh: { title: "灵光一闪" } } };
   const serveCapture = (peerTarget = false) => {
     const answering = Bun.serve({
       port: 0,
       hostname: "127.0.0.1",
       fetch: async (req) => {
+        if (req.headers.get("content-type")?.startsWith("application/json")) {
+          return Response.json({ ok: true, at: new URL(req.url).pathname, got: await req.json(), caller: req.headers.get("x-space-caller"), label: "口谕 #3" });
+        }
         const form = await req.formData();
         const file = form.get("file") as File;
         return Response.json({ ok: true, at: new URL(req.url).pathname, bytes: file.size, via: form.get("via"), id: form.get("id"), caller: req.headers.get("x-space-caller") }, { status: 201 });
       },
     });
     const store = new BusStore(":memory:");
-    const b = new Bus({ store, events: new Store(":memory:"), servicePort: (name) => (["ai-spark", "ai-notes"].includes(name) ? answering.port : undefined), log: () => {} });
+    const b = new Bus({ store, events: new Store(":memory:"), servicePort: (name) => (["ai-spark", "ai-notes", "decree"].includes(name) ? answering.port : undefined), log: () => {} });
     b.syncApp("ai-spark", { events: { publishes: [], consumes: [] }, provides: [{ name: "capture-image", method: "POST", path: "/spark", timeoutMs: 5000, capture: sparkCapture }] });
     b.syncApp("ai-notes", { events: { publishes: [], consumes: [] }, provides: [{ name: "capture-image", method: "POST", path: "/notes", timeoutMs: 5000, capture: { kinds: ["image"], title: "Notes" } }, { name: "find", method: "POST", path: "/find", timeoutMs: 5000 }] });
+    b.syncApp("decree", { events: { publishes: [], consumes: [] }, provides: [{ name: "issue", method: "POST", path: "/decree", timeoutMs: 5000, capture: { kinds: ["text"], title: "Decree", i18n: { zh: { title: "口谕" } } } }] });
     const withPeer = peerTarget
-      ? { ...remote, capabilities: () => [...remote.capabilities(), { app: "david/keep", peer: "david", health: "ok" as const, provides: [{ name: "shot", method: "POST" as const, path: "/k", timeoutMs: 1000, capture: { kinds: ["image" as const], title: "Keep" } }], publishes: [], consumes: [] }] }
+      ? { ...remote, capabilities: () => [...remote.capabilities(), { app: "david/keep", peer: "david", health: "ok" as const, provides: [{ name: "shot", method: "POST" as const, path: "/k", timeoutMs: 1000, capture: { kinds: ["image" as const, "text" as const], title: "Keep" } }], publishes: [], consumes: [] }] }
       : remote;
     const server = Bun.serve({ port: 0, hostname: "127.0.0.1", routes: createBusRoutes({ bus: b, store, events: new Store(":memory:"), token: "op", remote: withPeer }) });
     return { url: `http://127.0.0.1:${server.port}`, store, stop: () => (server.stop(true), answering.stop(true)) };
@@ -260,10 +265,16 @@ describe("the panel's image capture", () => {
       expect(await fetch(`${s.url}/api/capture`).then((r) => r.json())).toEqual({
         ok: true,
         image: true,
+        // The image targets alone, as the iPhone client has always read them.
         targets: [
-          { id: "ai-notes/capture-image", app: "ai-notes", capability: "capture-image", title: "Notes" },
-          { id: "ai-spark/capture-image", app: "ai-spark", capability: "capture-image", title: "Spark", i18n: { zh: { title: "灵光一闪" } } },
-          { id: "david/keep/shot", app: "keep", capability: "shot", peer: "david", title: "Keep" },
+          { id: "ai-notes/capture-image", app: "ai-notes", capability: "capture-image", title: "Notes", kinds: ["image"] },
+          { id: "ai-spark/capture-image", app: "ai-spark", capability: "capture-image", title: "Spark", i18n: { zh: { title: "灵光一闪" } }, kinds: ["image"] },
+          { id: "david/keep/shot", app: "keep", capability: "shot", peer: "david", title: "Keep", kinds: ["image", "text"] },
+        ],
+        text: true,
+        textTargets: [
+          { id: "decree/issue", app: "decree", capability: "issue", title: "Decree", i18n: { zh: { title: "口谕" } }, kinds: ["text"] },
+          { id: "david/keep/shot", app: "keep", capability: "shot", peer: "david", title: "Keep", kinds: ["image", "text"] },
         ],
       });
     } finally {
@@ -281,6 +292,10 @@ describe("the panel's image capture", () => {
       expect(forwarded.pop()).toMatchObject({ path: "/api/peer/call/keep/shot", caller: "seoul/space" });
       // Only declared targets: a plain capability is not one.
       expect((await fetch(`${s.url}/api/capture/image?to=ai-notes/find`, { method: "POST", body: shot() })).status).toBe(404);
+      // A target of words takes no picture.
+      const wrongKind = await fetch(`${s.url}/api/capture/image?to=decree/issue`, { method: "POST", body: shot() });
+      expect(wrongKind.status).toBe(404);
+      expect((await wrongKind.json()).error).toMatch(/does not take image/);
       // A client that names no target reaches Spark, as before.
       expect(await fetch(`${s.url}/api/capture/image`, { method: "POST", body: shot() }).then((r) => r.json())).toMatchObject({ at: "/spark" });
       expect(s.store.listCalls({}).map((c) => [c.caller, c.app, c.capability])).toEqual([["space", "ai-spark", "capture-image"], ["space", "david/keep", "shot"], ["space", "ai-notes", "capture-image"]]);
@@ -289,3 +304,82 @@ describe("the panel's image capture", () => {
     }
   });
 });
+
+describe("the panel's text capture", () => {
+  const ID = "6b0f3c1e-2d4a-4e5b-8c7d-9e0f1a2b3c4d";
+  const post = (url: string, body: unknown, headers: Record<string, string> = {}) =>
+    fetch(url, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: typeof body === "string" ? body : JSON.stringify(body) });
+
+  test("the words go to the text target the client chose, as the operator, with the same body", async () => {
+    const s = serveCaptureForText();
+    try {
+      const r = await post(`${s.url}/api/capture/text?to=decree/issue`, { text: "  明天上午十点开会  ", via: "voice", id: ID });
+      expect(r.status).toBe(200);
+      expect(await r.json()).toEqual({ ok: true, at: "/decree", got: { text: "明天上午十点开会", via: "voice", id: ID }, caller: "space", label: "口谕 #3" });
+      // `via` may be left out.
+      expect(await post(`${s.url}/api/capture/text?to=decree/issue`, { text: "buy milk", id: ID }).then((x) => x.json())).toMatchObject({ got: { text: "buy milk", id: ID } });
+      // A peer's target is reached through the peer, as the operator of this space.
+      expect(await post(`${s.url}/api/capture/text?to=david/keep/shot`, { text: "note", via: "type", id: ID }).then((x) => x.json())).toEqual({ from: "david" });
+      expect(forwarded.pop()).toEqual({ path: "/api/peer/call/keep/shot", caller: "seoul/space", body: JSON.stringify({ text: "note", via: "type", id: ID }) });
+      expect(s.store.listCalls({}).map((c) => [c.caller, c.app, c.capability])).toEqual([["space", "david/keep", "shot"], ["space", "decree", "issue"], ["space", "decree", "issue"]]);
+    } finally {
+      s.stop();
+    }
+  });
+
+  test("only a declared target that takes text, and only a usable note", async () => {
+    const s = serveCaptureForText();
+    try {
+      const refused = async (path: string, body: unknown, status: number, error: RegExp) => {
+        const r = await post(`${s.url}${path}`, body);
+        expect(r.status).toBe(status);
+        expect((await r.json()).error).toMatch(error);
+      };
+      const note = { text: "hello", id: ID };
+      await refused("/api/capture/text", note, 400, /to is required/);
+      await refused("/api/capture/text?to=decree/nope", note, 404, /not a capture target/);
+      // An image target is a capture target, but not one for words.
+      await refused("/api/capture/text?to=ai-spark/capture-image", note, 404, /does not take text/);
+      await refused("/api/capture/text?to=decree/issue", { text: "   ", id: ID }, 400, /text is empty/);
+      await refused("/api/capture/text?to=decree/issue", { id: ID }, 400, /text is empty/);
+      await refused("/api/capture/text?to=decree/issue", { text: "x".repeat(MAX_CAPTURE_TEXT_CHARS + 1), id: ID }, 413, /limit/);
+      await refused("/api/capture/text?to=decree/issue", { text: "hi", via: "fax", id: ID }, 400, /via must be/);
+      await refused("/api/capture/text?to=decree/issue", { text: "hi" }, 400, /id must be a UUID/);
+      await refused("/api/capture/text?to=decree/issue", { text: "hi", id: "1" }, 400, /id must be a UUID/);
+      await refused("/api/capture/text?to=decree/issue", "not json", 400, /must be JSON/);
+      await refused("/api/capture/text?to=decree/issue", [1], 400, /must be JSON/);
+      expect(s.store.listCalls({})).toEqual([]);
+    } finally {
+      s.stop();
+    }
+  });
+
+  test("a browser write from another origin is refused, as on the other panel routes", async () => {
+    const s = serveCaptureForText(true);
+    try {
+      const r = await post(`${s.url}/api/capture/text?to=decree/issue`, { text: "hi", id: ID }, { origin: "https://evil.example" });
+      expect(r.status).toBe(403);
+      const own = await post(`${s.url}/api/capture/text?to=decree/issue`, { text: "hi", id: ID }, { origin: s.url });
+      expect(own.status).toBe(200);
+    } finally {
+      s.stop();
+    }
+  });
+});
+
+/** A space with the text target `decree/issue`, the image target `ai-spark/capture-image` and the peer target `david/keep/shot`. */
+function serveCaptureForText(guarded = false) {
+  const answering = Bun.serve({
+    port: 0,
+    hostname: "127.0.0.1",
+    fetch: async (req) => Response.json({ ok: true, at: new URL(req.url).pathname, got: await req.json(), caller: req.headers.get("x-space-caller"), label: "口谕 #3" }),
+  });
+  const store = new BusStore(":memory:");
+  const b = new Bus({ store, events: new Store(":memory:"), servicePort: (name) => (["ai-spark", "decree"].includes(name) ? answering.port : undefined), log: () => {} });
+  b.syncApp("ai-spark", { events: { publishes: [], consumes: [] }, provides: [{ name: "capture-image", method: "POST", path: "/spark", timeoutMs: 5000, capture: { kinds: ["image"], title: "Spark" } }] });
+  b.syncApp("decree", { events: { publishes: [], consumes: [] }, provides: [{ name: "issue", method: "POST", path: "/decree", timeoutMs: 5000, capture: { kinds: ["text"], title: "Decree" } }] });
+  const withPeer = { ...remote, capabilities: () => [...remote.capabilities(), { app: "david/keep", peer: "david", health: "ok" as const, provides: [{ name: "shot", method: "POST" as const, path: "/k", timeoutMs: 1000, capture: { kinds: ["text" as const], title: "Keep" } }], publishes: [], consumes: [] }] };
+  const routes = createBusRoutes({ bus: b, store, events: new Store(":memory:"), token: "op", remote: withPeer });
+  const server = Bun.serve({ port: 0, hostname: "127.0.0.1", routes: guarded ? guardBrowserWrites(routes) : routes });
+  return { url: `http://127.0.0.1:${server.port}`, store, stop: () => (server.stop(true), answering.stop(true)) };
+}

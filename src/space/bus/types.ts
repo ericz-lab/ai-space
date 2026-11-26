@@ -50,14 +50,15 @@ export type Capability = {
   capture?: CaptureSpec;
 };
 
-/** What a capture target takes. */
-export const CAPTURE_KINDS = ["image"] as const;
+/** What a capture target takes: a picture, or a line of text (the Mac's spoken notes). */
+export const CAPTURE_KINDS = ["image", "text"] as const;
 export type CaptureKind = (typeof CAPTURE_KINDS)[number];
 
 /**
- * A capability that keeps a captured picture. It is called as `space` with multipart `file` (PNG or
- * JPEG), `text?` (the operator's words), `via?` (screenshot, share, pick) and `id` (a UUID kept
- * across retries; a repeated id answers the first result), and answers `{ ok, url?, label? }`:
+ * A capability that keeps what a client captures. It is called as `space`; for `image` with
+ * multipart `file` (PNG or JPEG), `text?` (the operator's words), `via?` (screenshot, share, pick)
+ * and `id`; for `text` with JSON `{ text, via?, id }` (`via`: voice or type). `id` is a UUID kept
+ * across retries; a repeated id answers the first result. Either answers `{ ok, url?, label? }`:
  * where the kept item opens and how to name it ("Spark #12").
  */
 export type CaptureSpec = {

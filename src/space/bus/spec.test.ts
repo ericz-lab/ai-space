@@ -89,9 +89,17 @@ describe("capture targets", () => {
     expect(cap!.capture).toEqual({ kinds: ["image"], title: "Spark", i18n: { zh: { title: "灵光一闪" } } });
   });
 
+  test("a capability can take words, or words and pictures", () => {
+    const [words] = parseProvidesSpec({ issue: { http: { method: "POST", path: "/d" }, capture: { kinds: ["text"], title: "Decree", i18n: { zh: { title: "口谕" } } } } });
+    expect(words!.capture).toEqual({ kinds: ["text"], title: "Decree", i18n: { zh: { title: "口谕" } } });
+    const [both] = parseProvidesSpec({ keep: { http: { method: "POST", path: "/k" }, capture: { kinds: ["image", "text", "text"], title: "Keep" } } });
+    expect(both!.capture!.kinds).toEqual(["image", "text"]);
+  });
+
   test("a bad capture block rejects the manifest", () => {
     const http = { method: "POST", path: "/i" };
     expect(() => parseProvidesSpec({ c: { http, capture: { kinds: ["video"], title: "x" } } })).toThrow(/kinds/);
+    expect(() => parseProvidesSpec({ c: { http, capture: { kinds: [], title: "x" } } })).toThrow(/kinds must list image, text/);
     expect(() => parseProvidesSpec({ c: { http, capture: { kinds: ["image"] } } })).toThrow(/title/);
     expect(() => parseProvidesSpec({ c: { http: { method: "GET", path: "/i" }, capture: { kinds: ["image"], title: "x" } } })).toThrow(/POST/);
     expect(() => parseProvidesSpec({ c: { http, callers: ["other"], capture: { kinds: ["image"], title: "x" } } })).toThrow(/space/);
