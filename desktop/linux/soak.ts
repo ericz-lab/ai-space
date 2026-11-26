@@ -85,7 +85,7 @@ const server = Bun.serve({
 
 const dir = await mkdtemp(join(tmpdir(), "ai-space-soak-"));
 await mkdir(join(dir, "config", "ai-space"), { recursive: true });
-await Bun.write(join(dir, "config", "ai-space", "connections.json"), JSON.stringify([{ id: "soak", name: "Soak", url: `http://127.0.0.1:${server.port}/`, isDefault: true, managed: false }]));
+await Bun.write(join(dir, "config", "ai-space", "connections.json"), JSON.stringify([{ id: "soak", name: "Soak", url: `http://127.0.0.1:${server.port}/`, isDefault: true }]));
 const pidFile = join(dir, "client.pid");
 const headless = !visible && Bun.which("gnome-shell") !== null;
 const script = `

@@ -30,7 +30,7 @@ Gio._promisify(WebKit.CookieManager.prototype, "add_cookie", "add_cookie_finish"
 Gio._promisify(WebKit.CookieManager.prototype, "get_all_cookies", "get_all_cookies_finish");
 Gio._promisify(WebKit.WebView.prototype, "evaluate_javascript", "evaluate_javascript_finish");
 
-/** Where the bundle runs from: `<root>/main.js`, with `data/` and `terminal/` beside it and, in the Local edition, `space/`. */
+/** Where the bundle runs from: `<root>/main.js`, with `data/` and `terminal/` beside it. */
 export const APP_ROOT: string = Gio.File.new_for_uri(import.meta.url).get_parent().get_path();
 
 export const dirs = {
@@ -129,8 +129,6 @@ export type Prefs = {
   background: boolean;
   notifications: boolean;
   permission: Permission;
-  /** Agent CLIs chosen by path for the Local edition, by name. */
-  chosenRuntimes: Record<string, string>;
   window: { width: number; height: number; maximized: boolean };
   lastAgent?: string;
   /** The machine chosen last in the chat for each agent on several machines, by `app/name`: the peer's name, or "" for this machine. */
@@ -167,10 +165,11 @@ export type Prefs = {
 const PREFS_FILE = path(dirs.config, "preferences.json");
 
 function loadPrefs(): Prefs {
-  const base: Prefs = { background: true, notifications: true, permission: "", chosenRuntimes: {}, window: { width: 1180, height: 780, maximized: false } };
+  const base: Prefs = { background: true, notifications: true, permission: "", window: { width: 1180, height: 780, maximized: false } };
   try {
-    const raw = JSON.parse(readTextSync(PREFS_FILE) ?? "{}") as Partial<Prefs>;
-    return { ...base, ...raw, window: { ...base.window, ...(raw.window ?? {}) }, chosenRuntimes: { ...(raw.chosenRuntimes ?? {}) } };
+    // `chosenRuntimes` was the retired Local edition's: dropped, so the next save leaves it out.
+    const { chosenRuntimes: _, ...raw } = JSON.parse(readTextSync(PREFS_FILE) ?? "{}") as Partial<Prefs> & { chosenRuntimes?: unknown };
+    return { ...base, ...raw, window: { ...base.window, ...(raw.window ?? {}) } };
   } catch {
     return base;
   }

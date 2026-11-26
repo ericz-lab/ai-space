@@ -146,6 +146,9 @@ export function useCatalog({ initial, onChange }: { initial?: CatalogView; onCha
       if (!a.ok) fail(`${app}: ${a.error ?? "failed"}`);
       else report({ app, action: "rebuilt" });
       return a.ok;
+    } catch (e) {
+      fail(`${app}: ${String((e as Error).message || e)}`);
+      return false;
     } finally {
       setWorking(null);
     }
@@ -159,6 +162,9 @@ export function useCatalog({ initial, onChange }: { initial?: CatalogView; onCha
       if (!a.ok) fail(`${app}: ${a.error ?? "failed"}`);
       else report({ app, action: "removed" });
       return a.ok;
+    } catch (e) {
+      fail(`${app}: ${String((e as Error).message || e)}`);
+      return false;
     } finally {
       setWorking(null);
     }

@@ -17,6 +17,8 @@ export const DEFAULT_URL = "http://127.0.0.1:8700";
  * from the environment or the `.env`, then, for a space on loopback, the token ai-space keeps in
  * `<workspace>/run/operator-token` under `SPACE_AUTH=builtin` (docs/auth.md). `SPACE_APP_TOKEN` and
  * `SPACE_APP` are kept for the routes that take an app's identity. The `.env` is read only for what is not already set.
+ * A `--url` that names another machine gets `--token` or a `SPACE_API_TOKEN` set in the environment for
+ * that call, never this workspace's own token from its `.env`: that secret belongs to this Space alone.
  */
 export async function resolveTarget(
   flags: { url?: string; token?: string },
@@ -28,14 +30,24 @@ export async function resolveTarget(
   const fromFile = async (key: string) => (file ??= await readEnvFile().catch(() => ({}) as Record<string, string>))[key]?.trim();
   const pick = async (key: string) => env[key]?.trim() || (await fromFile(key));
 
-  let url = flags.url?.trim() || env.SPACE_API_URL?.trim();
-  if (!url) {
+  let own = env.SPACE_API_URL?.trim();
+  if (!own) {
     const host = await pick("SPACE_HOST");
     const port = await pick("SPACE_PORT");
-    url = host || port ? `http://${host || "127.0.0.1"}:${port || 8700}` : DEFAULT_URL;
+    own = host || port ? `http://${host || "127.0.0.1"}:${port || 8700}` : DEFAULT_URL;
   }
-  const token = flags.token?.trim() || (await pick("SPACE_API_TOKEN")) || (isLoopback(url) ? await readLocalToken().catch(() => "") : "");
+  const url = flags.url?.trim() || own;
+  const foreign = !isLoopback(url) && originOf(url) !== originOf(own);
+  const token = flags.token?.trim() || env.SPACE_API_TOKEN?.trim() || (foreign ? "" : await fromFile("SPACE_API_TOKEN")) || (isLoopback(url) ? await readLocalToken().catch(() => "") : "");
   return { url: url.replace(/\/+$/, ""), token, appToken: env.SPACE_APP_TOKEN?.trim() ?? "", app: env.SPACE_APP?.trim() || undefined };
+}
+
+function originOf(url: string): string {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return url;
+  }
 }
 
 /** The next step when nothing answers: the service on this machine, or the address used for another one. */

@@ -91,12 +91,12 @@ export function renderShellEnv(vars: Record<string, string>): { text: string; sk
   return { text: lines.join("\n") + "\n", skipped };
 }
 
-/** Text for a plist `<string>`; a control character XML cannot carry is refused rather than dropped. */
 /** A `<string>` element of the plist, as `renderPlist` writes it. */
 export function plistString(s: string): string {
   return `<string>${xml(s)}</string>`;
 }
 
+/** Text for a plist `<string>`; a control character XML cannot carry is refused rather than dropped. */
 function xml(s: string): string {
   if (/[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(s)) throw new Error("a control character cannot go into a LaunchAgent; move it into a script");
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");

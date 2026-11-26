@@ -580,7 +580,12 @@ internal sealed class AppModel
     /// <summary>A new address starts fresh pages; the old ones' unsent text is gone, which the form says.</summary>
     public void Update(Guid id, string name, Uri url)
     {
-        if (Store.Update(id, name, url)) Discard(id);
+        // Discard stops the Space's live refresh; SyncLives starts one for the new address.
+        if (Store.Update(id, name, url))
+        {
+            Discard(id);
+            SyncLives();
+        }
         Changed?.Invoke();
     }
 

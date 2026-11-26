@@ -133,10 +133,13 @@ function parseVerdict(raw: string): { status: RunStatus; error?: string } | unde
 
 async function runCommand(target: Extract<Target, { kind: "command" }>, ctx: RunContext): Promise<RunResult> {
   const cwd = target.cwd ?? ctx.appDir ?? process.cwd();
-  const env = { ...(await placeholderEnv(cwd, ctx)), ...(target.env ?? {}), ...eventEnv(ctx.trigger ?? "schedule", ctx.events ?? []), ...(target.model ? { SPACE_TASK_MODEL: target.model } : {}) };
+  const vars = { ...(await placeholderEnv(cwd, ctx)), ...(target.env ?? {}) };
+  const env = { ...vars, ...eventEnv(ctx.trigger ?? "schedule", ctx.events ?? []), ...(target.model ? { SPACE_TASK_MODEL: target.model } : {}) };
   // ${VAR} placeholders resolve from the same environment as http targets,
   // so machine-specific paths (a venv python, a token) stay out of the manifest.
-  const r = await spawnCollect([hostShell("sh"), "-c", interpolate(target.command, env)], { cwd, env, signal: ctx.signal });
+  // Event data is another app's or a peer's text: it reaches the command as the
+  // SPACE_EVENT variables the shell expands, never spliced into the command text.
+  const r = await spawnCollect([hostShell("sh"), "-c", interpolate(target.command, vars)], { cwd, env, signal: ctx.signal });
   const output = truncate(joinOutput(r.stdout, r.stderr));
   if (r.aborted || r.timedOut) return { status: "error", error: "timed out", output };
   if (r.code !== 0) return { status: "error", error: `exit code ${r.code}`, output };

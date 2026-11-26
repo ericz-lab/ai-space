@@ -17,8 +17,8 @@ import type { CallTrace } from "../../../../src/web/call-trace.ts";
 
 export const webText = (lang: Lang, key: WebKey, vars?: Record<string, string | number>) => translate(lang, key, vars);
 
-/** The panel's sections, then this client's own two (This Computer in the Local edition, Peer). */
-export type Section = "general" | "appearance" | "models" | "automation" | "feedback" | "usage" | "status" | "packages" | "account" | "local" | "peer";
+/** The panel's sections, then this client's own (Peer). */
+export type Section = "general" | "appearance" | "models" | "automation" | "feedback" | "usage" | "status" | "packages" | "account" | "peer";
 export const WEB_SECTIONS = ["general", "appearance", "models", "automation", "feedback", "usage", "status", "packages", "account"] as const;
 export const SECTION_LABEL: Record<(typeof WEB_SECTIONS)[number], WebKey> = {
   general: "settings.section.general",

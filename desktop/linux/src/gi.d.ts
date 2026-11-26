@@ -1,4 +1,4 @@
-// GJS's GObject-introspection imports (GTK 4, libadwaita, WebKitGTK 6, libsoup 3, libsecret).
+// GJS's GObject-introspection imports (GTK 4, libadwaita, WebKitGTK 6 and libsoup 3).
 // They are typed loosely: the app layer is thin glue, and the logic it drives lives in core/,
 // which is fully typed and tested with Bun. Generating full bindings (@girs/*) would add a large
 // dependency for little gain at this size.

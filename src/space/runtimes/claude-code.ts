@@ -58,7 +58,9 @@ export function createClaudeCode(spec: ClaudeCodeSpec & { models?: TierModels },
   const space = spec.gateway === "space";
   // Through the built-in model gateway the CLI's own token does not name the process: a new one is
   // issued per process, so a conversation's live process is matched without it.
-  const live = new LivePool({ fingerprint: space ? (t) => claudeLiveFingerprint({ ...t, env: { ...t.env, ANTHROPIC_AUTH_TOKEN: undefined } }) : claudeLiveFingerprint });
+  // The pool and the process must name a conversation the same way, or no turn ever finds its process.
+  const fingerprint = space ? (t: ChatTurn) => claudeLiveFingerprint({ ...t, env: { ...t.env, ANTHROPIC_AUTH_TOKEN: undefined } }) : claudeLiveFingerprint;
+  const live = new LivePool({ fingerprint });
 
   /**
    * How one process reaches its model gateway (docs/model-gateway.md): magpie's address and caller
@@ -135,7 +137,7 @@ export function createClaudeCode(spec: ClaudeCodeSpec & { models?: TierModels },
         return { kill: () => {} };
       }
       const turn: ChatTurn = spec.magpie || space ? { ...original, env: r.env(original.env) } : original;
-      if (turn.interactive) return live.run(turn, cb, () => new ClaudeLive(r.bin, turn, spec.chatArgs));
+      if (turn.interactive) return live.run(turn, cb, () => new ClaudeLive(r.bin, turn, spec.chatArgs, undefined, fingerprint));
       return chatStream([...r.bin, ...chatArgs(turn, spec.chatArgs)], turn, cb);
     },
 

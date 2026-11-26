@@ -85,6 +85,7 @@ describe("routeTable", () => {
     expect(routableHost("https://A.Example.com:8443/x")).toBe("a.example.com");
     expect(routableHost("http://[::1]:8700")).toBeUndefined();
     expect(routableHost("not a url")).toBeUndefined();
+    expect(routableHost("https://a{b}.example.com")).toBeUndefined();
     expect(routableHost(undefined)).toBeUndefined();
   });
 });

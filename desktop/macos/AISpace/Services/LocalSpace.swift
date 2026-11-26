@@ -7,7 +7,7 @@ import Foundation
 enum LocalSpaceRules {
     /// The default `SPACE_PORT` in src/space/config.ts.
     static let defaultPort = 8700
-    /// The name a Space on this Mac is saved under, as the Local edition's is (AppModel.adoptLocal).
+    /// The name a Space on this Mac is saved under (AppModel.adoptFound).
     static let name = "This Mac"
 
     /// The workspace's `.env`: `$SPACE_HOME/.env`, else `~/.ai-space/.env`.

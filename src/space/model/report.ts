@@ -82,11 +82,11 @@ export function mergeReports(local: UsageReport, peers: UsageReport[]): UsageRep
   };
 }
 
-const TOTAL_KEYS = ["calls", "errors", "inputTokens", "cacheWriteTokens", "cacheReadTokens", "outputTokens", "tokens", "costUsd", "durationMs"] as const;
+const TOTAL_KEYS = ["calls", "errors", "inputTokens", "cacheWriteTokens", "cacheReadTokens", "outputTokens", "tokens", "costUsd", "unpriced", "durationMs"] as const;
 
 function sum(list: UsageTotals[]): UsageTotals {
   const out = Object.fromEntries(TOTAL_KEYS.map((k) => [k, 0])) as UsageTotals;
-  for (const t of list) for (const k of TOTAL_KEYS) out[k] += t[k] ?? 0;
+  for (const t of list) for (const k of TOTAL_KEYS) out[k] = (out[k] ?? 0) + (t[k] ?? 0);
   return out;
 }
 

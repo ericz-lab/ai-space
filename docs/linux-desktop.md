@@ -3,9 +3,7 @@
 Status: built and run on Ubuntu 24.04 (GNOME, Wayland). AI Space Desktop (the Client edition)
 connects to Spaces that exist: at its first launch it offers to connect to the AI Space on this
 computer (installed first when there is none) or to one on another machine ([below](#first-launch)). It
-carries no service. The Local edition, no longer published, is the same app with a service inside,
-which it sets up and runs on this computer as a systemd user service ([local.md](local.md#on-linux)).
-The app follows the Mac client ([macos-desktop.md](macos-desktop.md)) where Linux allows, and says
+carries no service. The app follows the Mac client ([macos-desktop.md](macos-desktop.md)) where Linux allows, and says
 below where it does less.
 
 ## What it is
@@ -21,7 +19,7 @@ below where it does less.
 | Voice input | A microphone beside Home's command box and the chat's message field (Quick Chat's too): the words appear in the field as they are heard and nothing is sent. `ai-space --dictate`, bound to a key the same way, talks into any app: the words show in a capsule at the bottom of the screen, and the text goes into AI Space's own field when it has the keyboard, else onto the clipboard for Ctrl+V ([below](#voice-input)) |
 | Floating ball | A small round ball over every window and every workspace, off until Settings › General › Floating Ball turns it on ([below](#floating-ball)). Resting the pointer on it opens a dial of four sections around a hub; each Space sets its own sections on this computer (an app or an agent, Default, or None; the defaults are Keep, Space Assistant, Todo and Design Studio). Clicking a section opens Quick Chat on its agent (an app's own agent, else Space Assistant told where the work goes); a picture dropped on a section opens it with the picture attached, one dropped on the hub opens Space Assistant with it. Drag the ball to move it (its place is remembered); right-click for Quick Chat, Settings and Hide |
 | Desk pet | The web panel's Claude walking along the bottom of Home, or of the screen over every app ([below](#desk-pet)); on by default, set in Settings › General › Desk Pet. It shows what the current Space is doing: it looks on while agents work, hops in its corner while one waits for an approval, spins when a turn is done and sleeps when all is quiet, with a line about it in a bubble. A click opens that agent's chat or the inbox; right-click to move it between the window and the desktop, or hide it |
-| Settings | Laid out as the web panel's Settings, in its words: the sections on the left, one on the right, and the pages a section opens inside it with Back ([below](#settings)). Then This Computer (the Local edition) and Peer, this computer as a peer of a Space used elsewhere ([below](#peer)) |
+| Settings | Laid out as the web panel's Settings, in its words: the sections on the left, one on the right, and the pages a section opens inside it with Back ([below](#settings)). Then Peer, this computer as a peer of a Space used elsewhere ([below](#peer)) |
 
 Each saved Space keeps its own web tabs and terminal sessions, as the Windows client keeps its tabs
 per Space (`core/per-space.ts`): picking another Space in the Space menu hides them, sessions still
@@ -31,9 +29,7 @@ its address is changed.
 The window has Home, Chat, Inbox, Terminal and Apps in the header (in a bar at the bottom on a
 narrow window), the Space menu at the start of the header, and a banner when the Space needs a
 sign-in, cannot be reached (with what was last known, kept on disk) or cannot be opened. Before any
-Space is saved it shows the welcome screen ([First launch](#first-launch)); in the Local edition
-that is the setup, an address to connect to, and a Space already answering on `127.0.0.1:8700` in
-one click.
+Space is saved it shows the welcome screen ([First launch](#first-launch)).
 
 `aispace://` links work as on the Mac (`core/desktop.ts`, `parseDeepLink`): `chat?agent=&text=`,
 `open?app=`, `inbox`, `show`. A link may fill in a message but never sends it.
@@ -99,13 +95,10 @@ The app only ever installs. It never upgrades, stops or uninstalls the service: 
 `space uninstall` do. Removing the app (`install.sh --uninstall`) leaves AI Space, its workspace
 and its background service in place. Closing the window while the installer runs does not stop it.
 
-The Local edition (the app with `space/` inside) does none of this: its welcome screen is its own
-setup ([local.md](local.md#on-linux)).
-
 ### The home screen at first
 
-However the first Space came (found here, installed from the welcome screen, connected by its
-address, or set up by the Local edition), the window then shows Home on the **home screen**: the
+However the first Space came (found here, installed from the welcome screen, or connected by its
+address), the window then shows Home on the **home screen**: the
 first screen, the one tiles are pinned to and the panel calls home (`HOME` in
 `src/web/screens.ts`). It is Home's second page; the library is the first, on its left, and the
 window never opens there, nor on a later screen (`openingPage` in `core/screens.ts`). Another
@@ -148,9 +141,8 @@ pages looks at once, so the tiles are there when Home shows.
 ## How it is built
 
 TypeScript, bundled by Bun for [GJS](https://gjs.guide/) (GNOME's JavaScript runtime), on GTK 4,
-libadwaita, WebKitGTK 6.0, libsoup 3 and libsecret. One language with the rest of the repository,
-the web code reused as it is, and the desktop's own widgets, notifications, keyring and file
-dialogs.
+libadwaita, WebKitGTK 6.0 and libsoup 3. One language with the rest of the repository, the web
+code reused as it is, and the desktop's own widgets, notifications and file dialogs.
 
 ```
 desktop/linux/
@@ -161,7 +153,7 @@ desktop/linux/
                   and widget cards, the first launch (the look for a Space here, the installer's
                   address and command), strings (en, zh)
   src/app/        GTK glue (GJS only): window, views, chat cards (`chat-cards.ts`), HTTP
-                  (libsoup), web views (WebKit), the Local manager, notifications
+                  (libsoup), web views (WebKit), notifications
   src/main.ts     the entry point (`gjs -m main.js`)
   src/ball/       the floating ball's own process (`gjs -m ball.js`, GTK 3 on X11)
   src/pet/        the desk pet's own process on the desktop (`gjs -m pet.js`, GTK 3 on X11)
@@ -184,17 +176,17 @@ takes its types from the server's own modules. The app layer types GObject libra
 | `bun run linux:build` | `desktop/linux/build/ai-space`: `main.js`, `terminal/`, the icon, the built-in tiles' pictures, `bin/ai-space`, `install.sh`, `VERSION.json` |
 | `bun run linux:run` | builds, then runs it from the build directory |
 | `bun run linux:install` | builds, then installs it for this user |
-| `bun desktop/linux/build.ts --local --out <dir>` | the Local edition: the same plus `space/`, the Space's release tree (release/server.ts `stageRelease`, `runtime/bun`, `runtime/space-pty`) |
-| `bun run release:linux` | both editions as tarballs in `dist/` ([release.md](release.md#linux-app)) |
+| `bun desktop/linux/build.ts --out <dir>` | the same build in another directory |
+| `bun run release:linux` | the app as a tarball in `dist/` ([release.md](release.md#linux-app)) |
 
 ## Installing
 
-Needs GJS, libadwaita 1.5 or later, WebKitGTK 6.0, libsoup 3 and libsecret, which current GNOME
-desktops have (Ubuntu 24.04, Fedora 40, Debian 13, Arch):
+Needs GJS, libadwaita 1.5 or later, WebKitGTK 6.0 and libsoup 3, which current GNOME desktops
+have (Ubuntu 24.04, Fedora 40, Debian 13, Arch):
 
 ```sh
-sudo apt install gjs gir1.2-adw-1 gir1.2-webkit-6.0 gir1.2-soup-3.0 gir1.2-secret-1   # Debian, Ubuntu
-sudo dnf install gjs libadwaita webkitgtk6.0 libsoup3 libsecret                          # Fedora
+sudo apt install gjs gir1.2-adw-1 gir1.2-webkit-6.0 gir1.2-soup-3.0   # Debian, Ubuntu
+sudo dnf install gjs libadwaita webkitgtk6.0 libsoup3                  # Fedora
 ```
 
 Voice input ([below](#voice-input)) also needs GStreamer's bindings and an audio source plugin.
@@ -217,18 +209,17 @@ with no root:
 | `~/.local/share/applications/dev.ai_space.Desktop.desktop` | the desktop entry; it also handles `aispace://` |
 | `~/.local/share/icons/hicolor/scalable/apps/`, `~/.local/share/metainfo/` | the icon and AppStream metadata |
 
-`install.sh --uninstall` removes those. Neither touches a workspace, the saved Spaces, an AI Space
-installed on this computer (from the welcome screen or by its one-command installer: `space
-uninstall` removes it), or the Local edition's background service (remove that first, in Settings ›
-This Computer).
+`install.sh --uninstall` removes those. Neither touches a workspace, the saved Spaces, or an AI
+Space installed on this computer (from the welcome screen or by its one-command installer: `space
+uninstall` removes it).
 
 What the app keeps:
 
 | Path | What |
 | --- | --- |
-| `~/.config/ai-space/connections.json` | the saved Spaces (an unreadable file is set aside as `connections.unreadable.json` and the app says so) |
+| `~/.config/ai-space/connections.json` | the saved Spaces (an unreadable file is set aside as `connections.unreadable.json` and the app says so; the `managed` mark an older Local build wrote is ignored and left out on the next save) |
 | `~/.config/ai-space/screens.json` | Home's screens, per saved Space, with the apps each Space has had (to tell a newly installed one) |
-| `~/.config/ai-space/preferences.json` | keep running, notifications, the chat permission, the window's size, agent CLIs chosen by hand, the machine chosen for each agent on several machines, appearance, language, widgets on screens, the Settings section shown last, the floating ball (on or off, its place, each Space's sections), the desk pet (on or off, where, its size, its place on the desktop), voice input's language and the Space it transcribes with |
+| `~/.config/ai-space/preferences.json` | keep running, notifications, the chat permission, the window's size, the machine chosen for each agent on several machines, appearance, language, widgets on screens, the Settings section shown last, the floating ball (on or off, its place, each Space's sections), the desk pet (on or off, where, its size, its place on the desktop), voice input's language and the Space it transcribes with |
 | `~/.local/share/ai-space/desktop/<connection>/` | each Space's web data: cookies (its sign-in), storage, cache |
 | `~/.cache/ai-space/catalogue-<connection>.json` | the last catalogue, shown marked as such while the Space cannot be reached |
 | `~/.config/autostart/dev.ai_space.Desktop.desktop` | Start at login (`ai-space --background`) |
@@ -481,7 +472,7 @@ Settings › Peer makes this computer's Space a peer of a Space used elsewhere, 
 
 | Group | What it does |
 | --- | --- |
-| This Computer as a Peer | Writes `SPACE_HUB_TOKEN` (32 random bytes, hex; copy, or make a new one), `SPACE_NAME` (suggested from the host name; letters, digits and `-`, so the hub reads it back unchanged) and `SPACE_TERMINAL_ENABLED` into this Space's workspace `.env`, edited as `space setup` edits it (`core/peer.ts`, tested against `src/space/setup.ts`), mode 0600. The workspace is the Local edition's, else `SPACE_HOME`, else `~/.ai-space`. Save restarts the Local edition's service; another Space on this computer has to be restarted by hand. Turning it off empties the token, which removes `/api/peer/*` |
+| This Computer as a Peer | Writes `SPACE_HUB_TOKEN` (32 random bytes, hex; copy, or make a new one), `SPACE_NAME` (suggested from the host name; letters, digits and `-`, so the hub reads it back unchanged) and `SPACE_TERMINAL_ENABLED` into this Space's workspace `.env`, edited as `space setup` edits it (`core/peer.ts`, tested against `src/space/setup.ts`), mode 0600. The workspace is `SPACE_HOME`, else `~/.ai-space`. After Save the Space on this computer has to be restarted by hand. Turning it off empties the token, which removes `/api/peer/*` |
 | How the Hub Reaches This Computer | An SSH tunnel: the app writes `~/.config/systemd/user/ai-space-peer-tunnel.service`, which runs `ssh -N -R 127.0.0.1:<port>:127.0.0.1:<SPACE_PORT> <user@host>` with key login only (`BatchMode`), reconnects after a drop and starts at login; Start, Stop and Remove, and the last line ssh logged when it is not connected. The hub's machine needs this computer's key (`ssh-copy-id`); its own `127.0.0.1:<port>` then leads here, and nothing is published. Or an address of the person's own (a Cloudflare tunnel's hostname) with optional headers for its access layer |
 | On the Hub | The lines for the hub's `.env` (`SPACE_PEER_<NAME>`, `_TOKEN`, `_HEADERS`), to copy, and a check that asks a saved Space's `GET /api/peers` how it sees this computer |
 
@@ -527,8 +518,7 @@ whenever the app sends it the dial, which needs no screenshot permission from th
 walking, the jump) into a PNG once the app sends it a mood, and quit without showing a window.
 `AISPACE_VOICE_SOURCE=<GStreamer source>` records from that instead of the microphone, such as
 `audiotestsrc is-live=true` or `filesrc location=speech.wav ! decodebin`, and `--action app.dictate`
-starts and stops `--dictate`. `AISPACE_LOCAL_BUNDLE` points the Local
-manager at another release tree.
+starts and stops `--dictate`.
 
 ## Memory
 
@@ -561,5 +551,5 @@ build it runs. `AISPACE_MEMSTAT=<seconds>` makes any run print its RSS and threa
 - Voice input typed straight into another app, and a key held to talk: the text of `--dictate` goes onto the clipboard, and the key presses it once to start and once to stop ([Voice input](#voice-input) says why).
 - Dragging tiles and cards into order (Edit This Screen moves them with buttons), and a card two columns wide.
 - The web panel's theme presets and colour adjustments in Settings › Appearance (the Panel page's own Settings has them), the hover-details switch and the panel's own desk-pet switch, which only the panel draws (the app's desk pet is set in General), and the panel's 30-second refresh of the Settings pages (here, Reload).
-- Updating the app itself. AI Space installed from the welcome screen is updated with `space upgrade`, not by the app; the Local edition updates its service from the release the app carries.
+- Updating the app itself. AI Space installed from the welcome screen is updated with `space upgrade`, not by the app.
 - A global shortcut of its own (see Quick Chat above).

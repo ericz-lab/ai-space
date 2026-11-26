@@ -7,4 +7,8 @@ cd "$(git rev-parse --show-toplevel)"
 # Tests create temporary repositories; do not let them inherit this checkout.
 unset $(git rev-parse --local-env-vars)
 bun install --frozen-lockfile >/dev/null
-bun run check
+# The tests start services and sweep units: with the real home they have removed a machine's own
+# space.<app> LaunchAgents before. A temporary home keeps them off this user's services.
+CHECK_HOME="$(mktemp -d)"
+trap 'rm -rf "$CHECK_HOME"' EXIT
+HOME="$CHECK_HOME" bun run check

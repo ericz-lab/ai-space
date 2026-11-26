@@ -7,7 +7,7 @@ export AISPACE_LAUNCHER="${AISPACE_LAUNCHER:-$(readlink -f "$0")}"
 gjs="$here/ai-space-gjs"
 [ -x "$gjs" ] || gjs=$(command -v gjs || true)
 if [ -z "$gjs" ]; then
-  echo "ai-space: gjs is missing; install gjs, libadwaita, WebKitGTK 6.0 and libsecret (see docs/linux-desktop.md)" >&2
+  echo "ai-space: gjs is missing; install gjs, libadwaita, WebKitGTK 6.0 and libsoup 3 (see docs/linux-desktop.md)" >&2
   exit 1
 fi
 # WebKit sandboxes its web processes with bubblewrap, which needs user namespaces. Where the

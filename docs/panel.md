@@ -82,7 +82,7 @@ ai-space treats them like any app (they can even declare widgets with a full `so
 
 ## Adding an app from a link
 
-Edit mode has an "Add" tile that takes one link. The panel asks the claude runtime to read the page (`claude -p … --allowedTools WebFetch`) and answer with a JSON object of identity fields, validates the answer, writes `apps/<name>/space.yaml`, and syncs the new directory (storage, scheduler, registry) like a boot would. The link itself becomes `url` when the answer names none. Fields can also be posted directly, which is what a script or a skill does.
+Edit mode has an "Add" tile that takes one link. The panel asks the space's model service to read the page (one `full` call with the `WebFetch` tool on the `basic` tier, tag `app-link`, so it runs on whichever runtime the space has) and answer with a JSON object of identity fields, validates the answer, writes `apps/<name>/space.yaml`, and syncs the new directory (storage, scheduler, registry) like a boot would. The link itself becomes `url` when the answer names none. Fields can also be posted directly, which is what a script or a skill does.
 
 ## Arranging, hiding and uninstalling apps
 

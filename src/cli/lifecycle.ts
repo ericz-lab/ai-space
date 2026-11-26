@@ -2,8 +2,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { SHARED_SKILLS } from "../space/config.ts";
 import { cloneDefaultApps, describeInstalls, installDefaultApps, newPackagePort, newWorkspaceEnv, parseDefaultApps } from "../space/defaults.ts";
-import { RUNTIME_ENV, type Runtimes, findRuntimes, freePort, portFree, renderLocalRuntimes } from "../space/local.ts";
 import { RUNTIMES_FILE } from "../space/runtimes/config.ts";
+import { RUNTIME_ENV, type Runtimes, findRuntimes, renderRuntimesYaml } from "../space/runtimes/discover.ts";
 import { loadRouterConfig, renderCaddyfile } from "../space/router/index.ts";
 import { codexUpgrade } from "../space/runtimes/codex-upgrade.ts";
 import { EXTENSIONS, EXTENSION_TITLES, type Extension, SetupAborted, realDeps, runSetup, terminalIO } from "../space/setup.ts";
@@ -13,6 +13,7 @@ import { noMore, parseArgs } from "./args.ts";
 import { type Ctx, type Noun, UsageError } from "./types.ts";
 import { WorkspaceBusy, acquireWorkspaceLock } from "../space/instance.ts";
 import { readVersion } from "../space/version.ts";
+import { EDITION } from "../space/identity.ts";
 
 /**
  * The commands that work with no ai-space running, or that start it:
@@ -23,18 +24,36 @@ import { readVersion } from "../space/version.ts";
 /** How `init` looks for the agent CLIs of a new workspace; tests replace it. */
 export const initDeps = { findRuntimes: (env: Record<string, string | undefined>) => findRuntimes(env, env.HOME?.trim() || homedir()) };
 
+/** Whether nothing listens on the loopback port. */
+export function portFree(port: number): boolean {
+  try {
+    Bun.serve({ port, hostname: "127.0.0.1", fetch: () => new Response() }).stop(true);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** A loopback port nothing listens on now. */
+export function freePort(): number {
+  const s = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: () => new Response() });
+  const port = s.port!;
+  s.stop(true);
+  return port;
+}
+
 /**
  * A new workspace (`init` creates its `.env`) starts usable without editing anything
  * (docs/install.md#a-new-workspace): the `.env` gets `newWorkspaceEnv`'s defaults, and
  * `runtimes.yaml` the agent CLIs found on this machine, when the workspace has no such file and
- * the environment names no runtime. The Local edition writes its own from the CLIs its user chose.
+ * the environment names no runtime.
  */
 async function newWorkspace(home: string, env: Record<string, string | undefined>): Promise<{ envText: string; looked: boolean; runtimes?: { text: string; found: string[] } }> {
   let runtimes: { text: string; found: string[] } | undefined;
-  const wanted = env.SPACE_EDITION?.trim() !== "local" && !RUNTIME_ENV.some((k) => env[k]?.trim()) && !(await Bun.file(join(home, RUNTIMES_FILE)).exists());
+  const wanted = !RUNTIME_ENV.some((k) => env[k]?.trim()) && !(await Bun.file(join(home, RUNTIMES_FILE)).exists());
   if (wanted) {
     const r: Runtimes = await initDeps.findRuntimes(env);
-    const text = renderLocalRuntimes(r, { withDefault: true, header: ["# Written by init for this new workspace: the agent CLIs found on this machine (docs/runtimes.md).", "# Edit freely; init writes this file only when it creates the workspace's .env."] });
+    const text = renderRuntimesYaml(r, ["# Written by init for this new workspace: the agent CLIs found on this machine (docs/runtimes.md).", "# Edit freely; init writes this file only when it creates the workspace's .env."]);
     if (text) runtimes = { text, found: (Object.keys(r) as (keyof Runtimes)[]).filter((k) => r[k]) };
   }
   // SPACE_MODEL_DEFAULT's built-in `sonnet` names a Claude model; without Claude Code the default runtime's tier stands in for it.
@@ -98,7 +117,7 @@ const start = async (ctx: Ctx, argv: string[]) => {
   const { ws, config } = await ctx.workspace();
   // One service per workspace: a second one would run a second scheduler on the same data (src/space/instance.ts).
   try {
-    await acquireWorkspaceLock(ws.run, ws.home, { port: config.port, edition: config.edition, version: await readVersion() });
+    await acquireWorkspaceLock(ws.run, ws.home, { port: config.port, edition: EDITION, version: await readVersion() });
   } catch (e) {
     if (e instanceof WorkspaceBusy) return ctx.io.err(`[space] ${e.message}`), 1;
     throw e;

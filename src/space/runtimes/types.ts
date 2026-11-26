@@ -404,7 +404,7 @@ export type RuntimeSpec = (ClaudeCodeSpec | AnthropicApiSpec | DeepseekHarnessSp
 export type RuntimesConfig = {
   /**
    * Runtime a bare model name (no `runtime/` prefix) goes to. Absent (a runtimes.yaml without
-   * `default`, as the Local edition writes it): there is none, and every model must name its runtime.
+   * `default`): there is none, and every model must name its runtime.
    */
   default?: string;
   runtimes: RuntimeSpec[];

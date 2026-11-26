@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { Inbox, NotifyService, NotifyStore, createNotifyRoutes, createTaskNotifier, loadChannels, parseNotifySpec } from "./space/notify/index.ts";
 import { RunRegistry, SessionStore, callerAppOf, createAgentRoutes, fixerAgentView, spaceAgentView } from "./space/agents/index.ts";
-import { AppRegistry, HealthProbe, IconPacks, LayoutStore, PetFeed, SpaceMood, WidgetFeed, createPanelRoutes, runStopCommand } from "./space/panel/index.ts";
+import { AppRegistry, HealthProbe, IconPacks, LayoutStore, PetFeed, SpaceMood, WidgetFeed, createPanelRoutes, linkPrompt, parseLinkAnswer, runStopCommand } from "./space/panel/index.ts";
 import { ConnectionPeers, PeerHub, PeerLedgers, PeerStore, createAdoptHandler, createConnectionPeerServe, createMigrateRoutes, createPeerRoutes, createPeerServeHandlers, createPeerServeRoutes, loadPeers, peerRuntimes, renamePeer } from "./space/peers/index.ts";
 import { ModelService, ModelStore, RuntimeHealth, createModelRoutes, createPeerModelRoutes, createPeerUsageRoutes, recordAgentRun } from "./space/model/index.ts";
 import { probeTargets, statusTable } from "./space/model/machines.ts";
@@ -36,11 +36,9 @@ import { TODO_APP } from "./space/feedback/todo.ts";
 import { buildFeedbackScript } from "./web/feedback-widget/build.ts";
 import { Launchctl, Supervisor, Systemctl, createServiceRoutes } from "./space/services/index.ts";
 import { createWebRoutes } from "./web/routes.ts";
-import { createIdentityRoutes } from "./space/identity.ts";
+import { EDITION, createIdentityRoutes } from "./space/identity.ts";
 import { UptimeStore, createUptimeRoutes } from "./space/uptime.ts";
 import { readVersion } from "./space/version.ts";
-import { withUserToolDirs } from "./space/host-tools.ts";
-import { readOwnership } from "./space/local.ts";
 import { logsToFile } from "./space/service.ts";
 import { createPackageRoutes } from "./space/packages/api.ts";
 import { BUILTIN_PUBLISHERS } from "./space/packages/publishers.ts";
@@ -60,7 +58,7 @@ import { runPackageTask } from "./space/packages/tasks.ts";
 import { loadAppEnv } from "./space/scheduler/targets.ts";
 import { PackageLifecycle } from "./space/packages/lifecycle.ts";
 import { createPackagePanelRoutes } from "./space/packages/panel.ts";
-import { type Config, SHARED_SKILLS, SPACE_ROOT, backupTaskDefaults, openBackups, openStorage } from "./space/config.ts";
+import { type Config, SHARED_SKILLS, backupTaskDefaults, openBackups, openStorage } from "./space/config.ts";
 import { run } from "./cli/main.ts";
 import { bearer, guardBrowserWrites, tokenEquals } from "./space/auth.ts";
 import { guardHosts, hostRules } from "./space/hosts.ts";
@@ -90,9 +88,6 @@ export { type Config, loadConfig, openBackups, openStorage, backupTaskDefaults }
 export { parseNotifyArgs } from "./cli/notify.ts";
 
 export async function boot(ws: Workspace, config: Config, env: Record<string, string | undefined> = process.env) {
-  // The Local edition runs under launchd with a bare PATH; agent CLIs live in the user's tool directories (docs/editions.md#ai-space-local).
-  // Its own bin/ first, so agents and the terminal run this release's `space` (the app-studio skill uses it).
-  if (config.edition === "local") env.PATH = `${join(SPACE_ROOT, "bin")}:${withUserToolDirs(env.PATH, homedir())}`;
   // Built-in sign-in (docs/auth.md): the operator token is never empty then, or every caller past the gate would be the operator.
   if (config.auth === "builtin") config = { ...config, apiToken: await ensureOperatorToken(ws.home, config.apiToken) };
   const store = new Store(config.dbPath, { eventRetentionMs: config.eventRetentionMs });
@@ -560,6 +555,13 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
 
   const moodInbox = new Inbox(notifyStore.db);
   const panelRoutes = createPanelRoutes({
+    // "Add an app from a link" reads the page on whichever runtime this space has, as every other
+    // model call does: a machine with only Codex has no `claude` to spawn.
+    resolveLink: async (link) => {
+      const r = await model.run("space", { prompt: linkPrompt(link), system: "You answer one request from an application. Reply with exactly what it asks for and nothing else.", model: "basic", mode: "full", tag: "app-link", tools: ["WebFetch"], timeoutMs: 180_000, maxTokens: 1000 });
+      if (!r.outcome.ok) throw new Error(r.outcome.error);
+      return parseLinkAnswer(r.outcome.text);
+    },
     sharedApps: (hidden) => packageCatalogue.views(hidden),
     sharedIcon: (connection, app) => packageCatalogue.icon(connection, app),
     packageCheckUrl: (app, check) => `http://127.0.0.1:${config.port}/api/panel/packages/apps/${encodeURIComponent(app)}/checks/${encodeURIComponent(check)}`,
@@ -785,7 +787,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       ["app", createModelRoutes({ service: model, token: config.apiToken, appForToken: (t) => storage.appForToken(t), resolveModel: (app, tag) => appModels.resolve(app, tag), machines: machineCells, servesPeers: config.peerModel, space: config.name, ...(peers.names().length ? { peerLedgers: new PeerLedgers(peers, config.name) } : {}) })],
       ["owner", createAppModelRoutes(appModelRouteOpts)],
       ["app", createChatRoutes({ service: chat, token: config.apiToken, appForToken: (t) => storage.appForToken(t), widget })],
-      ["public", createIdentityRoutes({ version, edition: config.edition, id: packageStore.spaceId, name: config.name, token: config.apiToken, managed: Boolean(await readOwnership(ws.home)), uptime: () => uptime.summary() })],
+      ["public", createIdentityRoutes({ version, id: packageStore.spaceId, name: config.name, token: config.apiToken, uptime: () => uptime.summary() })],
       ["owner", createUptimeRoutes({ uptime, token: config.apiToken })],
       ["owner", panelRoutes],
       ["owner", createPackageRoutes({ installer: packageInstaller, token: config.apiToken, trustedKeys: packageTrustKeys, runtime: packageRuntime, lifecycle: packageLifecycle, activate: activatePackage })],
@@ -898,7 +900,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   modelGateway.listen("base" in gatewayAt ? gatewayAt.base : undefined, "reason" in gatewayAt ? gatewayAt.reason : undefined);
   if (modelGateway.enabled && "reason" in gatewayAt) console.error(`[model-gateway] ${gatewayAt.reason}`);
   console.log(`[space] listening on http://${config.host}:${server.port} · workspace ${ws.home} · apps ${registry.list().length}${peers.names().length ? ` · peers ${peers.names().join(", ")}` : ""}${config.hubToken ? " · serving /api/peer as " + config.name : ""}${terminal.enabled ? ` · terminal ${terminal.backend}` : ""}${router.enabled ? ` · router ${config.router.backend} :${config.router.port}` : ""} · services by ${supervisor.mode} · runtimes ${runtimes.describe()} (${loaded.source})${gatewayLoaded.loaded ? ` · model gateway ${gatewayLoaded.loaded.config.providers.map((p) => p.name + (gatewayLoaded.loaded!.config.off[p.name] ? " (off)" : "")).join(", ")}` : ""}`);
-  uptime.start({ version, edition: config.edition });
+  uptime.start({ version, edition: EDITION });
 
   // A restart must not cut the work in flight: no new runs are started, then the task runs and the
   // model calls apps are blocked on get SPACE_DRAIN_SECONDS to finish. The server keeps serving while
@@ -906,7 +908,11 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   // grace is over is aborted and recorded, so nothing disappears silently. The unit must give the
   // process more than this: KillMode=mixed (children survive until the drain is over) and a
   // TimeoutStopSec above SPACE_DRAIN_SECONDS. See deploy/ai-space.service and docs/scheduler.md.
+  let stopping = false;
   const shutdown = async () => {
+    // A second signal while the drain runs must not start it again over closed databases.
+    if (stopping) return;
+    stopping = true;
     clearInterval(probeTimer);
     console.log("[space] shutting down");
     scheduler.stop();

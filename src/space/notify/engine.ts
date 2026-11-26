@@ -225,7 +225,8 @@ export class NotifyService {
       ).catch((e) => this.log(`rate-limit notice failed: ${(e as Error).message}`));
     }
 
-    if (input.wait) {
+    // Once stopped no worker sends: the delivery stays queued for the next start, and waiting would never end.
+    if (input.wait && !this.stopped) {
       await this.waitFor(deliveries.filter((d) => d.status === "queued").map((d) => d.id));
       return { notification, deliveries: this.store.listDeliveries(notification.id) };
     }

@@ -25,8 +25,7 @@ describe("the server archive", () => {
 
   test("is named after the version, system and CPU", () => {
     expect(archiveName({ version: "1.2.3", os: "linux", arch: "arm64" })).toBe("ai-space-1.2.3-linux-arm64");
-    expect(linuxArchiveName("client", "1.2.3", "x64")).toBe("ai-space-desktop-1.2.3-linux-x64");
-    expect(linuxArchiveName("local", "1.2.3", "arm64")).toBe("ai-space-local-1.2.3-linux-arm64");
+    expect(linuxArchiveName("1.2.3", "x64")).toBe("ai-space-desktop-1.2.3-linux-x64");
     expect(windowsArchiveName("1.2.3", "x64")).toBe("ai-space-desktop-1.2.3-windows-x64");
     expect(windowsArchiveName("1.2.3-dev.abc1234", "arm64")).toBe("ai-space-desktop-1.2.3-dev.abc1234-windows-arm64");
   });

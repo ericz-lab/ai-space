@@ -142,7 +142,7 @@ How the variables reach the app process:
 | a shell, a script, a test | `bun src/index.ts env <app>` prints the variables in `export` form. |
 | anything else | `GET /api/apps/:app/storage` returns the provisioned names, backends and paths. PostgreSQL passwords are not in the response; they only exist in `space.env`. |
 
-Databases created at runtime, for example a scratch database an agent needs for one conversation, go through `POST /api/apps/:app/databases { name, backend? }`. They are provisioned by the same code, appear in `space.env` on the next write, and are marked `source: api` so a manifest re-sync does not treat them as orphaned. Removing a database is never a side effect of sync or of an API call: a name that disappears from the manifest is marked orphaned and kept, and `bun src/index.ts storage rm <app> <name>` moves the data aside as `<name>.removed-<ts>` rather than deleting it.
+Databases created at runtime, for example a scratch database an agent needs for one conversation, go through `POST /api/apps/:app/databases { name, backend? }`. They are provisioned by the same code, appear in `space.env` on the next write, and are marked `source: api` so a manifest re-sync does not treat them as orphaned. Removing a database is never a side effect of sync or of an API call: a name that disappears from the manifest is marked orphaned and kept, and removing it by command (`storage rm <app> <name>`, planned, see the rollout order) will move the data aside as `<name>.removed-<ts>` rather than delete it.
 
 Ownership, in one line each:
 

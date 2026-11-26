@@ -21,6 +21,16 @@ describe("resolveTarget", () => {
     expect(await resolveTarget({}, {}, async () => ({}))).toMatchObject({ url: DEFAULT_URL, token: "" });
   });
 
+  test("the workspace .env token is not sent to another machine named by --url", async () => {
+    const file = async () => ({ SPACE_HOST: "10.0.0.1", SPACE_PORT: "9000", SPACE_API_TOKEN: "file-token" });
+    expect((await resolveTarget({ url: "https://other.example.com" }, {}, file)).token).toBe("");
+    expect((await resolveTarget({ url: "https://other.example.com" }, { SPACE_API_TOKEN: "for-this-call" }, file)).token).toBe("for-this-call");
+    expect((await resolveTarget({ url: "https://other.example.com", token: "t" }, {}, file)).token).toBe("t");
+    // The workspace's own address, spelled out, and loopback still get it.
+    expect((await resolveTarget({ url: "http://10.0.0.1:9000/" }, {}, file)).token).toBe("file-token");
+    expect((await resolveTarget({ url: "http://127.0.0.1:9000" }, {}, file)).token).toBe("file-token");
+  });
+
   test("keeps the app's own token and name for the routes that take an app identity", async () => {
     const t = await resolveTarget({}, { SPACE_APP_TOKEN: "sat_x", SPACE_APP: "demo", SPACE_API_TOKEN: "op" }, async () => ({}));
     expect(t).toMatchObject({ appToken: "sat_x", app: "demo", token: "op" });

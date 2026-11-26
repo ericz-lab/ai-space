@@ -39,7 +39,9 @@ export function routableHost(url: string | undefined): string | undefined {
   } catch {
     return undefined;
   }
-  return !host || LOOPBACK.test(host) ? undefined : host;
+  // `new URL` keeps `{`, `}` and `"` in a host; one of those in the Caddyfile fails the reload for every app.
+  if (!/^[a-z0-9.\-:[\]]+$/.test(host)) return undefined;
+  return LOOPBACK.test(host) ? undefined : host;
 }
 
 export function routeTable(manifests: Manifest[], opts: TableOptions): Route[] {

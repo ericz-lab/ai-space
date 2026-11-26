@@ -2,12 +2,11 @@ import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { ConnectionUrlError, escapeSegment, isLoopback, normalizeConnectionUrl, origin, queryParams, resolveUrl, sameOrigin } from "./url.ts";
-import { ConnectionList, decodeConnections, encodeConnections, localToClaim } from "./connections.ts";
+import { ConnectionList, decodeConnections, encodeConnections } from "./connections.ts";
 import { agentBase, allEntries, decodeCatalogue, ICON_RADIUS_MAX, iconShape, NotASpaceError, opensFirst, pageUrl, panelScreens, pickText, search, widgetLines } from "./catalogue.ts";
 import { checkResponse, classifyIdentity, classifyLayout, SpaceError } from "./check.ts";
 import { LineSplitter, SSEParser } from "./sse.ts";
 import { appForUrl, decodeInbox, inboxClick, InboxSeen, inboxShown, parseDeepLink, visibleTabs } from "./desktop.ts";
-import { decodeLocal, hasSession, LocalFailure, needsDeviceCredential, newer, runtimeArgs, updateAvailable } from "./local.ts";
 import { markdownBlocks, inlineMarkup } from "./markdown.ts";
 import { crashReload, decideNavigation, grantsMicrophone } from "./navigation.ts";
 import { relativeTime } from "./format.ts";
@@ -51,45 +50,46 @@ describe("connection URLs", () => {
 });
 
 describe("saved connections", () => {
-  test("one default while any exist; managed is kept; older files decode", () => {
+  test("one default while any exist; older files decode", () => {
     let n = 0;
     const list = new ConnectionList([], () => `id${++n}`);
     const a = list.add("", "https://a.example.com/");
-    const b = list.add("Home", "http://127.0.0.1:8700/", { managed: true });
+    const b = list.add("Home", "http://127.0.0.1:8700/");
     expect(a).toMatchObject({ name: "a.example.com", isDefault: true });
-    expect(list.managed?.id).toBe(b.id);
     list.setDefault(b.id);
     expect(list.default?.id).toBe(b.id);
     list.remove(b.id);
     expect(list.default?.id).toBe(a.id);
     const back = decodeConnections(encodeConnections(list.connections));
     expect(back).toEqual(list.connections);
-    expect(decodeConnections('[{"id":"x","name":"n","url":"https://n/","isDefault":true}]')[0]!.managed).toBe(false);
+    expect(decodeConnections('[{"id":"x","name":"n","url":"https://n/","isDefault":true}]')[0]).toEqual({ id: "x", name: "n", url: "https://n/", isDefault: true });
     expect(() => decodeConnections('{"id":1}')).toThrow();
   });
 
-  test("editing renames, moves, and drops the Local mark only when the origin changes", () => {
-    let n = 0;
-    const list = new ConnectionList([], () => `id${++n}`);
-    const local = list.add("This Computer", "http://127.0.0.1:8700/", { managed: true });
-    expect(list.update(local.id, "Mine", "http://127.0.0.1:8700/")).toBe(false);
-    expect(list.get(local.id)).toMatchObject({ name: "Mine", url: "http://127.0.0.1:8700/", managed: true });
-    expect(list.update(local.id, "", "http://127.0.0.1:8711/")).toBe(true);
-    expect(list.get(local.id)).toMatchObject({ name: "127.0.0.1", url: "http://127.0.0.1:8711/", managed: false });
-    expect(list.update("missing", "x", "https://x.example.com/")).toBe(false);
+  test("a file written by the retired Local edition keeps its Spaces and drops `managed` on the next save", () => {
+    const old = JSON.stringify([
+      { id: "h", name: "This Computer", url: "http://127.0.0.1:8700/", isDefault: true, managed: true },
+      { id: "r", name: "Remote", url: "https://space.example.com/", isDefault: false, managed: false },
+    ]);
+    const saved = decodeConnections(old);
+    expect(saved).toEqual([
+      { id: "h", name: "This Computer", url: "http://127.0.0.1:8700/", isDefault: true },
+      { id: "r", name: "Remote", url: "https://space.example.com/", isDefault: false },
+    ]);
+    const list = new ConnectionList(saved, () => "n");
+    expect(list.default?.id).toBe("h");
+    expect(encodeConnections(list.connections)).not.toContain("managed");
   });
 
-  test("a hand-added Space at the Local edition's address becomes the app's own", () => {
-    const hand = { id: "h", name: "This Computer", url: "http://127.0.0.1:8700/", isDefault: false, managed: false };
-    const remote = { id: "r", name: "Remote", url: "https://space.example.com/", isDefault: true, managed: false };
-    const status = { state: "managed", url: "http://127.0.0.1:8700/" };
-    expect(localToClaim([remote, hand], status)).toBe("h");
-    expect(localToClaim([remote, { ...hand, url: "http://127.0.0.1:8700" }], status)).toBe("h");
-    // Not the Local edition's (another installation, or none), or one is marked already.
-    expect(localToClaim([remote, hand], { state: "foreign", url: status.url })).toBeUndefined();
-    expect(localToClaim([remote, hand], undefined)).toBeUndefined();
-    expect(localToClaim([{ ...remote, managed: true }, hand], status)).toBeUndefined();
-    expect(localToClaim([remote], status)).toBeUndefined();
+  test("editing renames and moves; it says when the origin changes", () => {
+    let n = 0;
+    const list = new ConnectionList([], () => `id${++n}`);
+    const local = list.add("This Computer", "http://127.0.0.1:8700/");
+    expect(list.update(local.id, "Mine", "http://127.0.0.1:8700/")).toBe(false);
+    expect(list.get(local.id)).toMatchObject({ name: "Mine", url: "http://127.0.0.1:8700/" });
+    expect(list.update(local.id, "", "http://127.0.0.1:8711/")).toBe(true);
+    expect(list.get(local.id)).toMatchObject({ name: "127.0.0.1", url: "http://127.0.0.1:8711/" });
+    expect(list.update("missing", "x", "https://x.example.com/")).toBe(false);
   });
 });
 
@@ -255,29 +255,6 @@ describe("desktop rules", () => {
     expect(grantsMicrophone("microphone", "https://s.example.com/x", "https://s.example.com/", home)).toBe(true);
     expect(grantsMicrophone("camera", "https://s.example.com/x", "https://s.example.com/", home)).toBe(false);
     expect(grantsMicrophone("microphone", "https://evil.example/", "https://s.example.com/", home)).toBe(false);
-  });
-});
-
-describe("Local edition output", () => {
-  test("envelopes, versions and the device credential", () => {
-    expect(decodeLocal<{ ok: true; x: number }>('{"ok":true,"x":1}').x).toBe(1);
-    expect(() => decodeLocal('{"ok":false,"code":"busy","error":"the Space is busy"}')).toThrow(LocalFailure);
-    try {
-      decodeLocal("bun: not found");
-    } catch (e) {
-      expect(e).toMatchObject({ code: "output", message: "bun: not found" });
-    }
-    expect(newer("0.2.0", "0.1.9")).toBe(true);
-    expect(newer("0.2.0", "0.2.0-rc.1")).toBe(true);
-    expect(newer("0.2.0-rc.1", "0.2.0")).toBe(false);
-    expect(newer("0.1.0", "0.1.0")).toBe(false);
-    const s = { state: "managed", workspace: { exists: true }, bundle: { version: "0.2.0" }, installed: { version: "0.1.0" } } as never;
-    expect(updateAvailable(s)).toBe(true);
-    expect(needsDeviceCredential(s, true)).toBe(false);
-    expect(needsDeviceCredential(s, false)).toBe(true);
-    expect(runtimeArgs({ claude: "/c", codex: undefined, dsh: "/d" })).toEqual(["--claude", "/c", "--dsh", "/d"]);
-    expect(hasSession([{ name: "space_session", domain: "127.0.0.1" }], "127.0.0.1")).toBe(true);
-    expect(hasSession([{ name: "space_session", domain: "127.0.0.1", expires: 1 }], "127.0.0.1", 2)).toBe(false);
   });
 });
 

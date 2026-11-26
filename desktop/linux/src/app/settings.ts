@@ -12,8 +12,6 @@ import { VOICE_LANGUAGES, voiceSetting } from "../core/voice.ts";
 import { desktopPetAvailable } from "./pet.ts";
 import { LANGS } from "../../../../src/web/messages.ts";
 import { APP_ID, APP_ROOT, exists, lang, logError, path, prefs, savePrefs, t, tw, writeText } from "./env.ts";
-import type { LocalManager } from "./local-manager.ts";
-import { LocalPanel } from "./local-view.ts";
 import type { AppModel } from "./model.ts";
 import { PeerPage } from "./peer-view.ts";
 import { type Ctx, choiceRow, confirm, loadLabels, plain } from "./settings-kit.ts";
@@ -27,7 +25,7 @@ import { connectForm } from "./welcome.ts";
  * Space keeps its own password), one section on the right, and the pages a section opens (App
  * models, Scheduled tasks, Events and calls, Model usage, App usage) inside the pane with Back.
  * The words are the panel's. General also holds what only this app has: the saved Spaces and how
- * the app runs. This Computer (the Local edition) and Peer follow the panel's sections.
+ * the app runs. Peer follows the panel's sections.
  * The Space sections show the current Space; the section shown last opens next time.
  */
 
@@ -63,15 +61,14 @@ const ICONS: Record<Section, string> = {
   status: "network-wired-symbolic",
   packages: "package-x-generic-symbolic",
   account: "avatar-default-symbolic",
-  local: "computer-symbolic",
   peer: "network-server-symbolic",
 };
 
 const SPACE_SECTIONS: Section[] = ["models", "automation", "feedback", "usage", "status", "packages", "account"];
 
-const label = (s: Section) => (s === "local" ? t("thisComputer") : s === "peer" ? t("peer") : tw(SECTION_LABEL[s]));
+const label = (s: Section) => (s === "peer" ? t("peer") : tw(SECTION_LABEL[s]));
 
-export function showSettings(parent: any, model: AppModel, local: LocalManager, page?: Section, detail?: Detail): void {
+export function showSettings(parent: any, model: AppModel, page?: Section, detail?: Detail): void {
   const dialog = new Adw.Dialog({ title: tw("settings.title"), content_width: 980, content_height: 700, width_request: 360, height_request: 420 });
   const toasts = new Adw.ToastOverlay();
   const split = new Adw.NavigationSplitView({ min_sidebar_width: 190, max_sidebar_width: 240, sidebar_width_fraction: 0.24 });
@@ -83,7 +80,7 @@ export function showSettings(parent: any, model: AppModel, local: LocalManager, 
   const toast = (title: string) => toasts.add_toast(new Adw.Toast({ title, timeout: 3 }));
 
   // The section list
-  const sections: Section[] = [...WEB_SECTIONS, ...(local.available ? (["local"] as const) : []), "peer"];
+  const sections: Section[] = [...WEB_SECTIONS, "peer"];
   const list = new Gtk.ListBox({ css_classes: ["navigation-sidebar"] });
   const rows = new Map<Section, any>();
   for (const s of sections) {
@@ -98,7 +95,7 @@ export function showSettings(parent: any, model: AppModel, local: LocalManager, 
   // A line between the panel's sections and this computer's own.
   list.set_header_func((r: any, before: any) => {
     const s = sections[r.get_index()];
-    r.set_header(before && (s === "local" || (s === "peer" && !local.available)) ? new Gtk.Separator({ margin_top: 6, margin_bottom: 6 }) : null);
+    r.set_header(before && s === "peer" ? new Gtk.Separator({ margin_top: 6, margin_bottom: 6 }) : null);
   });
   // Account shows only where the Space keeps its own password and this app is signed in to it.
   rows.get("account").set_visible(false);
@@ -147,7 +144,7 @@ export function showSettings(parent: any, model: AppModel, local: LocalManager, 
     content.set_title(label(s));
     builtFor = spaceKey();
     labels = undefined;
-    nav.replace([sectionPage(s, ctx, local, model, toast)]);
+    nav.replace([sectionPage(s, ctx, model, toast)]);
     split.set_show_content(true);
   };
   list.connect("row-selected", (_l: unknown, r: any) => {
@@ -193,13 +190,12 @@ export function showSettings(parent: any, model: AppModel, local: LocalManager, 
     sync();
   });
   dialog.connect("closed", off);
-  if (local.available) void local.refresh();
   dialog.present(parent);
   sync();
 }
 
 /** A section's page: a header naming the Space it shows, and its rows. */
-function sectionPage(s: Section, ctx: Ctx, local: LocalManager, model: AppModel, toast: (title: string) => void): any {
+function sectionPage(s: Section, ctx: Ctx, model: AppModel, toast: (title: string) => void): any {
   const page = new Adw.NavigationPage({ title: label(s), tag: s });
   const toolbar = new Adw.ToolbarView();
   const bar = new Adw.HeaderBar();
@@ -209,7 +205,7 @@ function sectionPage(s: Section, ctx: Ctx, local: LocalManager, model: AppModel,
   page.set_child(toolbar);
 
   if (s === "peer") {
-    const peer = new PeerPage(local, model, { toast, copyRow: (command) => commandRow(command, toast) });
+    const peer = new PeerPage(model, { toast, copyRow: (command) => commandRow(command, toast) });
     toolbar.set_content(peer.widget);
     return page;
   }
@@ -226,12 +222,6 @@ function sectionPage(s: Section, ctx: Ctx, local: LocalManager, model: AppModel,
     case "appearance":
       appearance(prefsPage);
       break;
-    case "local": {
-      const g = new Adw.PreferencesGroup();
-      g.add(new LocalPanel(local, model, { onConnected: () => ctx.rebuild() }).widget);
-      prefsPage.add(g);
-      break;
-    }
     case "models":
       modelsSection(prefsPage, ctx, space!);
       break;
@@ -307,7 +297,6 @@ function general(page: any, ctx: Ctx, model: AppModel, toast: (title: string) =>
       else row.add_prefix(new Gtk.Box({ width_request: 16 }));
       const tags: string[] = [];
       if (c.isDefault) tags.push(t("isDefault"));
-      if (c.managed) tags.push(t("managedTag"));
       if (tags.length) row.add_suffix(new Gtk.Label({ label: tags.join(" · "), css_classes: ["dim-label", "caption"] }));
       const menu = new Gtk.MenuButton({ icon_name: "view-more-symbolic", tooltip_text: t("spaceActions"), valign: Gtk.Align.CENTER, css_classes: ["flat"] });
       const pop = new Gtk.Popover();

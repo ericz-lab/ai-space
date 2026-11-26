@@ -4,7 +4,6 @@ import { groupById, groupKeyOf, preferredMachine } from "../core/agents.ts";
 import { type Identity, type SpaceState, SpaceError, classifyIdentity, classifyLayout } from "../core/check.ts";
 import { ChangeGate } from "../core/change.ts";
 import { type Connection, ConnectionList, decodeConnections, encodeConnections } from "../core/connections.ts";
-import { normalizeConnectionUrl, sameOrigin } from "../core/url.ts";
 import { Conversation, type RunInfo } from "../core/conversation.ts";
 import { type InboxItem, type InboxSummary, InboxSeen, decodeInbox } from "../core/desktop.ts";
 import { type SpaceMood, decodeMood } from "../core/pet.ts";
@@ -77,10 +76,6 @@ export class AppModel {
   private readonly listeners = new Set<(c: Change, space?: Space) => void>();
   private timer = 0;
   private ticks = 0;
-  /** The Local edition signs in to its own Space with the device credential; set by LocalManager. */
-  signIn: ((space: Space) => Promise<boolean>) | undefined;
-  /** The saved Space the Local edition runs but that is not marked yet (`localToClaim`); set by LocalManager. */
-  localToClaim: ((connections: readonly Connection[]) => string | undefined) | undefined;
   /** New unread inbox threads, for desktop notifications. */
   onFreshInbox: ((space: Space, items: InboxItem[]) => void) | undefined;
 
@@ -150,9 +145,8 @@ export class AppModel {
     void this.refresh(this.current!);
   }
 
-  add(name: string, url: string, opts: { managed?: boolean; makeDefault?: boolean } = {}): Space {
+  add(name: string, url: string, opts: { makeDefault?: boolean } = {}): Space {
     const c = this.list.add(name, url, opts);
-    this.markLocal();
     this.save();
     this.select(c.id);
     return this.space(c.id)!;
@@ -182,71 +176,11 @@ export class AppModel {
       this.spaces.get(id)?.client.close();
       this.spaces.delete(id);
     }
-    this.markLocal();
     this.save();
     if (moved && this.currentId === id) {
       this.emit("selection", this.current);
       void this.refresh(this.current!);
     }
-  }
-
-  /** The Space the Local edition runs was saved without its mark (`localToClaim`): mark it, so the app signs in with the device credential. */
-  claimLocal(id: string): void {
-    const c = this.list.get(id);
-    if (!c || c.managed) return;
-    log("local", "marking", c.name, "as this computer's Space");
-    this.list.setManaged(id, c.url);
-    this.save();
-    // It may already show "sign in": look again, now with the device credential.
-    const space = this.spaces.get(id);
-    if (space?.state.kind === "signin") void this.refresh(space);
-  }
-
-  /** A Space added or pointed at the Local edition's address after launch is its own too. */
-  private markLocal(): void {
-    const id = this.localToClaim?.(this.list.connections);
-    const c = id ? this.list.get(id) : undefined;
-    if (!c || c.managed) return;
-    log("local", "marking", c.name, "as this computer's Space");
-    this.list.setManaged(c.id, c.url);
-  }
-
-  /**
-   * After the Local edition is set up or taken over: the Space it runs becomes the saved, default
-   * and shown one, marked as the app's own so the app signs in to it with its device credential.
-   */
-  adoptLocal(address: string): Space {
-    const url = normalizeConnectionUrl(address);
-    const existing = this.list.managed ?? this.list.connections.find((c) => sameOrigin(c.url, url));
-    let id: string;
-    if (existing) {
-      // A Space at another address gets a new client on the next look.
-      if (!sameOrigin(existing.url, url)) {
-        this.spaces.get(existing.id)?.client.close();
-        this.spaces.delete(existing.id);
-      }
-      this.list.setManaged(existing.id, sameOrigin(existing.url, url) ? existing.url : url);
-      id = existing.id;
-    } else {
-      id = this.list.add(t("thisComputer"), url, { makeDefault: true, managed: true }).id;
-    }
-    this.list.setDefault(id);
-    this.save();
-    const space = this.space(id)!;
-    if (this.currentId !== id) {
-      this.currentId = id;
-      this.emit("selection", space);
-    }
-    void this.refresh(space);
-    return space;
-  }
-
-  /** After the background service was removed: the Space stays saved but is no longer the app's own. */
-  releaseLocal(): void {
-    const c = this.list.managed;
-    if (!c) return;
-    this.list.setManaged(c.id, c.url, false);
-    this.save();
   }
 
   // Refreshing
@@ -281,12 +215,8 @@ export class AppModel {
       if ("state" in verdict && verdict.state.kind !== "signin") return this.setState(space, verdict.state);
       if ("identity" in verdict) space.identity = verdict.identity;
 
-      let layout = await c.answer("GET", "/api/panel/layout");
-      let state = classifyLayout(layout.status, layout.contentType, layout.body);
-      if (state.kind === "signin" && space.conn.managed && this.signIn && (await this.signIn(space))) {
-        layout = await c.answer("GET", "/api/panel/layout");
-        state = classifyLayout(layout.status, layout.contentType, layout.body);
-      }
+      const layout = await c.answer("GET", "/api/panel/layout");
+      const state = classifyLayout(layout.status, layout.contentType, layout.body);
       if (state.kind !== "ready") return this.setState(space, state);
       this.setState(space, { kind: "ready", ...(space.identity ? { version: space.identity.version, edition: space.identity.edition, ...(space.identity.name ? { name: space.identity.name } : {}) } : {}) });
 

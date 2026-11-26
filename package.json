@@ -26,8 +26,6 @@
     "release:server": "bun release/server.ts",
     "release:smoke": "bun release/smoke.ts",
     "release:client": "desktop/macos/scripts/package.sh",
-    "release:local": "bun release/local.ts",
-    "release:local-smoke": "bun release/local-smoke.ts",
     "release:linux": "bun release/linux.ts",
     "release:windows": "bun release/windows.ts",
     "typecheck": "tsc --noEmit",

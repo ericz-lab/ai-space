@@ -41,8 +41,6 @@ export class StandaloneServices implements StandaloneHost {
   /** The app's name in service and file names. */
   key(app: string): string { return `${app}-${this.suffix}`; }
   unit(app: string): string { return this.opts.manager.unitName(this.key(app)); }
-  /** Every key of this Space's the sweep of `SPACE_SUPERVISOR=space` must leave alone. */
-  isKey(name: string): boolean { return name.endsWith(`-${this.suffix}`); }
   envFile(app: string): string { return join(this.opts.envDir, `${this.key(app)}.env`); }
   private unitPath(app: string): string { return join(this.opts.manager.unitDir, this.opts.manager.unitFile(this.key(app))); }
 

@@ -45,7 +45,9 @@ final class SpaceLive: ObservableObject {
             await self?.refresh(catalogue: true)
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(30))
-                await self?.refresh()
+                // Gone without stop(): the loop ends with it.
+                guard let self else { return }
+                await self.refresh()
             }
         }
     }

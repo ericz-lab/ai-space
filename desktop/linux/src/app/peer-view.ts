@@ -4,7 +4,6 @@ import GLib from "gi://GLib";
 import Gtk from "gi://Gtk?version=4.0";
 import { DEFAULT_HUB_PORT, TUNNEL_UNIT, hubLines, parseEnvText, parseSshTarget, peerSideUpdates, readPeerSide, readTunnelUnit, renderTunnelUnit, suggestPeerName, tokenHex, tunnelAddress, updateEnvText, validHubPort, validPeerName } from "../core/peer.ts";
 import { logError, path, prefs, readText, readTextSync, savePrefs, sleep, t, writeText } from "./env.ts";
-import type { LocalManager } from "./local-manager.ts";
 import type { AppModel } from "./model.ts";
 
 /**
@@ -75,7 +74,6 @@ export class PeerPage {
   private readonly check = new Gtk.Button({ label: t("peerCheckButton"), valign: Gtk.Align.CENTER });
 
   constructor(
-    private readonly local: LocalManager,
     private readonly model: AppModel,
     private readonly opts: Opts,
   ) {
@@ -84,16 +82,11 @@ export class PeerPage {
     this.buildHub();
     void this.load();
     void this.refreshTunnel();
-    // The Local status names the workspace once it arrives; read that one unless edits are pending.
-    const off = local.on(() => {
-      if (!this.dirty && this.workspaceEnv() !== this.envFile) void this.load();
-    });
-    this.widget.connect("destroy", off);
   }
 
-  /** This computer's Space: the Local edition's workspace, else SPACE_HOME, else ~/.ai-space. */
+  /** This computer's Space: SPACE_HOME, else ~/.ai-space. */
   private workspaceEnv(): string {
-    const ws = this.local.status?.workspace.path ?? (GLib.getenv("SPACE_HOME") || path(GLib.get_home_dir(), ".ai-space"));
+    const ws = GLib.getenv("SPACE_HOME") || path(GLib.get_home_dir(), ".ai-space");
     return path(ws, ".env");
   }
 
@@ -183,10 +176,7 @@ export class PeerPage {
     this.dirty = false;
     this.render();
     // The Space reads its .env when it starts.
-    if (this.local.status?.state === "managed") {
-      this.opts.toast(t("peerSavedRestarting"));
-      await this.local.restart();
-    } else this.opts.toast(t("peerSavedRestart"));
+    this.opts.toast(t("peerSavedRestart"));
   }
 
   // 2. The hub reaches this computer.
@@ -315,7 +305,7 @@ export class PeerPage {
     this.checkRow.add_suffix(this.check);
     this.hubGroup.add(this.checkRow);
     this.widget.add(this.hubGroup);
-    const others = () => this.model.list.connections.filter((c) => !c.managed);
+    const others = () => this.model.list.connections;
     const fill = () => {
       const list = others();
       this.checkRow.set_model(Gtk.StringList.new(list.map((c) => c.name)));

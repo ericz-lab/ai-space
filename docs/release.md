@@ -7,8 +7,8 @@ Status: implemented. A release publishes two things ([editions.md](editions.md))
 - **AI Space Desktop**: the native app that connects to an AI Space (the Client edition), for a Mac
   on Apple silicon, Linux and Windows on x64 and arm64 (Windows not signed yet).
 
-The Local edition (the app with the service inside, [local.md](local.md)) is no longer published:
-its builders stay for the installations that exist ([Local edition](#local-edition)).
+The Local edition (the app with the service inside) was retired on 2026-11-24 and its builders
+removed ([editions.md](editions.md#what-is-published-2026-11-21)).
 
 One tag builds both from one commit and one version. Nothing is published without a
 person: the pipeline ends in a draft GitHub Release.
@@ -147,9 +147,9 @@ Settings, all optional, as environment variables before `bash`:
 | `AI_SPACE_DOWNLOAD` | Where the release's files are: a mirror, or `file://<dir>` with the files downloaded already |
 | `AI_SPACE_NO_OPEN` | `1`: do not open a browser at the end |
 
-It stops, having changed nothing, on a machine whose workspace belongs to the AI Space app (the
-Local edition, [local.md](local.md)): that app already runs ai-space there with a service of its
-own. Not yet: Intel Macs, a Linux machine without a systemd user manager.
+It stops, having changed nothing, on a machine whose workspace belongs to the AI Space app of the
+retired Local edition (`installation.json` with `"managedBy": "ai-space-local"`): that app may still
+run ai-space there with a service of its own. Not yet: Intel Macs, a Linux machine without a systemd user manager.
 
 Afterwards, on the machine:
 
@@ -191,6 +191,7 @@ running, and that difference lives in one place: `space service` (`src/space/ser
 | Manager | systemd, the user's manager | launchd, the user's GUI domain |
 | Definition | `~/.config/systemd/user/ai-space.service` (`deploy/ai-space.service` with this machine's paths) | `~/Library/LaunchAgents/ai.space.server.plist` |
 | Runs | `<bun> src/index.ts` in the program directory, `SPACE_HOME` set | the same |
+| `PATH` | the unit's (`deploy/ai-space.service`), the Bun's directory first | the Bun's directory, then the user tool directories where agent CLIs are installed (`~/.local/bin`, `~/.claude/local`, `~/.volta/bin`, `/opt/homebrew/bin`, ..., `userToolDirs` in `src/space/host-tools.ts`), then the system's: launchd gives a job `/usr/bin:/bin:/usr/sbin:/sbin` only |
 | Starts | at boot, with lingering on (`loginctl enable-linger`, asked for by the installer) | when the user logs in at the Mac |
 | After a crash | restarted (`Restart=on-failure`) | restarted (`KeepAlive`, not after a clean exit) |
 | On stop | SIGTERM, then the drain (`TimeoutStopSec=360`) | SIGTERM, then the drain (`ExitTimeOut` 360) |
@@ -213,9 +214,9 @@ Whether it runs is read from the workspace's lock (`run\service.lock`, `run\serv
 `space logs space` reads either. `space service install [--root <dir>] [--bun <path>]` writes the
 definition for that code and Bun and (re)starts it; `status`, `start`, `stop` (off until started
 again), `restart` and `remove` do what they say, and `space service workspace` prints the workspace
-the installed service runs on. A workspace that belongs to the AI Space app keeps the app's
-service (`ai-space-local.service`, `ai.space.local`): `restart` drives that one, `install` and
-`remove` refuse.
+the installed service runs on. On a workspace that belongs to the retired Local edition's app
+(`installation.json`, above), `install`, `remove`, `space uninstall` and `space upgrade` refuse and
+change nothing.
 
 A Mac is not a server by default. A LaunchAgent runs only while its user is logged in, so a Mac
 that should serve after a reboot needs automatic login, and one that should serve all day needs
@@ -243,56 +244,16 @@ it in a shape the older release does not read; then restore the snapshot taken b
 ([backup.md](backup.md)), which is why a backup target is worth setting before upgrading a space
 that matters.
 
-## Local edition
-
-Not part of a release any more (the workflow has no `local` job); for the installations that
-exist it is built by hand on a Mac:
-
-```bash
-bun run release:local [--app <file.spaceapp>]...       # dist/local/AI Space.app, ad-hoc unless SIGN_IDENTITY
-bun run release:local-smoke "dist/local/AI Space.app"  # the service from inside the app
-EDITION=local APP="dist/local/AI Space.app" desktop/macos/scripts/package.sh   # the .dmg
-```
-
-The Client and the Local app share the bundle id: installing the Local app replaces the Client,
-which it contains. Bundled apps come from `--app` or `LOCAL_APPS`; the workflow bundles none until
-the list is chosen ([editions.md](editions.md#open-questions)).
-
-`release/local.ts` builds the Mac client, puts the release tree of `release/server.ts` (edition
-`local`) at `Contents/Resources/space`, builds the terminal's forkpty helper there as
-`runtime/space-pty`, and signs every Mach-O file inside with the hardened runtime, the bundled Bun
-with `SpaceRuntime.entitlements` (JIT), then the app. `SIGN_IDENTITY` picks a Developer ID instead
-of ad-hoc.
-
-`release/local-smoke.ts` copies the app, makes `Resources/space` read-only, and starts the service
-from it with `PATH=/usr/bin:/bin`, a fresh home and `SPACE_EDITION=local`. It checks the identity
-route, the panel's HTML import and files, the chat widget, the linked skills, SQLite, a terminal
-session through `space-pty` (size, resize, job control) and the runtime adapters; then that nothing
-was written inside the app and its signature still verifies.
-
-What a running service needs from the machine, and what it does without it:
-
-| Needs | On a Mac without the Command Line Tools |
-| --- | --- |
-| Bun | Bundled (`runtime/bun`) |
-| A PTY for the terminal | Bundled (`runtime/space-pty`); the `/usr/bin/python3` stub is never started |
-| `git` | Missing (a stub, never started): default apps are not cloned (a new workspace has none); apps install from packages |
-| `claude`, `codex` | The user's; the service adds the usual tool directories (`~/.local/bin`, `/opt/homebrew/bin`, ...) to the bare PATH launchd gives it |
-| `zstd` | Missing: backups fail until it is installed (to solve before Local ships backups) |
-
 ## Linux app
 
 The `linux` job of the release workflow, after the checks, on x64 and arm64. By hand on Linux:
 
 ```bash
 bun run release:linux                     # dist/ai-space-desktop-<version>-linux-<arch>.tar.gz
-bun release/linux.ts --edition local      # dist/ai-space-local-<version>-linux-<arch>.tar.gz, not published
 ```
 
 `release/linux.ts` runs `desktop/linux/build.ts`: the app bundled for GJS, the
-terminal page, the icon, the launcher and `install.sh`; for Local also the release tree of
-`release/server.ts` (edition `local`) at `space/` with `runtime/space-pty` built from
-`src/space/terminal/pty_helper.c`. Nothing is signed: Linux has no counterpart of the Mac's
+terminal page, the icon, the launcher and `install.sh`. Nothing is signed: Linux has no counterpart of the Mac's
 notarization, so `SHA256SUMS` is what a download is checked against.
 
 ## Windows app

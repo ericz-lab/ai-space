@@ -1,7 +1,7 @@
 # Apps made inside ai-space
 
 Status: implemented (`src/space/studio.ts`, `space app create` / `build`, the panel's New app,
-the `app-studio` skill). Step 8 of [editions.md](editions.md#the-work-in-order): an app without
+the `app-studio` skill). Step 5 of [editions.md](editions.md#the-work-in-order): an app without
 GitHub and without a coding tool outside the product.
 
 ## The loop
@@ -48,9 +48,9 @@ A spec-2 package with a Bun process and no dependencies to install:
 | `AGENTS.md` | the rules for whoever changes it |
 | `icon.svg` | the tile's icon |
 
-The host's Bun runs it (in the Local edition, the one inside the app). An app opens through the
-package gateway, so the Space needs `SPACE_PACKAGE_PORT`; the Local edition sets it at install, and
-`init` writes it into a new Server workspace's `.env` ([install.md](install.md#a-new-workspace)).
+The host's Bun runs it. An app opens through the package gateway, so the Space needs
+`SPACE_PACKAGE_PORT`; `init` writes it into a new workspace's `.env`
+([install.md](install.md#a-new-workspace)).
 
 ## API
 

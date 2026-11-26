@@ -12,16 +12,13 @@ import { bytesToText, t } from "./env.ts";
 import { installOnThisComputer, lookForLocalSpace, waitForThisComputer } from "./first-launch.ts";
 import { appTexture } from "./icons.ts";
 import { plainRequest } from "./http.ts";
-import type { LocalManager } from "./local-manager.ts";
-import { LocalPanel } from "./local-view.ts";
 import type { AppModel } from "./model.ts";
 import { colors } from "./widget-card.ts";
 
 /**
  * The first window, before any Space is saved (and Settings' Add). The app without a service
  * (AI Space Desktop) offers two entries: connect to the AI Space on this computer (installed first,
- * behind one progress bar, when there is none) or to one on another machine (core/first-launch.ts). The Local
- * edition, which carries its service, shows its setup and the address form instead.
+ * behind one progress bar, when there is none) or to one on another machine (core/first-launch.ts).
  */
 
 /** Whether the address answers as a Space (or asks to sign in first), before it is saved. */
@@ -122,7 +119,7 @@ const OUTPUT_LINES = 200;
 export class WelcomePage {
   readonly widget: any;
   private readonly body: any;
-  /** The part that changes with what was found; only in the app without a service. */
+  /** The part that changes with what was found. */
   private readonly holder: any;
   private installing = false;
   private look = 0;
@@ -131,7 +128,6 @@ export class WelcomePage {
 
   constructor(
     private readonly model: AppModel,
-    local: LocalManager,
     private readonly onDone: () => void,
   ) {
     const column = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL, spacing: 24, margin_top: 36, margin_bottom: 36, margin_start: 16, margin_end: 16 });
@@ -141,14 +137,8 @@ export class WelcomePage {
     column.append(title);
     this.body = new Gtk.Label({ label: t("welcomeBody"), wrap: true, justify: Gtk.Justification.CENTER, css_classes: ["dim-label"] });
     column.append(this.body);
-    if (local.available) {
-      column.append(new LocalPanel(local, model, { onConnected: onDone }).widget);
-      column.append(new Gtk.Separator({ margin_top: 12 }));
-      column.append(connectForm(model, onDone));
-    } else {
-      this.holder = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL, spacing: 12 });
-      column.append(this.holder);
-    }
+    this.holder = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL, spacing: 12 });
+    column.append(this.holder);
     const clamp = new Adw.Clamp({ maximum_size: 560, child: column });
     const scroll = new Gtk.ScrolledWindow({ hscrollbar_policy: Gtk.PolicyType.NEVER, vexpand: true, child: clamp });
     // Start at the top, not scrolled to wherever the focus landed.
@@ -163,7 +153,7 @@ export class WelcomePage {
    * meanwhile, only so the first entry can say what its click will do; it saves nothing.
    */
   enter(): void {
-    if (!this.holder || this.installing) return;
+    if (this.installing) return;
     const look = ++this.look;
     this.here = undefined;
     this.choices();
