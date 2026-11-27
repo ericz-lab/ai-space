@@ -2444,7 +2444,85 @@ a.wb-tank-cell:hover { background: var(--glass-strong); }
 .orders-msg.person { align-self: flex-end; max-width: 85%; white-space: pre-wrap; background: var(--glass-strong); }
 .orders-msg.director { background: var(--glass); }
 .orders-rename { min-width: 0; flex: 1 1 160px; cursor: text; font-family: inherit; }
+/* A topic that waits for the person, or works: a mark beside its state, not only the dot's colour. */
+.orders-mark { flex: none; font-size: 10.5px; font-weight: 600; border-radius: 999px; padding: 0 7px; line-height: 1.6; }
+.orders-mark.needs { color: var(--text); background: color-mix(in srgb, var(--warning) 28%, transparent); border: 1px solid color-mix(in srgb, var(--warning) 75%, transparent); }
+.orders-mark.working { color: var(--success); border: 1px solid color-mix(in srgb, var(--success) 45%, transparent); }
+.orders-row.needs { box-shadow: inset 3px 0 0 var(--warning); }
+.orders-row.needs .task-name { color: var(--text); }
+/* Full permission in force (docs/orders.md#permission), wherever it shows. */
+.full-mark {
+  flex: none; display: inline-flex; align-items: center; font-size: 10px; font-weight: 600; line-height: 1.5; padding: 0 6px; border-radius: 999px;
+  color: var(--tone-warning); border: 1px solid color-mix(in srgb, var(--warning) 55%, transparent); background: color-mix(in srgb, var(--warning) 10%, transparent);
+}
+/* The Director's conversation and runs, drawn with the chat's steps inside the topic. */
+.orders-ai.msg.ai { align-self: stretch; width: auto; max-width: 100%; padding: 2px 0; gap: 8px; }
+.orders-live-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.orders-live-foot .msg-status { margin: 0; }
+.orders-live-foot .inbox-pill { display: inline-flex; align-items: center; gap: 5px; }
+.orders-head { margin: 4px 0 0; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+.orders-delegations { display: flex; flex-direction: column; gap: 6px; padding-top: 6px; border-top: 1px solid var(--glass-border); }
+/* A delegation (docs/orders.md#in-the-chat-view): who, state, brief, added messages, stop, result, the delegate's steps. */
+.chat-delegation { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.chat-delegation .chat-work-head { flex-wrap: wrap; }
+.chat-delegation .chat-work-head strong { min-width: 0; overflow-wrap: anywhere; }
+.chat-dlg-id { color: var(--muted); font-size: 11px; }
+.chat-delegation.running .chat-work-state { color: var(--link); }
+.chat-delegation.waiting .chat-work-state { color: var(--warning); }
+.chat-delegation.done .chat-work-state { color: var(--success); }
+.chat-delegation:is(.error, .timeout, .interrupted) .chat-work-state { color: var(--danger); }
+.msg.ai .chat-delegation.waiting { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warning) 40%, transparent); }
+.chat-dlg-fold { min-width: 0; font-size: 12px; }
+.chat-dlg-fold summary { display: flex; gap: 6px; min-width: 0; cursor: pointer; color: var(--muted); list-style: none; }
+.chat-dlg-fold summary::-webkit-details-marker { display: none; }
+.chat-dlg-fold summary::before { content: "›"; flex: none; transition: transform 0.15s ease; }
+.chat-dlg-fold[open] summary::before { transform: rotate(90deg); }
+.chat-dlg-fold summary b { flex: none; color: var(--text); font-weight: 600; }
+.chat-dlg-fold summary span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-dlg-fold > pre, .chat-dlg-fold > .md { margin: 6px 0 0 14px; }
+.chat-work .chat-dlg-fold > pre { max-height: 220px; }
+.chat-dlg-say { overflow-wrap: anywhere; }
+.chat-dlg-fate { margin-left: 4px; }
+.chat-dlg-fate.read { color: var(--success); }
+.chat-dlg-fate.refused { color: var(--danger); }
+.chat-dlg-asking { padding: 6px 10px; border-radius: 8px; font-size: 12px; background: color-mix(in srgb, var(--warning) 12%, transparent); }
+.chat-dlg-asking p { margin: 0; }
+.chat-dlg-run { display: flex; flex-direction: column; gap: 8px; min-width: 0; padding-left: 10px; border-left: 2px solid var(--glass-border); }
+.chat-dlg-note { margin: 0; font-size: 12px; color: var(--muted); }
+.chat-dlg-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.chat-dlg-actions:empty { display: none; }
+.chat-dlg-actions .inbox-pill { font-size: 11px; text-decoration: none; }
+/* A delegation's result delivered into the delegator's conversation: folded to its header. */
+.chat-dlg-result { min-width: 0; }
+.chat-dlg-result > summary { cursor: pointer; list-style: none; }
+.chat-dlg-result > summary::-webkit-details-marker { display: none; }
+.chat-dlg-result > .md { margin-top: 8px; font-size: 13px; }
+.chat-dlg-result.done .chat-work-state { color: var(--success); }
+.chat-dlg-result:is(.error, .timeout, .interrupted) .chat-work-state { color: var(--danger); }
+/* The team (docs/orders.md#team): one card per member. */
+.orders-team { display: flex; flex-direction: column; gap: 8px; padding-top: 8px; border-top: 1px solid var(--glass-border); }
+.orders-member { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border-radius: 10px; background: var(--glass); border: 1px solid var(--glass-border); min-width: 0; }
+.orders-member.off { opacity: 0.7; }
+.orders-member.full { border-color: color-mix(in srgb, var(--warning) 45%, transparent); }
+.orders-member-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
+.orders-member-title { flex: 1 1 140px; min-width: 0; cursor: text; font-family: inherit; font-weight: 600; }
+.orders-member-remove { margin-left: auto; font-size: 11px; }
+.orders-member-agent { color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
+.orders-member-summary {
+  width: 100%; box-sizing: border-box; min-width: 0; resize: vertical; padding: 6px 8px; border-radius: 8px; font: inherit; font-size: 12px;
+  background: var(--glass); color: var(--text); border: 1px solid var(--glass-border);
+}
+.orders-member-summary:focus-visible { outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 35%, transparent); }
+.orders-settings .orders-member-opts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
+.orders-settings .orders-member-opts label { justify-content: flex-start; gap: 6px; }
+.orders-settings .orders-member-opts input.setselect { cursor: text; font-family: inherit; min-width: 0; }
+.orders-settings label.orders-member-enabled { gap: 6px; cursor: pointer; }
+.orders-member-always { margin: 0; }
+.orders-member .orders-warn { padding: 0; border: none; }
+.orders-add > label { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
 @media (max-width: 600px) {
   .orders-detail { padding-left: 8px; }
   .orders-settings label { flex-direction: column; align-items: stretch; }
+  .orders-settings .orders-member-opts { flex-direction: column; align-items: stretch; }
+  .orders-settings label.orders-member-enabled { flex-direction: row; align-items: center; }
 }

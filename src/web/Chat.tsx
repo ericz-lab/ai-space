@@ -1,7 +1,10 @@
 import { mdHtml, BARE_URL, trimUrl } from "./chat-markdown.ts";
 import { readChatImages, imageURL, type ChatImage } from "./chat-images.ts";
-import { applyJobs, ChatSteps, historySteps, ReplyActivity, stepGroups, submitsChat, type ChatJob, type ChatQuestion, type ChatStep, type HistoryStep } from "./chat-steps.ts";
+import { applyJobs, ChatSteps, historySteps, ReplyActivity, stepGroups, submitsChat, type ChatJob, type ChatStep, type HistoryStep } from "./chat-steps.ts";
 import { Glyph, JobsBadge, NoticeStep, ToolGroup, WorkStep } from "./ChatToolRow.tsx";
+import { ApprovalStep, DelegationResult, DelegationStep, QuestionStep } from "./ChatWork.tsx";
+import { postAnswer, SseParser } from "./run-follow.ts";
+import { parseResultHeader } from "../space/agents/delegation-view.ts";
 import { cardApp, ChatCards, type ShownCard } from "./ChatCards.tsx";
 import type { Card } from "../space/agents/cards.ts";
 import { browserZone } from "./shortcuts.ts";
@@ -285,7 +288,7 @@ export default function Chat({ open, agent, agents = [], apps = [], onClose, onS
     const setSid = (sid: string) => patch(turnKey, (v) => ({ ...v, sid }));
     let acc = ""; // finished text of this turn (tool calls split it into several assistant messages)
     let streamed = ""; // delta of the current message
-    let lastSeq = 0; // the run's last event seen, to reattach after it
+    const parser = new SseParser(); // its lastSeq is the run's last event seen, to reattach after it
     let finished = false; // the stream said "done"
     const seenTools = new Set<string>();
     const toolNames = new Map<string, string>();
@@ -360,7 +363,7 @@ export default function Chat({ open, agent, agents = [], apps = [], onClose, onS
           signal: ctrl.signal,
         });
       }
-      return fetch(`${chatBase}/runs/${encodeURIComponent(active.runId!)}/events?after=${lastSeq}`, { signal: ctrl.signal });
+      return fetch(`${chatBase}/runs/${encodeURIComponent(active.runId!)}/events?after=${parser.lastSeq}`, { signal: ctrl.signal });
     };
     let retries = 0;
     try {
@@ -384,32 +387,13 @@ export default function Chat({ open, agent, agents = [], apps = [], onClose, onS
         if (active.stopRequested) void stopRun(active).catch(() => {});
         const reader = r.body.getReader();
         const dec = new TextDecoder();
-        let buf = "";
-        let seq: number | null = null;
+        parser.reset();
         try {
           for (;;) {
             const { done, value } = await reader.read();
             if (done) break;
             retries = 0;
-            buf += dec.decode(value, { stream: true });
-            const lines = buf.split("\n");
-            buf = lines.pop() ?? "";
-            for (const raw of lines) {
-              if (raw.startsWith("id: ")) seq = Number(raw.slice(4));
-              if (!raw.startsWith("data: ")) continue;
-              let ev: unknown;
-              try {
-                ev = JSON.parse(raw.slice(6));
-              } catch {
-                continue;
-              }
-              if (seq !== null && Number.isFinite(seq)) {
-                if (seq <= lastSeq) { seq = null; continue; }
-                lastSeq = seq;
-              }
-              seq = null;
-              handle(ev);
-            }
+            for (const ev of parser.push(dec.decode(value, { stream: true }))) handle(ev);
           }
         } catch (e) {
           if ((e as Error).name === "AbortError" || !active.runId || retries >= RECONNECT_TRIES) throw e;
@@ -528,10 +512,13 @@ export default function Chat({ open, agent, agents = [], apps = [], onClose, onS
       return;
     }
     const run = news.run;
-    if (run.trigger !== "background" || run.status !== "running" || (run.sessionId !== conv.sid && run.sid !== conv.sid)) return;
+    // A turn the platform started on this conversation: the agent answering a background job, or a
+    // delegation's result delivered to it (docs/orders.md#the-result-comes-back), shown as its message.
+    if ((run.trigger !== "background" && run.trigger !== "delegation") || run.status !== "running" || (run.sessionId !== conv.sid && run.sid !== conv.sid)) return;
     if (attachedRef.current.has(run.id)) return;
     attachedRef.current.add(run.id);
-    const source: TurnSource = { kind: "attach", runId: run.id, background: true };
+    if (run.trigger === "delegation") patch(k, (v) => ({ ...v, msgs: [...v.msgs, { role: "user", text: run.message }] }));
+    const source: TurnSource = { kind: "attach", runId: run.id, background: run.trigger === "background" };
     if (runner(k).running) runner(k).attach.push({ base: agentBase(a), source });
     else void drain(k, agentBase(a), source);
   };
@@ -631,14 +618,8 @@ export default function Chat({ open, agent, agents = [], apps = [], onClose, onS
   const answer = async (k: string, id: string, decision: "allow" | "deny", answers?: Record<string, string[]>): Promise<string | null> => {
     const a = runner(k).active;
     if (!a?.runId) return t("chat.approval.failed", { error: "no run" });
-    try {
-      const r = await fetch(`${a.base}/runs/${encodeURIComponent(a.runId)}/approvals/${encodeURIComponent(id)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ decision, ...(answers ? { answers } : {}) }) });
-      if (r.ok) return null;
-      const j = (await r.json().catch(() => ({}))) as { error?: string };
-      return t("chat.approval.failed", { error: j.error || `HTTP ${r.status}` });
-    } catch (e) {
-      return t("chat.approval.failed", { error: (e as Error).message });
-    }
+    const error = await postAnswer(a.base, a.runId, id, decision, answers);
+    return error === null ? null : t("chat.approval.failed", { error });
   };
 
   // ⏹ stops the run on the server; its stream then ends with the "stopped" error and "done".
@@ -901,7 +882,10 @@ export default function Chat({ open, agent, agents = [], apps = [], onClose, onS
               {shown.description || (agent.app === "space" ? t("chat.helloSpace") : agent.id)}
             </div>
           )}
-          {conv.msgs.map((m, i) => (
+          {conv.msgs.map((m, i) => m.role === "user" && parseResultHeader(m.text) ? (
+            // A delegation's result delivered into this conversation (docs/orders.md#the-result-comes-back): not a message of the person's.
+            <div key={i} className="msg ai"><DelegationResult text={m.text} /></div>
+          ) : (
             <div key={i} className={`msg ${m.role}`}>
               {m.role === "ai" ? <>
                 {m.background && <div className="chat-bg-label"><Glyph name="notice" size={12} weight={1.3} />{t("chat.backgroundRun")}</div>}
@@ -914,6 +898,8 @@ export default function Chat({ open, agent, agents = [], apps = [], onClose, onS
                   step.kind === "approval" && step.questions ? <QuestionStep key={step.id} step={step} onAnswer={m.live ? (answers) => answer(key, step.id.slice("approval:".length), answers ? "allow" : "deny", answers ?? undefined) : undefined} /> :
                   step.kind === "approval" ? <ApprovalStep key={step.id} step={step} onAnswer={m.live ? (decision) => answer(key, step.id.slice("approval:".length), decision) : undefined} /> :
                   step.kind === "notice" ? <NoticeStep key={step.id} step={step} /> :
+                  step.kind === "delegation" ? <DelegationStep key={step.id} delegation={step.delegation} id={step.delegationId} /> :
+                  parseResultHeader(step.text) ? <DelegationResult key={step.id} text={step.text} /> :
                   <div key={step.id} className="chat-steer"><b>↳ {t("chat.steerYou")}</b> {linkNodes(step.text)}</div>
                 ) : <>
                   {m.tools.length > 0 && <div className="chat-tools">{m.tools.map((tool, index) => <WorkStep key={index} step={{ id: String(index), kind: "tool", name: tool.name, text: tool.hint, output: "", state: "incomplete" }} />)}</div>}
@@ -979,92 +965,4 @@ export default function Chat({ open, agent, agents = [], apps = [], onClose, onS
       </aside>
     </div>
   );
-}
-
-/** An action the agent waits on: what it wants to do, and the person's answer while the turn runs. */
-function ApprovalStep({ step, onAnswer }: { step: ChatStep; onAnswer?: (decision: "allow" | "deny") => Promise<string | null> }) {
-  const { t } = useLang();
-  const [sending, setSending] = useState(false);
-  const [error, setError] = useState("");
-  const reply = async (decision: "allow" | "deny") => {
-    setSending(true);
-    setError("");
-    const failed = await onAnswer!(decision);
-    setSending(false);
-    if (failed) setError(failed);
-  };
-  const waiting = step.state === "waiting" && !!onAnswer;
-  return <section className={`chat-work chat-approval ${step.state}`} aria-label={step.name}>
-    <div className="chat-work-head"><span className="chat-work-icon" aria-hidden="true"><Glyph name="shield" /></span><strong>{step.name}</strong><span className="chat-work-state">{t(`chat.step.${step.state}`)}</span></div>
-    {step.text && <pre className="chat-work-input">{step.text}</pre>}
-    {step.output && <p className="chat-approval-why">{step.output}</p>}
-    {waiting && <div className="chat-approval-actions">
-      <button className="primary" disabled={sending} onClick={() => void reply("allow")}>{t("chat.approval.allow")}</button>
-      <button disabled={sending} onClick={() => void reply("deny")}>{t("chat.approval.deny")}</button>
-    </div>}
-    {error && <small role="alert">{error}</small>}
-  </section>;
-}
-
-/**
- * A question the agent asks while its turn runs: pick an option or type an answer. One question
- * with one choice goes back on the click; otherwise the answers go back with Send. Skip answers
- * nothing and the agent goes on without it.
- */
-function QuestionStep({ step, onAnswer }: { step: ChatStep; onAnswer?: (answers: Record<string, string[]> | null) => Promise<string | null> }) {
-  const { t } = useLang();
-  const questions = step.questions ?? [];
-  const [picked, setPicked] = useState<Record<string, string[]>>({});
-  const [typed, setTyped] = useState<Record<string, string>>({});
-  const [sending, setSending] = useState(false);
-  const [error, setError] = useState("");
-  const waiting = step.state === "waiting" && !!onAnswer;
-  const answerOf = (q: ChatQuestion, p = picked, ty = typed): string[] => {
-    const own = (ty[q.id] ?? "").trim();
-    if (!q.multiSelect) return own ? [own] : p[q.id] ?? [];
-    return [...(p[q.id] ?? []), ...(own ? [own] : [])];
-  };
-  const reply = async (answers: Record<string, string[]> | null) => {
-    setSending(true);
-    setError("");
-    const failed = await onAnswer!(answers);
-    setSending(false);
-    if (failed) setError(failed);
-  };
-  const all = (p: Record<string, string[]>, ty: Record<string, string>) => Object.fromEntries(questions.map((q) => [q.id, answerOf(q, p, ty)]));
-  const choose = (q: ChatQuestion, label: string) => {
-    const current = picked[q.id] ?? [];
-    const next = { ...picked, [q.id]: q.multiSelect ? (current.includes(label) ? current.filter((l) => l !== label) : [...current, label]) : [label] };
-    const nextTyped = q.multiSelect ? typed : { ...typed, [q.id]: "" };
-    setPicked(next);
-    setTyped(nextTyped);
-    if (questions.length === 1 && !q.multiSelect) void reply(all(next, nextTyped));
-  };
-  const ready = questions.every((q) => answerOf(q).length > 0);
-  const shown = step.answers ?? {};
-  return <section className={`chat-work chat-approval chat-question ${step.state}`} aria-label={t("chat.question.label")}>
-    <div className="chat-work-head"><span className="chat-work-icon" aria-hidden="true"><Glyph name="question" /></span><strong>{t("chat.question.label")}</strong><span className="chat-work-state">{t(step.state === "allowed" ? "chat.question.answered" : step.state === "denied" ? "chat.question.skipped" : `chat.step.${step.state}`)}</span></div>
-    {questions.map((q) => <div key={q.id} className="chat-question-item">
-      {q.header && <small className="chat-question-header">{q.header}</small>}
-      <p>{q.question}</p>
-      {waiting ? <>
-        {q.options.length > 0 && <div className="chat-question-options" role={q.multiSelect ? "group" : "radiogroup"}>
-          {q.options.map((o) => {
-            const on = (picked[q.id] ?? []).includes(o.label) && !(!q.multiSelect && (typed[q.id] ?? "").trim());
-            return <button key={o.label} type="button" className={on ? "on" : ""} role={q.multiSelect ? "checkbox" : "radio"} aria-checked={on} disabled={sending} onClick={() => choose(q, o.label)}>
-              <b>{o.label}</b>{o.description && <small>{o.description}</small>}
-            </button>;
-          })}
-        </div>}
-        <input className="chat-question-own" value={typed[q.id] ?? ""} disabled={sending} placeholder={t(q.options.length ? "chat.question.other" : "chat.question.type")} aria-label={t("chat.question.type")}
-          onChange={(e) => setTyped({ ...typed, [q.id]: e.target.value })}
-          onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing && ready) { e.preventDefault(); void reply(all(picked, typed)); } }} />
-      </> : shown[q.id]?.length ? <p className="chat-question-answer">→ {shown[q.id]!.join(", ")}</p> : null}
-    </div>)}
-    {waiting && <div className="chat-approval-actions">
-      {(questions.length > 1 || questions.some((q) => q.multiSelect) || questions.some((q) => (typed[q.id] ?? "").trim())) && <button className="primary" disabled={sending || !ready} onClick={() => void reply(all(picked, typed))}>{t("chat.question.send")}</button>}
-      <button disabled={sending} onClick={() => void reply(null)}>{t("chat.question.skip")}</button>
-    </div>}
-    {error && <small role="alert">{error}</small>}
-  </section>;
 }

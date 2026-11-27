@@ -288,8 +288,8 @@ export type ChatRun = {
   startedAt: number;
   finishedAt: number | null;
   lastSeq: number;
-  /** `background`: the agent started the turn by itself to answer a background job (absent from older Spaces). */
-  trigger?: "user" | "background";
+  /** `background`: the agent started the turn by itself to answer a background job; `delegation`: a delegation's result started it (absent from older Spaces). */
+  trigger?: "user" | "background" | "delegation";
 };
 
 export async function getJson<T>(path: string): Promise<T> {
