@@ -31,6 +31,7 @@ The tables below list what the panel knows about. It does not lay all of it out 
 | Services (in Settings) | every registered manifest with a `service` | One row per service: icon, title, loopback port, health. |
 | Language (in Settings) | the browser's preferences | English or Chinese for everything the panel owns; the browser's language is the default. Apps' titles and descriptions follow when their manifest has an `i18n:` section. Design in [i18n.md](i18n.md). |
 | Desk pet (in Settings) | the browser's preferences | A sprite walking along the bottom edge. Off by a switch; a menu under it picks among the pets bundled with the panel (`BUILTIN` in `src/web/Pet.tsx`, the choice kept as `petBuiltin`). At present that is Claude alone, and it is the default: a 3D model of the mascot, built and posed in Blender by `src/web/pets/claude.py` and rendered into `public/pet-claude.webp` by `bun src/web/pets/claude.ts`; it scuttles sideways, sleeps, looks around, hops, and spins on a click. It shows the [Space's mood](app-spec.md#space-mood) (`/api/pets/mood`, read every 30 seconds while the page is visible): it stays in the corner hopping while an agent waits for you, looks on while agents work, spins once when a turn is done, sleeps when the Space has been quiet for two hours, says so in its bubble, and a click opens that agent's chat or the inbox. The Mac, iPhone and Linux clients draw the same sheet with the same table. Its feet are drawn for the pet's width and speed in `Pet.tsx`, so change those together with `claude.py` and re-render. When apps declare [pets](app-spec.md#pets) the menu offers them too; that choice (`<app>/<name>`) is kept in the same preferences, the page reads the pet's mood through `/api/pets/:app/:name/mood` on its `refresh` while visible, rests in the mood's animation, roams or (for `stay`) walks to the bottom-right corner and waits there, shows its line in a bubble and opens its link on a click. An app pet that is gone falls back to the petdex or bundled pet. |
+| Orders (built in; a [page of its own](#built-in-pages)) | the orders the operator gave and their topics ([orders.md](orders.md)) | A built-in tile like Inbox. Topics most recently active first, each with a state dot (working, needs you, done, failed) and what the Director said or asks last; opening one shows its orders (time, how they came, the screenshot) and the Director's conversation, a box to add to the topic, Open in chat (the topic's session on the chat page, where approvals, questions and stop are answered), rename, archive, move an order to a new topic, delete, send again. On top a box for a typed order (a pasted picture goes with it), and Settings: the topics' look-back days, where "needs you" is notified, the Director's model and permission (Full is warned about). `#order=<id>` opens an order's topic. |
 | Terminal (a built-in tile next to Settings; a [page of its own](#built-in-pages)) | this machine, and every peer whose snapshot says `terminal: true` | A machine picker, one tab per session, xterm.js over a WebSocket to a pseudo-terminal running the operator's shell in the workspace root. Off unless the machine sets `SPACE_TERMINAL_ENABLED=1`; every session is opened with a same-origin check and a one-time ticket, optionally a passphrase; sessions close when idle. Design and trust boundary in [terminal.md](terminal.md). |
 | Tasks (inside Settings → Automation; also opened from Shortcuts) | every task the scheduler knows, by machine and app | The list has one line per app that has tasks: how many are on and how many failed their last run; on a hub each peer's apps follow under its name, as on the Models page, read through `GET /api/peers/:peer/tasks` ([peers.md](peers.md)). A click opens the app's tasks, one row per task: status dot, name, effective schedule and event triggers (`on <app>/<event>`, filter and debounce on hover), last outcome and duration, next run, queued events, target kind; `api` and `override` badges; disabled and orphaned tasks muted. A row expands to the last twenty runs with error text and captured output; a run started by hand or carrying events says so. Read-only: it uses the scheduler's `GET /api/tasks` and `GET /api/tasks/:id/runs` (a peer's through the hub), which carry no token; running or toggling a task still goes through the token-guarded routes from the machine. |
 
@@ -133,8 +134,8 @@ What an app agent's tools did this turn shows under the reply as cards (an app's
 
 ### Built-in pages
 
-The five built-in tiles (App Store, Inbox, Shortcuts, Terminal, Settings) open the way an app's
-tile does: a link in a new tab. The address is `/?page=store`, `/?page=inbox`, `/?page=shortcuts`,
+The six built-in tiles (App Store, Orders, Inbox, Shortcuts, Terminal, Settings) open the way an app's
+tile does: a link in a new tab. The address is `/?page=store`, `/?page=orders`, `/?page=inbox`, `/?page=shortcuts`,
 `/?page=terminal` or `/?page=settings` (`src/web/panel-link.ts`): the panel shows that window alone, filling the tab,
 with no launcher behind it, and names the tab after it. The address is kept, so a reload shows the
 same page. ✕ goes to the launcher in the same tab; Escape does nothing there. A window opened from
@@ -158,8 +159,9 @@ a [panel link](#panel-links), and every window in the phone app, which has no ta
 ### Panel links
 
 A link can open one of the panel's windows once the page is up, through the address's fragment
-(`src/web/panel-link.ts`): `#inbox`, `#terminal`, `#settings`, `#shortcuts`, `#store`, and
-`#chat=<app>/<agent>&text=…` for an agent's chat (`#chat` alone opens the chat on the agent it
+(`src/web/panel-link.ts`): `#inbox`, `#terminal`, `#settings`, `#shortcuts`, `#store`, `#orders`,
+`#order=<id>` for one order (the Orders window opened on its topic; the link an order's capture
+answers with), and `#chat=<app>/<agent>&text=…` for an agent's chat (`#chat` alone opens the chat on the agent it
 shows). The agent is found by its id, else by app and name on the machine chosen last for it, the
 local one by default; an agent the Space does not have leaves the chat on the agent it shows. The
 text goes into the message field after whatever is there and is never sent, so a link from any
@@ -274,7 +276,9 @@ The panel probes `GET 127.0.0.1:<port><service.health>` (two-second timeout), ca
 | `POST /api/panel/usage/open`, `GET /api/usage` | an open of a tile or library card (a beacon); opens and time in use per entry ([usage.md](usage.md)) |
 | `GET /api/voice`, `POST /api/voice/transcribe`, `WS /api/voice/realtime` | whether voice input can be transcribed, a recorded clip (multipart `file`), and a live stream: the older names of `/api/speech/*` with the tag `voice-input`, kept for the native clients ([speech.md](speech.md#compatibility)) |
 | `GET /api/capture`, `POST /api/capture/image?to=`, `POST /api/capture/text?to=` | the places a picture or a note in words can be kept (capabilities declaring `capture`, here and on peers), a picture (multipart `file`, `text`, `via`, `id`) and a note (JSON `text`, `via`, `id`) forwarded to the chosen one as the operator: the iPhone client's screenshots and the Mac's spoken notes ([events.md](events.md#capture)) |
-| `GET /api/agents` | every agent the panel lists |
+| `GET /api/agents` | every agent the panel lists (the built-in Space Assistant, Director and Fix Engineer among them) |
+| `GET`/`POST /api/orders`, `GET`/`PUT /api/orders/settings`, `GET`/`PATCH /api/orders/topics/:id`, `GET`/`DELETE /api/orders/:id`, `POST /api/orders/:id/move`, `…/resend`, `GET /api/orders/:id/image` | the orders: topics, a typed order, the two settings, a topic, an order, moving and sending again, the screenshot; the owner's only (an app's token is 403), the screenshot never cached ([orders.md](orders.md#phase-1-as-built)) |
+| `GET`/`PUT /api/team` | the team (in this phase the Director's row): model and permission; the owner's only |
 | `POST /api/agents/:app/:agent/chat` | one chat turn as a background run, SSE |
 | `GET /api/agents/runs`, `GET /api/agents/:app/:agent/runs[/:id[/events]]`, `POST /api/agents/:app/:agent/runs/:id/stop`, `…/steer`, `…/approvals/:rid` | chat runs: list, one, replay and follow, stop, add a message, answer an approval ([Background runs](#background-runs)) |
 | `GET /api/agents/:app/:agent/sessions[/:sid]` | recent sessions, restored transcript |
@@ -308,7 +312,7 @@ src/space/terminal/ the web terminal: PTY backends, tickets and sessions, audit 
 src/space/usage/    store.ts (usage_opens, usage_sessions), service.ts, api.ts, script.ts (the heartbeat script) (usage.md)
 src/space/agents/   runtime.ts (a run as SSE), runs.ts (background runs, agent_runs), sessions.ts (chat_sessions),
                     transcript.ts, api.ts (routes, space agent)
-src/web/            index.html, main.tsx (language root), App.tsx, screens.ts (screen operations), panel-link.ts (links into the panel), Library.tsx, ScreenNav.tsx (edges, dock, phone row, hint), Activity.tsx (App usage), Chat.tsx, Tasks.tsx, Inbox.tsx, Terminal.tsx, Pet.tsx, petdex.ts (pet lookup),
+src/web/            index.html, main.tsx (language root), App.tsx, screens.ts (screen operations), panel-link.ts (links into the panel), Library.tsx, ScreenNav.tsx (edges, dock, phone row, hint), Activity.tsx (App usage), Chat.tsx, Tasks.tsx, Inbox.tsx, Orders.tsx, Terminal.tsx, Pet.tsx, petdex.ts (pet lookup),
                     theme.ts (appearance: presets, resolution, storage), ThemeSettings.tsx (its settings rows),
                     i18n.ts (dictionaries, language choice), styles.css, api.ts, routes.ts (HTML import + public files),
                     public/ (PWA shell, pet sprites), pets/ (the Claude pet's Blender model and sheet builder)
