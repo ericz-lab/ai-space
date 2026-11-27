@@ -15,7 +15,6 @@ import { AppRegistry } from "../panel/registry.ts";
 import { claudeOnly } from "../runtimes/registry.ts";
 import { fakeLiveBin } from "../runtimes/testing-live.ts";
 import { Store } from "../scheduler/store.ts";
-import { createTeamRoutes, parseTeamUpdate } from "../team/api.ts";
 import { TeamStore } from "../team/store.ts";
 import { removeTemp } from "../testing.ts";
 import { workspacePaths } from "../workspace.ts";
@@ -51,7 +50,7 @@ beforeAll(async () => {
   team = new TeamStore(db);
   store = new OrdersStore(db, { dataDir: join(home, "data") });
   sessions.exempt((agent) => (agent === DIRECTOR_ID ? store.pinnedSessions() : []));
-  const routes = createAgentRoutes({ ws: workspacePaths(home), registry: new AppRegistry(), layout: new LayoutStore(db), sessions, runtimes, runs, directorModel: () => team.director().model });
+  const routes = createAgentRoutes({ ws: workspacePaths(home), registry: new AppRegistry(), layout: new LayoutStore(db), sessions, runtimes, runs, teamModel: (agent) => team.byAgent(agent)?.model });
   const chat = (routes["/api/agents/:app/:agent/chat"] as { POST: (r: Request & { params: Record<string, string> }) => Promise<Response> }).POST;
   let n = 0;
   service = new OrdersService({
@@ -186,7 +185,7 @@ describe("the capture target space/order", () => {
     expect(list.targets.find((t) => t.id === "space/order")).toEqual({ id: "space/order", app: "space", capability: "order", title: "Orders", i18n: { zh: { title: "口谕" } }, kinds: ["text", "image"] });
     expect(list.textTargets.map((t) => t.id)).toEqual(["space/order", "david/space/order"]);
     const cat = (await (await fetch(`${url}/api/capabilities`)).json()) as { apps: { app: string; publishes: { name: string }[] }[] };
-    expect(cat.apps.find((a) => a.app === "space")!.publishes.map((p) => p.name)).toEqual(["peer.renamed", "order.issued", "order.sorted", "order.state"]);
+    expect(cat.apps.find((a) => a.app === "space")!.publishes.map((p) => p.name)).toEqual(["peer.renamed", "order.issued", "order.sorted", "order.state", "delegation.started", "delegation.noted", "delegation.ended"]);
   });
 
   test("words and a picture reach the orders in process, once per id; a peer's goes through the peer", async () => {
@@ -225,37 +224,5 @@ describe("the capture target space/order", () => {
   test("an app calling the capability itself is refused", async () => {
     const r = await bus.call("notes", "space", "order", { contentType: "application/json", body: JSON.stringify({ text: "x", id: crypto.randomUUID() }) });
     expect(r.status).toBe(403);
-  });
-});
-
-describe("the team route", () => {
-  const options = [{ value: "claude/advanced", runtime: "claude", tier: "advanced", model: "opus" }];
-  test("lists the Director; changes only its model and permission, and only to known values", async () => {
-    const t = new TeamStore(new Database(":memory:"));
-    let caller: string | null = null;
-    const routes = createTeamRoutes({ team: t, modelOptions: () => options, callerApp: async () => caller });
-    const req = (method: string, body?: unknown) => routes["/api/team"]![method as "GET"]!(Object.assign(new Request("http://x/api/team", { method, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) }), { params: {} }));
-    const got = (await (await req("GET")).json()) as { members: { role: string; permission: string; model: string | null }[]; options: unknown[]; permissions: string[] };
-    expect(got.members).toEqual([expect.objectContaining({ role: "director", title: "Director", agent: "space/director", permission: "ask", model: null, builtin: true })]);
-    expect(got.permissions).toEqual(["ask", "edit", "full"]);
-    const put = await req("PUT", { members: [{ role: "director", model: "claude/advanced", permission: "full" }] });
-    expect(((await put.json()) as { members: { model: string; permission: string }[] }).members[0]).toMatchObject({ model: "claude/advanced", permission: "full" });
-    for (const [body, words] of [
-      [{ members: [{ role: "engineer", permission: "ask" }] }, "unknown role"],
-      [{ members: [{ role: "director", permission: "root" }] }, "permission"],
-      [{ members: [{ role: "director", model: "gpt/9" }] }, "model must be null"],
-      [{ members: [{ role: "director", title: "Boss" }] }, "only model and permission"],
-      [{ members: [] }, "1 to 50"],
-      [[1], "body must be"],
-    ] as const) {
-      const r = await req("PUT", body);
-      expect(r.status).toBe(400);
-      expect(((await r.json()) as { error: string }).error).toContain(words);
-    }
-    expect(t.director()).toMatchObject({ model: "claude/advanced", permission: "full" });
-    expect(parseTeamUpdate({ members: [{ role: "director", model: null }] }, t, ["claude/advanced"])).toEqual([{ role: "director", model: null }]);
-    caller = "notes";
-    expect((await req("GET")).status).toBe(403);
-    expect((await req("PUT", { members: [{ role: "director", permission: "ask" }] })).status).toBe(403);
   });
 });

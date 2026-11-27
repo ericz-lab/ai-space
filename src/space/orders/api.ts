@@ -1,3 +1,4 @@
+import type { DelegationView } from "../agents/delegation-view.ts";
 import type { TeamStore } from "../team/store.ts";
 import type { OrdersService } from "./service.ts";
 import type { OrdersStore } from "./store.ts";
@@ -35,12 +36,14 @@ export type OrdersApiOptions = {
   callerApp?: (req: Request) => Promise<string | null>;
   /** The notify channels, for the setting's choices. */
   channels?: () => string[];
+  /** The delegations of a Director session (docs/orders.md#delegation), oldest first. */
+  delegations?: (session: string) => DelegationView[];
 };
 
 /** The page's typed order: words, and a pasted picture as base64 (about 4/3 of the picture's cap). */
 const MAX_TYPED_BODY = Math.ceil(MAX_IMAGE_BYTES / 3) * 4 + 64 * 1024;
 
-export function topicView(t: Topic, extra: { orders?: number; asking?: string[] } = {}) {
+export function topicView(t: Topic, extra: { orders?: number; asking?: string[]; delegations?: DelegationView[]; full?: boolean } = {}) {
   return {
     id: t.id,
     title: t.title,
@@ -53,6 +56,8 @@ export function topicView(t: Topic, extra: { orders?: number; asking?: string[] 
     archived: t.archived,
     ...(extra.orders !== undefined ? { orders: extra.orders } : {}),
     ...(extra.asking?.length ? { asking: extra.asking } : {}),
+    ...(extra.delegations?.length ? { delegations: extra.delegations } : {}),
+    ...(extra.full ? { full: true } : {}),
   };
 }
 
@@ -92,12 +97,14 @@ export function createOrdersRoutes(opts: OrdersApiOptions): Routes {
     return id;
   };
   const settingsView = () => ({ ok: true, settings: service.settings(), channels: opts.channels?.() ?? [] });
+  /** A topic as the page lists it: its orders' count, what it waits on, its delegations, whether full permission is in force. */
+  const listed = (t: Topic, orders: number) => topicView(t, { orders, asking: service.asking(t), full: service.full(t), ...(t.sessionId && opts.delegations ? { delegations: opts.delegations(t.sessionId) } : {}) });
 
   return {
     "/api/orders": {
       GET: owner((req) => {
         const archived = new URL(req.url).searchParams.get("archived") === "1";
-        const topics = store.topics({ archived }).map((t) => topicView(t, { orders: store.ofTopic(t.id).length, asking: service.asking(t) }));
+        const topics = store.topics({ archived }).map((t) => listed(t, store.ofTopic(t.id).length));
         return json({ ...settingsView(), topics, sorting: service.sortingCount(), full: opts.team.director().permission === "full" });
       }),
       POST: owner(async (req) => {
@@ -143,7 +150,7 @@ export function createOrdersRoutes(opts: OrdersApiOptions): Routes {
         const t = store.topic(idOf(req));
         if (!t) return error(404, `unknown topic ${req.params.id}`);
         const orders = store.ofTopic(t.id);
-        return json({ ok: true, topic: topicView(t, { orders: orders.length, asking: service.asking(t) }), orders: orders.map(orderView), full: opts.team.director().permission === "full" });
+        return json({ ok: true, topic: listed(t, orders.length), orders: orders.map(orderView), delegations: t.sessionId && opts.delegations ? opts.delegations(t.sessionId) : [], full: service.full(t) });
       }),
       PATCH: owner(async (req) => {
         const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;

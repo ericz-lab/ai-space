@@ -61,6 +61,15 @@ export type OrdersServiceOptions = {
   panelBase?: string;
   /** The notify channels that exist, for the setting's check. */
   channels?: () => string[];
+  /**
+   * The delegations of the Director's sessions (docs/orders.md#state): a topic is `working` while one
+   * of its delegations runs and `needs-you` while a delegate waits for the person.
+   */
+  delegations?: {
+    activity: (session: string) => { running: boolean; waiting: boolean; asking: string[]; full: boolean };
+    onChange: (fn: (d: { id: number; label: string; from: { session: string | null }; to: { title: string; role: string }; state: string; asking: string[] }) => void) => () => void;
+    onHeld: (fn: (d: { id: number; label: string; from: { session: string | null }; to: { title: string; role: string } }) => void) => () => void;
+  };
   sortTimeoutMs?: number;
   log?: (line: string) => void;
   now?: () => number;
@@ -88,6 +97,7 @@ export class OrdersService {
   /** Runs whose events are followed, by run id: the topic and the approvals it waits on. */
   private readonly followed = new Map<string, { topicId: number; asking: Map<string, string> }>();
   private unwatch: (() => void) | null = null;
+  private readonly offs: (() => void)[] = [];
 
   constructor(private readonly opts: OrdersServiceOptions) {
     this.store = opts.store;
@@ -125,7 +135,21 @@ export class OrdersService {
       this.store.patchTopic(topic.id, { runId: news.run.id });
       this.store.touch(topic.id);
       this.follow(news.run.id, topic.id);
+      this.refresh(topic.id);
     });
+    // A delegation of a topic's session moves the topic's state; a result held at the limit asks the person.
+    if (this.opts.delegations) {
+      this.offs.push(this.opts.delegations.onChange((d) => {
+        const topic = d.from.session ? this.store.topicOfSession(d.from.session) : undefined;
+        if (topic) this.refresh(topic.id, d.asking[0] ? `${d.to.title || d.to.role}: ${d.asking[0]}` : undefined);
+      }));
+      this.offs.push(this.opts.delegations.onHeld((d) => {
+        const topic = d.from.session ? this.store.topicOfSession(d.from.session) : undefined;
+        if (!topic) return;
+        this.lastReportedNeedsYou.add(topic.id);
+        this.setState(topic.id, "needs-you", `${d.label} (${d.to.title || d.to.role}) came back after several results in a row; the Director waits for you to look.`);
+      }));
+    }
     this.kickSort();
     for (const id of this.store.topicsWaiting()) void this.dispatch(id);
   }
@@ -133,7 +157,32 @@ export class OrdersService {
   stop(): void {
     this.unwatch?.();
     this.unwatch = null;
+    for (const off of this.offs.splice(0)) off();
   }
+
+  /** A topic's delegations now: running, waiting for the person, and under full permission. */
+  private delegationActivity(topic: Topic): { running: boolean; waiting: boolean; asking: string[]; full: boolean } {
+    return topic.sessionId && this.opts.delegations ? this.opts.delegations.activity(topic.sessionId) : { running: false, waiting: false, asking: [], full: false };
+  }
+
+  /**
+   * The state of a topic from what runs now: something waits for the person (the Director's run or
+   * a delegate), something works (either), or, when nothing runs any more, the end of the work.
+   */
+  private refresh(topicId: number, asked?: string): void {
+    const topic = this.store.topic(topicId);
+    if (!topic) return;
+    const act = this.delegationActivity(topic);
+    const director = this.running(topic);
+    const directorAsking = director ? (this.followed.get(director.id)?.asking.size ?? 0) > 0 : false;
+    if (directorAsking || act.waiting) this.setState(topicId, "needs-you", undefined, asked ?? act.asking[0]);
+    else if (director || act.running) this.setState(topicId, "working");
+    else if (topic.state === "working") this.setState(topicId, "done");
+    else if (topic.state === "needs-you" && !this.lastReportedNeedsYou.has(topicId)) this.setState(topicId, "done");
+  }
+
+  /** Topics whose `needs-you` comes from the Director's own status line (not from an approval that is answered now). */
+  private readonly lastReportedNeedsYou = new Set<number>();
 
   /** Resolves once the sorting queue and every topic's dispatch have settled (tests, shutdown). */
   async idle(): Promise<void> {
@@ -449,7 +498,7 @@ export class OrdersService {
           this.setState(entry.topicId, "needs-you", [...entry.asking.values()].pop());
         } else {
           entry.asking.delete(parsed.id);
-          if (!entry.asking.size && this.runs.get(runId)?.status === "running") this.setState(entry.topicId, "working");
+          if (!entry.asking.size && this.runs.get(runId)?.status === "running") this.refresh(entry.topicId);
         }
       },
       onEnd: (run) => {
@@ -480,6 +529,12 @@ export class OrdersService {
       state = run.status === "stopped" ? "done" : reported === "needs-you" ? "needs-you" : reported === "failed" ? "failed" : "done";
       summary = clip(reply, MAX_SUMMARY);
     }
+    if (state === "needs-you") this.lastReportedNeedsYou.add(topicId);
+    else this.lastReportedNeedsYou.delete(topicId);
+    // A delegation of the topic still running keeps it working; one waiting for the person makes it wait.
+    const act = this.delegationActivity(this.store.topic(topicId) ?? topic);
+    if (act.waiting) state = "needs-you";
+    else if (act.running && state === "done") state = "working";
     this.store.touch(topicId);
     this.setState(topicId, state, summary, state === "needs-you" ? lastWords(text) : undefined);
     if (this.store.waiting(topicId).length) void this.dispatch(topicId);
@@ -523,9 +578,15 @@ export class OrdersService {
     return this.store.unsorted().length;
   }
 
-  /** Whether a topic's latest run waits on an approval now. */
+  /** What a topic's runs wait on now: the Director's approvals and questions, then its delegates'. */
   asking(topic: Topic): string[] {
-    for (const [, f] of this.followed) if (f.topicId === topic.id) return [...f.asking.values()];
-    return [];
+    const own: string[] = [];
+    for (const [, f] of this.followed) if (f.topicId === topic.id) own.push(...f.asking.values());
+    return [...own, ...this.delegationActivity(topic).asking];
+  }
+
+  /** Whether full permission is in force on a topic: the Director's, or a delegation of it that runs with it. */
+  full(topic: Topic): boolean {
+    return this.opts.team.director().permission === "full" || this.delegationActivity(topic).full;
   }
 }

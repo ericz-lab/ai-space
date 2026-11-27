@@ -11,7 +11,7 @@
  *                        `heard: <text>`) or a stop
  *   `huge`               starts an event line over live chat's limit and never ends it or the turn
  *   anything else        `echo: <text> [pid <pid>]`, so a test can tell whether a process was reused
- * Claude reads these from the message's last line, so a message under a header line (an order's) asks too.
+ * Both read these from the message's last line, so a message under a header line (an order's, a delegation's) asks too.
  *
  * Claude only (docs/runtimes.md#background-work):
  *   `bg:<n>`             starts a background Bash job, takes in a Monitor report mid-turn and ends
@@ -53,9 +53,15 @@ async function claude(args: string[]): Promise<void> {
   const effort = args.includes("--effort") ? args[args.indexOf("--effort") + 1]! : "default";
   // The running turn: what it waits for next.
   let turn: { waiting: "approval" | "question" | "steer" | null; command?: string } | null = null;
-  const text = (t: string) => out({ type: "assistant", message: { content: [{ type: "text", text: t }] }, session_id: sid });
+  // The result carries the turn's last words, as the CLI's does.
+  let lastSaid = "";
+  const text = (t: string) => {
+    lastSaid = t;
+    out({ type: "assistant", message: { content: [{ type: "text", text: t }] }, session_id: sid });
+  };
   const result = (isError = false) => {
-    out({ type: "result", subtype: isError ? "error_during_execution" : "success", is_error: isError, result: isError ? "" : "ok", session_id: sid });
+    out({ type: "result", subtype: isError ? "error_during_execution" : "success", is_error: isError, result: isError ? "" : lastSaid || "ok", session_id: sid });
+    lastSaid = "";
     turn = null;
   };
   for await (const m of lines()) {
@@ -104,7 +110,7 @@ async function claude(args: string[]): Promise<void> {
     }
     out({ type: "system", subtype: "init", session_id: sid, model, permissionMode: mode });
     // What the message asks for is its last line: a message under a header line (an order's) asks too.
-    const asks = said.slice(said.lastIndexOf("\n") + 1);
+    const asks = said.slice(said.lastIndexOf("\n") + 1).replace(/( \[image\])+$/, "");
     if (asks.startsWith("approve:")) {
       const command = asks.slice("approve:".length);
       turn = { waiting: "approval", command };
@@ -180,7 +186,9 @@ async function codex(args: string[]): Promise<void> {
     else if (m.method === "thread/resume") out({ id: m.id, result: { thread: { id: (thread = String(p.threadId)) } } });
     else if (m.method === "turn/start") {
       const input = p.input as { type: string; text?: string }[];
-      const said = input.map((i) => (i.type === "text" ? i.text : `[${i.type}]`)).join(" ");
+      const whole = input.map((i) => (i.type === "text" ? i.text : `[${i.type}]`)).join(" ");
+      // As for Claude: what the message asks for is its last line.
+      const said = whole.slice(whole.lastIndexOf("\n") + 1);
       turn = { id: `turn-${++serial}`, waiting: null };
       out({ id: m.id, result: { turn: { id: turn.id, status: "inProgress" } } });
       note("item/started", { item: { type: "userMessage", id: `u-${serial}`, content: input } });
@@ -198,7 +206,7 @@ async function codex(args: string[]): Promise<void> {
       } else if (said === "huge") {
         process.stdout.write(HUGE_LINE);
       } else {
-        say(`echo: ${said} [pid ${process.pid}] [model ${p.model ?? "default"}] [approval ${p.approvalPolicy}] [sandbox ${(p.sandboxPolicy as Json | undefined)?.type}]`);
+        say(`echo: ${whole} [pid ${process.pid}] [model ${p.model ?? "default"}] [approval ${p.approvalPolicy}] [sandbox ${(p.sandboxPolicy as Json | undefined)?.type}]`);
         complete("completed");
       }
     } else if (m.method === "turn/steer") {

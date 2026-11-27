@@ -2,7 +2,8 @@ import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { Inbox, NotifyService, NotifyStore, createNotifyRoutes, createTaskNotifier, loadChannels, parseNotifySpec } from "./space/notify/index.ts";
-import { RunRegistry, SessionStore, callerAppOf, createAgentRoutes, directorAgentView, fixerAgentView, spaceAgentView } from "./space/agents/index.ts";
+import { DelegationService, DelegationStore, RunRegistry, RunTokens, SessionStore, builtinAgentViews, callerAppOf, createAgentRoutes, createDelegationRoutes } from "./space/agents/index.ts";
+import { check as gateCheck } from "./space/auth/gate.ts";
 import { AppRegistry, HealthProbe, IconPacks, LayoutStore, PetFeed, SpaceMood, WidgetFeed, createPanelRoutes, linkPrompt, parseLinkAnswer, runStopCommand } from "./space/panel/index.ts";
 import { ConnectionPeers, PeerHub, PeerLedgers, PeerStore, createAdoptHandler, createConnectionPeerServe, createMigrateRoutes, createPeerRoutes, createPeerServeHandlers, createPeerServeRoutes, loadPeers, peerRuntimes, renamePeer } from "./space/peers/index.ts";
 import { ModelService, ModelStore, RuntimeHealth, createModelRoutes, createPeerModelRoutes, createPeerUsageRoutes, recordAgentRun } from "./space/model/index.ts";
@@ -586,7 +587,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
         return c.later + c.review;
       },
       title: (agent) => {
-        const builtin = [spaceAgentView(), directorAgentView(), fixerAgentView()].find((v) => v.id === agent);
+        const builtin = builtinAgentViews().find((v) => v.id === agent);
         if (builtin) return { en: builtin.title, ...(builtin.i18n?.zh?.title ? { zh: builtin.i18n.zh.title } : {}) };
         const [app, name] = agent.split("/");
         const m = registry.get(app ?? "")?.manifest;
@@ -622,8 +623,10 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
         ? { stopService: (app: string) => runStopCommand(config.serviceStop, app) }
         : {}),
   });
-  // The team (docs/orders.md#team): in this phase the Director's row, its model and permission.
+  // The team (docs/orders.md#team): the built-in Director and Engineer and the members the person adds.
   const team = new TeamStore(store.db);
+  // Run tokens: a Director turn's SPACE_RUN_TOKEN, the only credential the delegation routes take from an agent.
+  const runTokens = new RunTokens(agentRuns);
   const callerApp = (req: Request) => callerAppOf(req, { operatorToken: config.apiToken, hubToken: config.hubToken, isDevice: (t) => Boolean(auth.verifyDevice(t)), appForToken: (t) => storage.appForToken(t) });
   const agentRoutes = createAgentRoutes({ actionCatalogue: () => shortcuts.catalogue(),
     // The command box's model layer: the space's basic tier, slim, no tools or thinking (docs/shortcuts.md#model-interpretation).
@@ -632,7 +635,8 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       return r?.outcome.ok ? r.outcome.text : undefined;
     },
     shortcuts: shortcutStore, holdApp: async (app) => packageRuntime.get(app) ? (await packageRuntime.acquire(app, false)).release : undefined, ws, registry, layout, sessions, runs: agentRuns, runtimes, defaultModel: config.chatModel, baseDefaultModel, appModel: (app) => ({ override: appModels.overrides(app).app, manifest: registry.get(app)?.manifest.model?.default }), envFor: appEnvFor, peers, icons, capabilities: () => [...bus.capabilities(), ...peers.capabilities()], sharedSkills: SHARED_SKILLS,
-    callerApp, agentCallers: config.agentCallers, directorModel: () => team.director().model,
+    callerApp, agentCallers: config.agentCallers, teamModel: (agent) => team.byAgent(agent)?.model,
+    runTokens, apiUrl: `http://${config.host === "0.0.0.0" || config.host === "::" ? "127.0.0.1" : config.host}:${config.port}`, teamRoster: () => team.list(),
     // Chat cards read and act on their app as the operator (docs/chat-cards.md).
     cardCall: async (app, capability, body) => {
       const r = await bus.call(SPACE_APP, app, capability, { body, contentType: "application/json", accept: "application/json" });
@@ -678,7 +682,34 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   // A session an order topic points at outlives the chat sessions' retention.
   sessions.exempt((agent) => (agent === DIRECTOR_ID ? ordersStore.pinnedSessions() : []));
   const sessionRoute = (agentRoutes["/api/agents/:app/:agent/sessions/:sid"] as { GET: Parameters<typeof localFixer>[0] }).GET;
+  // Delegation (docs/orders.md#delegation): a Director turn hands work to a team member through the same chat route.
+  const delegations = new DelegationService({
+    store: new DelegationStore(store.db),
+    team,
+    runs: agentRuns,
+    chat: chatRoute,
+    agentExists: (id) => {
+      const [app, name] = id.split("/");
+      if (app === SPACE_APP) return builtinAgentViews().some((v) => v.id === id);
+      return Boolean(registry.get(app ?? "")?.manifest.agents.some((a) => a.name === name));
+    },
+    orders: {
+      of: (session) => {
+        const topic = ordersStore.topicOfSession(session);
+        return { topicId: topic?.id ?? null, orderId: topic ? (ordersStore.ofTopic(topic.id).pop()?.id ?? null) : null };
+      },
+      image: async (orderId, session) => {
+        const o = ordersStore.get(orderId);
+        const topic = o?.topicId != null ? ordersStore.topic(o.topicId) : undefined;
+        if (!o?.imagePath || !o.imageMime || topic?.sessionId !== session) return undefined;
+        const bytes = await Bun.file(o.imagePath).arrayBuffer().catch(() => null);
+        return bytes ? { name: `order-${o.id}.${o.imageMime.split("/")[1]}`, mediaType: o.imageMime, data: Buffer.from(bytes).toString("base64") } : undefined;
+      },
+    },
+    publish: (name, data) => scheduler.publish({ app: SPACE_APP, name, data }),
+  });
   const orders = new OrdersService({
+    delegations,
     store: ordersStore,
     team,
     runs: agentRuns,
@@ -701,6 +732,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   // ai-space's own entry in the bus (docs/events.md#events-of-ai-space-itself): its events and the order target.
   bus.syncBuiltin(SPACE_APP, SPACE_BUS_SPEC, { order: captureHandler(orders) });
   orders.start();
+  delegations.start();
   const feedbackScript = buildFeedbackScript({ dev: process.env.SPACE_DEV === "1" });
   const uiKit = loadUiKit({ dev: process.env.SPACE_DEV === "1" });
   packageGateway.uiKit = (req) => uiKitResponse(req, uiKit);
@@ -835,8 +867,28 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       ["owner", createRouterRoutes({ router })],
       ["owner", createUsageRoutes({ service: usage, knownApp: (app) => Boolean(registry.get(app)), routerKey })],
       ["owner", feedbackRoutes],
-      ["owner", createOrdersRoutes({ service: orders, store: ordersStore, team, callerApp, channels: () => notify.channelViews().map((c) => c.name) })],
-      ["owner", createTeamRoutes({ team, callerApp, modelOptions: () => runtimes.tierOptions().filter((o) => o.capabilities.chat).map(({ value, runtime, tier, model, unavailable }) => ({ value, runtime, tier, model, ...(unavailable ? { unavailable } : {}) })) })],
+      ["owner", createOrdersRoutes({ service: orders, store: ordersStore, team, callerApp, channels: () => notify.channelViews().map((c) => c.name), delegations: (sid) => delegations.ofSession(sid) })],
+      ["owner", createTeamRoutes({
+        team,
+        callerApp,
+        modelOptions: () => runtimes.tierOptions().filter((o) => o.capabilities.chat).map(({ value, runtime, tier, model, unavailable }) => ({ value, runtime, tier, model, ...(unavailable ? { unavailable } : {}) })),
+        // The agents a member may be: this Space's own and its apps' (a peer's are listed only to say why they are refused).
+        agents: () => [
+          ...builtinAgentViews().map((v) => ({ id: v.id, title: v.title, description: v.description ?? "", builtin: true })),
+          ...registry.list().filter(({ manifest }) => manifest.status !== "archived").flatMap(({ manifest }) => manifest.agents.map((a) => ({ id: `${manifest.app}/${a.name}`, title: a.title ?? a.name, description: a.description ?? "" }))),
+          ...peers.agents(new Set()).map((a) => ({ id: a.id, title: a.title, description: a.description ?? "", peer: a.peer ?? "" })),
+        ],
+      })],
+      // Delegation routes check their own callers: a turn's run token, or the owner (docs/orders.md#who-may-call).
+      ["self", createDelegationRoutes({
+        service: delegations,
+        tokens: runTokens,
+        owner: async (req) => {
+          const refused = config.auth === "builtin" ? await gateCheck(req, "owner", { mode: config.auth, auth, operatorToken: config.apiToken, isAppCredential: async () => false }) : undefined;
+          if (refused) return refused;
+          return (await callerApp(req)) === null ? undefined : new Response(JSON.stringify({ ok: false, error: "delegations are read by the owner or the delegating turn" }), { status: 403, headers: { "content-type": "application/json" } });
+        },
+      })],
       ["owner", createLogsRoutes({ template: config.serviceLogs, token: config.apiToken, knownApp: (app) => Boolean(registry.get(app)), ...(logsToFile() && !env.SPACE_SERVICE_LOGS?.trim() ? { spaceTemplate: `tail -n {lines} {follow} '${join(ws.logs, "space.log").replace(/'/g, `'\\''`)}'` } : {}), ...(supervisor.mode !== "space" ? {} : manager instanceof Launchctl ? { appTemplate: manager.logsTemplate() } : { unitOf: (app: string) => manager.unitName(app) }) })],
       ["owner", createServiceRoutes({ supervisor, hasService: (app) => { const e = registry.get(app); return e ? Boolean(e.manifest.service) : undefined; }, manifest: (app) => registry.get(app)?.manifest })],
       ["owner", agentRoutes],
@@ -928,7 +980,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       hasCredential: async (req) => {
         const t = bearer(req);
         if (!t) return false;
-        return tokenEquals(t, config.apiToken) || tokenEquals(t, config.hubToken) || Boolean(auth.verifyDevice(t)) || Boolean(await storage.appForToken(t)) || Boolean(consumers.authenticate(t));
+        return tokenEquals(t, config.apiToken) || tokenEquals(t, config.hubToken) || Boolean(auth.verifyDevice(t)) || runTokens.known(t) || Boolean(await storage.appForToken(t)) || Boolean(consumers.authenticate(t));
       },
       log: (l) => console.error(l),
     }) as never,
@@ -956,6 +1008,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     console.log("[space] shutting down");
     scheduler.stop();
     orders.stop();
+    delegations.stop();
     bus.stop();
     notify.stop();
     peers.stop();

@@ -13,6 +13,9 @@ export const SPACE_PUBLISHES: EventPublication[] = [
   { name: "order.issued", description: "An order was stored: { id, text (at most 600 characters), via, image?: { mime, bytes }, createdAt, url }; never the picture." },
   { name: "order.sorted", description: "An order has its topic: { id, topic: { id, title, new }, by: model | fallback | person }." },
   { name: "order.state", description: "A topic's state changed: { topic: { id, title }, state: working | needs-you | done | failed, order?, summary? (at most 600 characters) }." },
+  { name: "delegation.started", description: "An agent delegated work to a team member: { id, order?, topic?, from, to, role }; never the brief." },
+  { name: "delegation.noted", description: "A message was added to a running delegation, or it was stopped: { id, kind: say | stop, taken? }." },
+  { name: "delegation.ended", description: "A delegation ended: { id, state: done | error | stopped | timeout | interrupted, summary (at most 600 characters of the result) }." },
 ];
 
 /** The built-in capture target: an order for the Director (docs/orders.md#the-capture-target). */

@@ -8,7 +8,7 @@ import type { ChatCallbacks, ChatTurn, RuntimeAdapter, SteerInput } from "../run
 import { removeTemp } from "../testing.ts";
 import { TeamStore } from "../team/store.ts";
 import { captureHandler, createOrdersRoutes } from "./api.ts";
-import { directorSystemPrompt, turnMessage } from "./prompt.ts";
+import { directorSystemPrompt, engineerSystemPrompt, turnMessage } from "./prompt.ts";
 import { DIRECTOR_ID, OrdersService } from "./service.ts";
 import { fallbackTitle, parseDecision, sortPrompt } from "./sort.ts";
 import { lastWords, parseStatus, statusLine, stripStatus } from "./status.ts";
@@ -110,14 +110,29 @@ describe("status line", () => {
 });
 
 describe("director prompt", () => {
-  test("carries the rules and the exact status line, and never offers delegation", () => {
-    const p = directorSystemPrompt("/ws");
+  test("carries the rules, the exact status line, delegation and the team from the table", () => {
+    const p = directorSystemPrompt("/ws", [
+      { role: "director", title: "Director", agent: "space/director", summary: "me", permission: "ask", enabled: true },
+      { role: "engineer", title: "Engineer", agent: "space/engineer", summary: "Changes an app.", permission: "edit", enabled: true },
+      { role: "designer", title: "Designer", agent: "ai-design/designer", summary: "Draws pages.", permission: "full", enabled: true },
+      { role: "writer", title: "Writer", agent: "blog/writer", summary: "Off.", permission: "ask", enabled: false },
+    ]);
     expect(p).toContain("restating the order in one line");
-    expect(p).toContain("Ask first when the order touches the platform itself, more than one app");
+    expect(p).toContain("Ask first when the order touches the platform itself (ai-space, core/), more than one app, deleting or moving data, a deploy");
     expect(p).toContain("A screenshot shows what was on the person's screen");
-    expect(p).toContain("ask the person how to proceed");
-    for (const s of ["done", "needs-you", "failed"] as const) expect(p).toContain(statusLine(s));
-    expect(p.toLowerCase()).not.toMatch(/delegat|space delegate|engineer will/);
+    for (const s of ["done", "working", "needs-you", "failed"] as const) expect(p).toContain(statusLine(s));
+    // Delegation: the brief's parts, one delegate per order, say vs stop, one follow-up, never approvals.
+    for (const words of ["Goal", "Where", "Done when", "Do not touch", "written out in words", "One delegate per order at a time", "`say`", "`stop`", "--continue", "one follow-up at most", "Never answer an approval for a delegate", "space delegate start <role> --brief-file -"]) expect(p).toContain(words);
+    // The team from the table: enabled members other than the Director, with role, agent, permission and summary.
+    expect(p).toContain("- engineer (Engineer, space/engineer; may change files in its working directory without asking): Changes an app.");
+    expect(p).toContain("- designer (Designer, ai-design/designer; full permission: runs any command without asking): Draws pages.");
+    expect(p).not.toContain("blog/writer");
+    expect(directorSystemPrompt("/ws")).toContain("no one to delegate to");
+  });
+
+  test("the Engineer works in app-src, follows each app's AGENTS.md and deploys only when briefed to", () => {
+    const p = engineerSystemPrompt("/ws", "/skills/app-fix/scope.ts");
+    for (const words of ["app-src/<app>/", "apps/<app>/ is the deployed copy", "its own AGENTS.md", "deploy channel it names", "Deploy only when the brief says to deploy", "bun /skills/app-fix/scope.ts app-src/<app>", "A message from the Director can arrive while you work"]) expect(p).toContain(words);
   });
 
   test("a turn's message names each order, how it came and its screenshot", () => {

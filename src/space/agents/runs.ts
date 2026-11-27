@@ -19,8 +19,11 @@ import type { ApprovalDecision, BackgroundJob, ChatCallbacks, ChatHandle, ChatTu
  */
 
 export type RunStatus = "running" | "done" | "error" | "stopped" | "timeout" | "interrupted";
-/** Who started the run: the person's message, or the runtime answering a background job's report. */
-export type RunTrigger = "user" | "background";
+/**
+ * Who started the run: the person's message, the runtime answering a background job's report, or
+ * a delegation's result delivered to the delegator's session (docs/orders.md#the-result-comes-back).
+ */
+export type RunTrigger = "user" | "background" | "delegation";
 
 export type RunInfo = {
   id: string;
@@ -60,6 +63,8 @@ export type StartRun = {
   onSession?: (sid: string) => void;
   /** What the run records as the person's message, when the turn's carries more (agents/cards.ts `changesNote`). */
   message?: string;
+  /** Who started it; default `user`. */
+  trigger?: RunTrigger;
 };
 
 /**
@@ -196,7 +201,7 @@ export class RunRegistry {
         }
       }
     }
-    const run = this.open({ agent: spec.agent, sessionId, message: spec.message ?? spec.turn.message, runtime: spec.runtime.name, model: spec.model ?? null, trigger: "user" });
+    const run = this.open({ agent: spec.agent, sessionId, message: spec.message ?? spec.turn.message, runtime: spec.runtime.name, model: spec.model ?? null, trigger: spec.trigger ?? "user" });
     try {
       run.handle = spec.runtime.chat(spec.turn, {
         ...this.callbacks(run, spec.onSession),
@@ -306,6 +311,29 @@ export class RunRegistry {
     } catch (e) {
       throw new RunStateError((e as Error).message);
     }
+  }
+
+  /** Whether a message can be added to the run now: it runs and its runtime takes messages while it runs. */
+  steerable(id: string): boolean {
+    const r = this.live.get(id);
+    return !!r && r.info.status === "running" && !r.ending && !!r.handle.steer;
+  }
+
+  /**
+   * Add an event line of ai-space's own to a running run (a delegation's step, docs/orders.md#in-the-chat-view):
+   * kept and sent like the runtime's lines. False when the run is not running.
+   */
+  inject(id: string, line: string): boolean {
+    const r = this.live.get(id);
+    if (!r || r.info.status !== "running" || r.ending) return false;
+    this.keep(r, line);
+    return true;
+  }
+
+  /** The approval requests and questions the running run waits on, by id. */
+  askingOf(id: string): string[] {
+    const r = this.live.get(id);
+    return r && r.info.status === "running" ? [...r.asking] : [];
   }
 
   /** Answer an approval or a question the running turn is waiting on; false when the run or the request is not open. */
