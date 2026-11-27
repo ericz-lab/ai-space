@@ -16,7 +16,7 @@ const view = (over: Partial<DelegationView> = {}): DelegationView => ({
     { seq: 3, at: "2026-11-26T10:02:00Z", kind: "say", text: "and the logo", taken: false, reason: "ended" },
     { seq: 4, at: "2026-11-26T10:05:00Z", kind: "result", text: "Fixed **both**." },
   ],
-  delivered: "turn", asking: [], ...over,
+  delivered: "turn", asking: [], unreachableSince: null, ...over,
 });
 const render = (el: ReturnType<typeof h>, lang: "en" | "zh" = "en") => renderToStaticMarkup(h(LangContext.Provider, { value: lang }, el));
 

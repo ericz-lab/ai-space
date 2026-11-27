@@ -19,7 +19,7 @@ export type TeamMember = {
   role: string;
   title: string;
   i18n: Record<string, { title: string }>;
-  /** `<app>/<agent>` of this Space. */
+  /** `<app>/<agent>` of this Space, or `<peer>/<app>/<agent>` of a peer it runs agents on (docs/orders.md#on-another-machine). */
   agent: string;
   summary: string;
   /** A `runtime/tier` (or `runtime/model`) value; null = the agent's default. */

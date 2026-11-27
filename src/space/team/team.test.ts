@@ -10,7 +10,10 @@ const agents: TeamAgentInfo[] = [
   { id: "space/director", title: "Director", description: "", builtin: true },
   { id: "space/engineer", title: "Engineer", description: "", builtin: true },
   { id: "ai-design/designer", title: "Designer", description: "Designs pages in the style book." },
-  { id: "david/ai-todo/planner", title: "Planner", description: "", peer: "david" },
+  { id: "david/ai-todo/planner", title: "Planner", description: "", peer: "david", models: [{ value: "codex/basic", runtime: "codex", tier: "basic", model: "gpt-5-mini" }] },
+  { id: "david/space/director", title: "Director", description: "", peer: "david" },
+  { id: "eric/notes/writer", title: "Writer", description: "", peer: "eric", offline: true },
+  { id: "box/notes/writer", title: "Writer", description: "", peer: "box", unavailable: "box does not grant this Space the agents scope" },
 ];
 
 function setup() {
@@ -57,11 +60,21 @@ describe("the team", () => {
 });
 
 describe("GET/PUT /api/team", () => {
-  test("lists the members, the models and this Space's agents (not a peer's)", async () => {
+  test("lists the members, the models, this Space's agents and the peers' (not a peer's Director)", async () => {
     const { req } = setup();
     const r = await req("GET");
     expect(r.body.members.map((m) => m.role)).toEqual(["director", "engineer"]);
-    expect(r.body.agents.map((a) => a.id)).toEqual(["space/director", "space/engineer", "ai-design/designer"]);
+    expect(r.body.agents.map((a) => a.id)).toEqual(["space/director", "space/engineer", "ai-design/designer", "david/ai-todo/planner", "eric/notes/writer", "box/notes/writer"]);
+  });
+
+  test("adds a peer's agent as a member, its model one of that machine's", async () => {
+    const { req, team } = setup();
+    expect((await req("PUT", { members: [{ role: "planner", agent: "david/ai-todo/planner", model: "claude/advanced" }] })).body.error).toContain("david's chat models (codex/basic)");
+    const r = await req("PUT", { members: [{ role: "planner", agent: "david/ai-todo/planner", model: "codex/basic", permission: "edit" }] });
+    expect(r.status).toBe(200);
+    expect(team.get("planner")).toMatchObject({ agent: "david/ai-todo/planner", model: "codex/basic", permission: "edit" });
+    // A machine prefix is not a model value.
+    expect((await req("PUT", { members: [{ role: "planner", model: "david:codex/basic" }] })).status).toBe(400);
   });
 
   test("adds an app agent as a member, its summary defaulting to the agent's description", async () => {
@@ -91,8 +104,11 @@ describe("GET/PUT /api/team", () => {
       [{ remove: ["director"] }, "built in"],
       [{ members: [{ role: "engineer", agent: "ai-design/designer" }] }, "its agent stays space/engineer"],
       [{ members: [{ role: "designer", agent: "ai-design/nobody" }] }, "not an agent of this Space"],
-      [{ members: [{ role: "planner", agent: "david/ai-todo/planner" }] }, "an agent of david"],
-      [{ members: [{ role: "planner", agent: "ai-todo/planner" }] }, "not an agent of this Space"],
+      [{ members: [{ role: "planner", agent: "ai-todo/planner" }] }, "name it david/ai-todo/planner"],
+      [{ members: [{ role: "boss", agent: "david/space/director" }] }, "own Director"],
+      [{ members: [{ role: "writer", agent: "eric/notes/writer" }] }, "eric does not answer"],
+      [{ members: [{ role: "writer", agent: "box/notes/writer" }] }, "agents scope"],
+      [{ members: [{ role: "writer", agent: "zed/notes/writer" }] }, "no peer zed lists it"],
       [{ members: [{ role: "boss", agent: "space/director" }] }, "member once"],
       [{ members: [{ role: "designer" }] }, "name its agent"],
       [{ members: [{ role: "Designer!", agent: "ai-design/designer" }] }, "role must be"],

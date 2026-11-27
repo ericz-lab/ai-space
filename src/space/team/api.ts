@@ -8,19 +8,28 @@ import { DIRECTOR_ROLE, MAX_MEMBER_TITLE, MAX_MEMBERS, MAX_SUMMARY, type MemberP
  *                  a role the team has is changed, a new one is added (it needs `agent`), a listed
  *                  role is removed; all of it is checked first and applied together, or nothing is (400)
  *
- * The rules: the agent must be an agent of this Space (a peer's is refused: delegation stays on one
- * machine in this phase); a role is unique; a built-in row keeps its agent and cannot be removed;
- * the Director cannot be disabled and is the only member with its agent. The owner's only: an
- * app's token or another credential is refused (403).
+ * The rules: the agent is an agent of this Space, or `<peer>/<app>/<agent>` of a peer this Space can
+ * run agents on (docs/orders.md#on-another-machine: listed, granting `agents`, answering when it is
+ * added); a role is unique; a built-in row keeps its agent and cannot be removed; the Director cannot
+ * be disabled, is the only member with its agent, and no peer's Director is a member. A member's
+ * model is one of its machine's chat models, without a machine prefix. The owner's only: an app's
+ * token or another credential is refused (403).
  */
 
-/** An agent a member may be: where it lives (`peer` for another machine's) and how it describes itself. */
-export type TeamAgentInfo = { id: string; title: string; description: string; peer?: string; builtin?: boolean };
+/** A model value a member may take: `runtime/tier` of the machine the agent runs on. */
+export type TeamModelOption = { value: string; runtime: string; tier: string; model: string; unavailable?: string };
+
+/**
+ * An agent a member may be: where it lives (`peer` for another machine's) and how it describes itself.
+ * A peer's agent carries `offline` while its machine does not answer, `unavailable` when this Space
+ * cannot run agents there (the reason), and `models`, its machine's chat models.
+ */
+export type TeamAgentInfo = { id: string; title: string; description: string; peer?: string; builtin?: boolean; offline?: boolean; unavailable?: string; models?: TeamModelOption[] };
 
 export type TeamApiOptions = {
   team: TeamStore;
   /** The `runtime/tier` values a chat can run on here. */
-  modelOptions: () => { value: string; runtime: string; tier: string; model: string; unavailable?: string }[];
+  modelOptions: () => TeamModelOption[];
   /** The agents the panel lists (this Space's, then the peers'), for the checks and the page's choices. */
   agents: () => Promise<TeamAgentInfo[]> | TeamAgentInfo[];
   /** `null` for the owner; anything else is refused. Absent: everyone is the owner. */
@@ -38,7 +47,7 @@ export function createTeamRoutes(opts: TeamApiOptions): Record<string, Partial<R
   };
   const view = async () => {
     const agents = await opts.agents();
-    return { ok: true, members: opts.team.list().map(memberView), options: opts.modelOptions(), permissions: TEAM_PERMISSIONS, agents: agents.filter((a) => !a.peer) };
+    return { ok: true, members: opts.team.list().map(memberView), options: opts.modelOptions(), permissions: TEAM_PERMISSIONS, agents: agents.filter((a) => !(a.peer && a.id === `${a.peer}/space/director`)) };
   };
   return {
     "/api/team": {
@@ -110,10 +119,7 @@ export function parseTeamUpdate(body: unknown, team: TeamStore, models: string[]
       if (typeof m.summary !== "string" || m.summary.length > MAX_SUMMARY) throw new Error(`${at}: summary must be text of at most ${MAX_SUMMARY} characters`);
       patch.summary = m.summary.trim();
     }
-    if ("model" in m) {
-      if (m.model !== null && (typeof m.model !== "string" || !models.includes(m.model))) throw new Error(`${at}: model must be null (the default) or one of this Space's chat models (${models.join(", ") || "none"})`);
-      patch.model = m.model as string | null;
-    }
+    // The model is checked below, against the machine of the member's agent.
     if ("permission" in m) {
       if (!(TEAM_PERMISSIONS as readonly unknown[]).includes(m.permission)) throw new Error(`${at}: permission must be one of ${TEAM_PERMISSIONS.join(", ")}`);
       patch.permission = m.permission as TeamPermission;
@@ -127,10 +133,18 @@ export function parseTeamUpdate(body: unknown, team: TeamStore, models: string[]
     if ("agent" in m) {
       if (typeof m.agent !== "string") throw new Error(`${at}: agent must be <app>/<agent>`);
       if (cur?.builtin && m.agent !== cur.agent) throw new Error(`${at}: ${m.role} is built in; its agent stays ${cur.agent}`);
-      agent = checkAgent(m.agent, agents, at);
+      agent = checkAgent(m.agent, agents, at, m.agent !== cur?.agent);
       if (m.agent === "space/director" && m.role !== DIRECTOR_ROLE) throw new Error(`${at}: the Director is a member once, as director`);
       patch.agent = m.agent;
     }
+    if ("model" in m) {
+      const id = patch.agent ?? cur?.agent ?? "";
+      const remote = id.split("/").length === 3 ? agents.find((a) => a.id === id) : undefined;
+      const allowed = remote ? (remote.models ?? []).map((o) => o.value) : models;
+      const where = remote ? `${remote.peer}'s chat models` : "this Space's chat models";
+      if (m.model !== null && (typeof m.model !== "string" || !allowed.includes(m.model))) throw new Error(`${at}: model must be null (the default) or one of ${where} (${allowed.join(", ") || "none"}), without a machine prefix`);
+      patch.model = m.model as string | null;
+    } else if (patch.agent && cur?.model && patch.agent !== cur.agent) patch.model = null; // another agent, maybe another machine: its default
     if (cur) {
       out.push({ kind: "update", role: m.role, patch });
       return;
@@ -155,13 +169,23 @@ export function parseTeamUpdate(body: unknown, team: TeamStore, models: string[]
   return out;
 }
 
-/** The agent of a member: one of this Space's; a peer's or an unknown one is refused with the reason. */
-function checkAgent(id: string, agents: TeamAgentInfo[], at: string): TeamAgentInfo {
+/**
+ * The agent of a member: one of this Space's, or a peer's this Space can run agents on (`fresh`: a
+ * new choice, which an offline machine cannot take); an unknown one is refused with the reason.
+ */
+function checkAgent(id: string, agents: TeamAgentInfo[], at: string, fresh = true): TeamAgentInfo {
   const found = agents.find((a) => a.id === id);
-  if (found?.peer) throw new Error(`${at}: ${id} is an agent of ${found.peer}; a member must be an agent of this Space (delegation to another machine is not built yet)`);
+  if (found?.peer) {
+    if (id === `${found.peer}/space/director`) throw new Error(`${at}: ${id} is ${found.peer}'s own Director; the Director of this Space delegates, a peer's Director is not a member`);
+    if (found.unavailable) throw new Error(`${at}: ${id} runs on ${found.peer}, and ${found.unavailable}`);
+    if (fresh && found.offline) throw new Error(`${at}: ${found.peer} does not answer now; add ${id} when it does`);
+    return found;
+  }
   if (!found) {
+    const parts = id.split("/");
+    if (parts.length === 3) throw new Error(`${at}: ${id} is not an agent of a peer of this Space (no peer ${parts[0]} lists it)`);
     const peer = agents.find((a) => a.peer && a.id === `${a.peer}/${id}`);
-    throw new Error(`${at}: ${id} is not an agent of this Space${peer ? ` (${peer.peer} has one; delegation stays on this machine for now)` : ""}`);
+    throw new Error(`${at}: ${id} is not an agent of this Space${peer ? ` (${peer.peer} has one: name it ${peer.id})` : ""}`);
   }
   return found;
 }

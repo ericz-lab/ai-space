@@ -180,12 +180,12 @@ describe("the run token", () => {
 });
 
 describe("start", () => {
-  test("refuses what is not a member, a disabled member, another machine's agent, itself and an empty brief", async () => {
+  test("refuses what is not a member (another machine's agent that is not one too), a disabled member, itself and an empty brief", async () => {
     const d = await director("wait");
     for (const [body, status, reason] of [
       [{ to: "designer", brief: "x" }, 403, "not-member"],
       [{ to: "ai-design/designer", brief: "x" }, 403, "not-member"],
-      [{ to: "david/space/engineer", brief: "x" }, 400, "other-machine"],
+      [{ to: "david/space/engineer", brief: "x" }, 403, "not-member"],
       [{ to: "director", brief: "x" }, 400, "self"],
       [{ to: "engineer", brief: "  " }, 400, undefined],
     ] as const) {

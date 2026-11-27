@@ -5,7 +5,7 @@ import { Inbox, NotifyService, NotifyStore, createNotifyRoutes, createTaskNotifi
 import { DelegationService, DelegationStore, RunRegistry, RunTokens, SessionStore, builtinAgentViews, callerAppOf, createAgentRoutes, createDelegationRoutes } from "./space/agents/index.ts";
 import { check as gateCheck } from "./space/auth/gate.ts";
 import { AppRegistry, HealthProbe, IconPacks, LayoutStore, PetFeed, SpaceMood, WidgetFeed, createPanelRoutes, linkPrompt, parseLinkAnswer, runStopCommand } from "./space/panel/index.ts";
-import { ConnectionPeers, PeerHub, PeerLedgers, PeerStore, createAdoptHandler, createConnectionPeerServe, createMigrateRoutes, createPeerRoutes, createPeerServeHandlers, createPeerServeRoutes, loadPeers, peerRuntimes, renamePeer } from "./space/peers/index.ts";
+import { ConnectionPeers, PeerHub, PeerLedgers, PeerStore, createAdoptHandler, createConnectionPeerServe, createMigrateRoutes, createPeerRoutes, createPeerServeHandlers, createPeerServeRoutes, loadPeers, peerMachines, peerRuntimes, renamePeer } from "./space/peers/index.ts";
 import { ModelService, ModelStore, RuntimeHealth, createModelRoutes, createPeerModelRoutes, createPeerUsageRoutes, recordAgentRun } from "./space/model/index.ts";
 import { probeTargets, statusTable } from "./space/model/machines.ts";
 import { setActivePrices } from "./space/prices/index.ts";
@@ -683,11 +683,14 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   sessions.exempt((agent) => (agent === DIRECTOR_ID ? ordersStore.pinnedSessions() : []));
   const sessionRoute = (agentRoutes["/api/agents/:app/:agent/sessions/:sid"] as { GET: Parameters<typeof localFixer>[0] }).GET;
   // Delegation (docs/orders.md#delegation): a Director turn hands work to a team member through the same chat route.
+  // A member on another machine runs through the peer client, in process (docs/orders.md#on-another-machine).
+  const delegateMachines = peerMachines(peers, () => connectionPeers.status());
   const delegations = new DelegationService({
     store: new DelegationStore(store.db),
     team,
     runs: agentRuns,
     chat: chatRoute,
+    machines: delegateMachines,
     agentExists: (id) => {
       const [app, name] = id.split("/");
       if (app === SPACE_APP) return builtinAgentViews().some((v) => v.id === id);
@@ -872,11 +875,15 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
         team,
         callerApp,
         modelOptions: () => runtimes.tierOptions().filter((o) => o.capabilities.chat).map(({ value, runtime, tier, model, unavailable }) => ({ value, runtime, tier, model, ...(unavailable ? { unavailable } : {}) })),
-        // The agents a member may be: this Space's own and its apps' (a peer's are listed only to say why they are refused).
+        // The agents a member may be: this Space's own and its apps', and its peers' with whether this Space may run them there.
         agents: () => [
           ...builtinAgentViews().map((v) => ({ id: v.id, title: v.title, description: v.description ?? "", builtin: true })),
           ...registry.list().filter(({ manifest }) => manifest.status !== "archived").flatMap(({ manifest }) => manifest.agents.map((a) => ({ id: `${manifest.app}/${a.name}`, title: a.title ?? a.name, description: a.description ?? "" }))),
-          ...peers.agents(new Set()).map((a) => ({ id: a.id, title: a.title, description: a.description ?? "", peer: a.peer ?? "" })),
+          ...peers.agents(new Set()).map((a) => {
+            const peer = a.peer ?? "";
+            const access = delegateMachines.access(peer);
+            return { id: a.id, title: a.title, description: a.description ?? "", peer, ...(a.stale ? { offline: true } : {}), ...(!access.ok && access.reason !== "offline" ? { unavailable: access.error } : {}), models: a.modelOptions ?? [] };
+          }),
         ],
       })],
       // Delegation routes check their own callers: a turn's run token, or the owner (docs/orders.md#who-may-call).

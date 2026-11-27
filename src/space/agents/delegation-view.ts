@@ -23,7 +23,7 @@ export type DelegationNoteView = {
   taken?: boolean;
   /** `say`: when the runtime reported the agent read it (the run's `steer` event). */
   readAt?: string | null;
-  /** `say` not taken: why (`ended`, `unsupported`). `stop`: who stopped it (`delegator`, `person`). `result`: how it reached the delegator. */
+  /** `say` not taken: why (`ended`, `unsupported`, `unreachable` for a machine that did not answer). `stop`: who stopped it (`delegator`, `person`). `result`: how it reached the delegator. */
   reason?: string;
 };
 
@@ -46,6 +46,8 @@ export type DelegationView = {
   delivered: "steered" | "turn" | "held" | null;
   /** What the delegate waits on now (approvals and questions), one line each. */
   asking: string[];
+  /** A delegate on another machine (`to.machine`) whose machine does not answer: since when; null otherwise. */
+  unreachableSince: string | null;
 };
 
 /** The label a delegation is spoken of by: "Delegation #3". */

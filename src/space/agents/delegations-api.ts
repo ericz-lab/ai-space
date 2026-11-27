@@ -7,7 +7,7 @@ import { DelegationError, type DelegationService, type RunCaller, type RunTokens
  * of its own session; the owner (the panel) may read every delegation and stop one.
  *
  *   POST /api/delegations              run token   { to, brief, continue?, images?: [order id] } → { ok, delegation }
- *   POST /api/delegations/:id/steer    run token   { message } → { ok: true } or { ok: false, reason: ended | unsupported, error }
+ *   POST /api/delegations/:id/steer    run token   { message } → { ok: true } or { ok: false, reason: ended | unsupported | unreachable, error }
  *   POST /api/delegations/:id/stop     token/owner → { ok, stopped, last }
  *   GET  /api/delegations/:id          token/owner → { ok, delegation, notes, tail }
  *   GET  /api/delegations?session=     token/owner → { ok, delegations } (a token: its own session's, whatever is asked)
@@ -70,9 +70,9 @@ export function createDelegationRoutes(opts: DelegationApiOptions): Record<strin
       }),
     },
     "/api/delegations/:id": {
-      GET: route(false, (req, caller) => {
+      GET: route(false, async (req, caller) => {
         const delegation = opts.service.read(caller, idOf(req));
-        return json({ ok: true, delegation, notes: delegation.notes, tail: opts.service.show(delegation.id).tail });
+        return json({ ok: true, delegation, notes: delegation.notes, tail: (await opts.service.show(delegation.id)).tail });
       }),
     },
     "/api/delegations/:id/steer": {
@@ -83,7 +83,7 @@ export function createDelegationRoutes(opts: DelegationApiOptions): Record<strin
       }),
     },
     "/api/delegations/:id/stop": {
-      POST: route(false, (req, caller) => json({ ok: true, ...opts.service.halt(caller, idOf(req)) })),
+      POST: route(false, async (req, caller) => json({ ok: true, ...(await opts.service.halt(caller, idOf(req))) })),
     },
   };
 }

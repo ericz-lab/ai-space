@@ -20,7 +20,8 @@ const PERMISSION_WORDS = { ask: "asks the person before anything beyond reading"
 export function rosterSection(team: RosterMember[]): string {
   const members = team.filter((m) => m.enabled && m.agent !== `space/${DIRECTOR_AGENT}`);
   if (!members.length) return "Your team has no one to delegate to now: handle the order yourself or ask the person.";
-  return ["Your team (delegate by role):", ...members.map((m) => `- ${m.role} (${m.title}, ${m.agent}; ${PERMISSION_WORDS[m.permission]}): ${m.summary || "no summary"}`)].join("\n");
+  const where = (agent: string) => (agent.split("/").length === 3 ? `${agent}, on the machine ${agent.split("/")[0]}: it works on that machine's files and apps, not this one's` : agent);
+  return ["Your team (delegate by role):", ...members.map((m) => `- ${m.role} (${m.title}, ${where(m.agent)}; ${PERMISSION_WORDS[m.permission]}): ${m.summary || "no summary"}`)].join("\n");
 }
 
 /** The standing instructions of `space/director`; the capability catalogue is appended after them. */

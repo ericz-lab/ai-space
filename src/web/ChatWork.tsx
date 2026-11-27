@@ -116,7 +116,7 @@ const isEnded = (d: DelegationView) => (ENDED_STATES as readonly string[]).inclu
 /** How an added message fared: read, taken but not read yet, or not taken and why. */
 function SayFate({ note }: { note: DelegationNoteView }) {
   const { lang, t } = useLang();
-  if (note.taken === false) return <small className="chat-dlg-fate refused">{t(note.reason === "ended" ? "dlg.notTaken.ended" : note.reason === "unsupported" ? "dlg.notTaken.unsupported" : "dlg.notTaken")}</small>;
+  if (note.taken === false) return <small className="chat-dlg-fate refused">{t(note.reason === "ended" ? "dlg.notTaken.ended" : note.reason === "unsupported" ? "dlg.notTaken.unsupported" : note.reason === "unreachable" ? "dlg.notTaken.unreachable" : "dlg.notTaken")}</small>;
   if (note.readAt) return <small className="chat-dlg-fate read" title={dateTime(note.readAt, lang)}>{t("dlg.read", { time: relTime(note.readAt, lang) })}</small>;
   return <small className="chat-dlg-fate">{t("dlg.taken")}</small>;
 }
@@ -170,19 +170,21 @@ export function DelegationStep({ delegation, id, follow, onChanged }: { delegati
     <div className="chat-work-head">
       <span className="chat-work-icon" aria-hidden="true"><Glyph name="task" /></span>
       <strong>{t("dlg.to", { who: delegateName(d) })}</strong>
+      {d.to.machine && <small className="chat-dlg-id">{t("dlg.onMachine", { machine: d.to.machine })}</small>}
       <small className="chat-dlg-id" title={dateTime(d.createdAt, lang)}>#{d.id}{d.continued ? ` · ${t("dlg.continued", { id: d.continued })}` : ""}</small>
       {d.permission === "full" && <FullMark />}
       <span className="chat-work-state">{t(`dlg.state.${d.state}`)}</span>
     </div>
     {brief && <Fold label={t("dlg.brief")} text={brief.text} />}
     {says.map((n) => <div key={n.seq} className="chat-steer chat-dlg-say"><b>↳ {t("dlg.added")}</b> {n.text} <SayFate note={n} /></div>)}
+    {running && d.unreachableSince && <p className="chat-dlg-note" role="status" title={dateTime(d.unreachableSince, lang)}>{t("dlg.unreachable", { machine: d.to.machine, time: relTime(d.unreachableSince, lang) })}</p>}
     {d.asking.length > 0 && <div className="chat-dlg-asking">{d.asking.map((a, i) => <p key={i}>{a}</p>)}</div>}
     {follow && run.steps.length > 0 && <div className="chat-dlg-run"><RunSteps steps={run.steps} live={run.live} steerBy={d.from.agent === "space/director" ? t("dlg.director") : d.from.agent} onAnswer={(rid, decision, answers) => postAnswer(base!, d.to.runId!, rid, decision, answers).then((e) => (e === null ? null : t("chat.approval.failed", { error: e })))} /></div>}
     {stop && <p className="chat-dlg-note">{t(stop.reason === "person" ? "dlg.stoppedByYou" : stop.reason === "delegator" ? "dlg.stoppedByDelegator" : "dlg.stopNote")}{stop.text ? ` · ${stop.text}` : ""}</p>}
     {result && <Fold label={t("dlg.result")} text={result.text} markdown />}
     {d.delivered === "held" && <p className="chat-dlg-note">{t("dlg.held")}</p>}
     <div className="chat-dlg-actions">
-      {d.to.session && <a className="inbox-pill" href={chatHref(d.to.agent, d.to.session)} target="_blank" rel="noopener noreferrer">{t("dlg.open")} ↗</a>}
+      {d.to.session && <a className="inbox-pill" href={chatHref(d.to.machine ? `${d.to.machine}/${d.to.agent}` : d.to.agent, d.to.session)} target="_blank" rel="noopener noreferrer">{t("dlg.open")} ↗</a>}
       {follow && running && <button className="inbox-pill" disabled={stopping} onClick={stopIt}>{t(stopping ? "dlg.stopping" : "dlg.stop")}</button>}
     </div>
     {(err || run.error) && <small role="alert">{err || run.error}</small>}

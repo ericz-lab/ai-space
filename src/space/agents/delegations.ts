@@ -3,6 +3,7 @@ import { finalText } from "../feedback/prompt.ts";
 import { PERMISSION_MODE, type TeamPermission, type TeamStore } from "../team/store.ts";
 import { DELEGATION_STATES, type DelegationNoteView, type DelegationState, type DelegationView, ENDED_STATES, type NoteKind, delegationLabel, resultHeader } from "./delegation-view.ts";
 import type { ChatImage } from "./images.ts";
+import { type RemoteMachines, peerAgentPath, readRunEvents, splitDelegate } from "./delegations-remote.ts";
 import { RunStateError, type RunInfo, type RunRegistry } from "./runs.ts";
 
 /**
@@ -24,8 +25,12 @@ import { RunStateError, type RunInfo, type RunRegistry } from "./runs.ts";
  *   is not delivered again: `stop` already answered with what the delegate had said.
  * - **Restart**: a delegation whose run did not live to its end is marked as its run is
  *   (`interrupted`) at start, and that result is delivered.
- *
- * Everything stays on this machine in this phase: `to_machine` is always empty.
+ * - **Another machine** (docs/orders.md#on-another-machine): a member `<peer>/<app>/<agent>` runs
+ *   on that peer through its `/api/peer/agents/…` routes (`RemoteMachines`); the row keeps
+ *   `to_machine` and the peer's run id in `run_id`. The run is followed on the peer's event stream,
+ *   read again after the last seq when it drops; `to_seq` is the last event whose effect is recorded,
+ *   so a replay after a restart reads nothing twice. While the machine does not answer the
+ *   delegation stays running with `unreachable_since`; after `REMOTE_GIVE_UP_MS` it is `interrupted`.
  */
 
 /** Agents whose turns get a run token and may delegate. */
@@ -38,6 +43,17 @@ export const MAX_BRIEF = 20_000;
 export const MAX_SAY = 8_000;
 /** What an event carries of a brief or result, at most. */
 export const MAX_EVENT_SUMMARY = 600;
+/**
+ * A delegate on another machine whose machine has not answered for this long is given up: the
+ * delegation ends `interrupted`. Longer than a run's own timeout on the peer (60 min by default), so
+ * a machine that comes back within the day still reports how its run ended; a peer keeps its last
+ * 200 finished runs, which the day of a busy Space can outgrow.
+ */
+export const REMOTE_GIVE_UP_MS = 24 * 60 * 60_000;
+/** The peer's event stream sends a heartbeat every 20 s; this long without a byte is a dead link. */
+export const REMOTE_IDLE_MS = 70_000;
+/** Waits between attempts to read a remote run again: growing to the last one. */
+const REMOTE_RETRY_MS = [1_000, 2_000, 5_000, 10_000, 30_000];
 const MAX_IMAGES = 4;
 
 const SCHEMA = `
@@ -58,7 +74,9 @@ CREATE TABLE IF NOT EXISTS delegations (
   continued    INTEGER,
   delivered    TEXT,
   created_at   INTEGER NOT NULL,
-  ended_at     INTEGER
+  ended_at     INTEGER,
+  to_seq       INTEGER NOT NULL DEFAULT 0,
+  unreachable_since INTEGER
 );
 CREATE INDEX IF NOT EXISTS delegations_from ON delegations(from_agent, from_session, id);
 CREATE TABLE IF NOT EXISTS delegation_notes (
@@ -73,6 +91,12 @@ CREATE TABLE IF NOT EXISTS delegation_notes (
   PRIMARY KEY (delegation_id, seq)
 );
 `;
+
+/** Columns added after phase 2; each is added once to an older table. */
+const ADDED: [column: string, decl: string][] = [
+  ["to_seq", "INTEGER NOT NULL DEFAULT 0"],
+  ["unreachable_since", "INTEGER"],
+];
 
 export type Delegation = {
   id: number;
@@ -92,6 +116,10 @@ export type Delegation = {
   delivered: "steered" | "turn" | "held" | "skipped" | null;
   createdAt: number;
   endedAt: number | null;
+  /** A delegate on another machine: the last event of its run whose effect (a message read) is recorded. */
+  toSeq: number;
+  /** A delegate on another machine: since when its machine does not answer; null while it does. */
+  unreachableSince: number | null;
 };
 
 export type DelegationNote = { delegationId: number; seq: number; at: number; kind: NoteKind; text: string; taken: boolean | null; readAt: number | null; reason: string | null };
@@ -114,6 +142,8 @@ type Row = {
   delivered: string | null;
   created_at: number;
   ended_at: number | null;
+  to_seq: number;
+  unreachable_since: number | null;
 };
 type NoteRow = { delegation_id: number; seq: number; at: number; kind: string; text: string; taken: number | null; read_at: number | null; reason: string | null };
 
@@ -123,14 +153,17 @@ export class DelegationStore {
     private readonly now: () => number = Date.now,
   ) {
     db.exec(SCHEMA);
+    const columns = db.query<{ name: string }, []>("PRAGMA table_info(delegations)").all();
+    for (const [column, decl] of ADDED) if (!columns.some((c) => c.name === column)) db.exec(`ALTER TABLE delegations ADD COLUMN ${column} ${decl}`);
   }
 
-  create(d: Pick<Delegation, "fromAgent" | "fromSession" | "fromRun" | "toAgent" | "toRole" | "toTitle" | "permission" | "orderId" | "continued">, brief: string): Delegation {
+  /** `toAgent` is the agent on its machine (`<app>/<agent>`); `toMachine` the peer it runs on, empty for this Space. */
+  create(d: Pick<Delegation, "fromAgent" | "fromSession" | "fromRun" | "toAgent" | "toRole" | "toTitle" | "permission" | "orderId" | "continued"> & { toMachine?: string }, brief: string): Delegation {
     const at = this.now();
     const id = this.db.transaction(() => {
       const r = this.db
-        .query("INSERT INTO delegations (from_agent, from_session, from_run, to_agent, to_role, to_title, to_machine, state, permission, order_id, continued, created_at) VALUES (?, ?, ?, ?, ?, ?, '', 'running', ?, ?, ?, ?)")
-        .run(d.fromAgent, d.fromSession, d.fromRun, d.toAgent, d.toRole, d.toTitle, d.permission, d.orderId, d.continued, at);
+        .query("INSERT INTO delegations (from_agent, from_session, from_run, to_agent, to_role, to_title, to_machine, state, permission, order_id, continued, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'running', ?, ?, ?, ?)")
+        .run(d.fromAgent, d.fromSession, d.fromRun, d.toAgent, d.toRole, d.toTitle, d.toMachine ?? "", d.permission, d.orderId, d.continued, at);
       const id = Number(r.lastInsertRowid);
       this.db.query("INSERT INTO delegation_notes (delegation_id, seq, at, kind, text) VALUES (?, 1, ?, 'brief', ?)").run(id, at, brief);
       return id;
@@ -160,10 +193,10 @@ export class DelegationStore {
     return this.db.query<Row, [number]>("SELECT * FROM delegations ORDER BY id DESC LIMIT ?").all(limit).map(delegationOf);
   }
 
-  patch(id: number, p: Partial<Pick<Delegation, "toSession" | "runId" | "state" | "delivered" | "endedAt" | "fromSession">>): void {
+  patch(id: number, p: Partial<Pick<Delegation, "toSession" | "runId" | "state" | "delivered" | "endedAt" | "fromSession" | "toSeq" | "unreachableSince">>): void {
     const cols: string[] = [];
     const vals: (string | number | null)[] = [];
-    const map: Record<string, string> = { toSession: "to_session", runId: "run_id", state: "state", delivered: "delivered", endedAt: "ended_at", fromSession: "from_session" };
+    const map: Record<string, string> = { toSession: "to_session", runId: "run_id", state: "state", delivered: "delivered", endedAt: "ended_at", fromSession: "from_session", toSeq: "to_seq", unreachableSince: "unreachable_since" };
     for (const [k, v] of Object.entries(p)) {
       if (v === undefined) continue;
       cols.push(`${map[k]} = ?`);
@@ -217,6 +250,8 @@ function delegationOf(r: Row): Delegation {
     delivered: (["steered", "turn", "held", "skipped"] as const).find((x) => x === r.delivered) ?? null,
     createdAt: r.created_at,
     endedAt: r.ended_at,
+    toSeq: r.to_seq ?? 0,
+    unreachableSince: r.unreachable_since ?? null,
   };
 }
 
@@ -300,11 +335,20 @@ export type DelegationServiceOptions = {
     image: (orderId: number, session: string) => Promise<ChatImage | undefined>;
   };
   publish?: (name: string, data: Record<string, unknown>) => void;
+  /** The peers whose agents a member may be (`<peer>/<app>/<agent>`); absent: delegation stays on this machine. */
+  machines?: RemoteMachines;
+  /** Tests: the remote timings (give up, a quiet stream, the waits between attempts). */
+  remote?: { giveUpMs?: number; idleMs?: number; retryMs?: number[] };
   log?: (line: string) => void;
   now?: () => number;
 };
 
 export type StartInput = { to: string; brief: string; continue?: number; images?: number[] };
+
+export type SayOutcome = { ok: true } | { ok: false; reason: "ended" | "unsupported" | "unreachable"; error: string };
+
+/** The agent a delegation went to, with its machine: `<peer>/<app>/<agent>` or `<app>/<agent>`. */
+export const delegateOf = (d: Pick<Delegation, "toAgent" | "toMachine">) => (d.toMachine ? `${d.toMachine}/${d.toAgent}` : d.toAgent);
 
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
@@ -312,8 +356,8 @@ export class DelegationService {
   private readonly store: DelegationStore;
   private readonly runs: RunRegistry;
   private readonly log: (line: string) => void;
-  /** Followed delegate runs, by delegation id: their lines so far and what they wait on. */
-  private readonly followed = new Map<number, { lines: string[]; asking: Map<string, string>; unread: string[] }>();
+  /** Followed delegate runs, by delegation id: their lines so far, what they wait on, and (remote) the stream's abort. */
+  private readonly followed = new Map<number, Followed>();
   /** Delegations being stopped, and by whom. */
   private readonly stopping = new Map<number, "delegator" | "person">();
   private readonly listeners = new Set<(d: DelegationView) => void>();
@@ -339,10 +383,17 @@ export class DelegationService {
     return () => this.heldListeners.delete(fn);
   }
 
-  /** After a restart: delegations whose run is gone are marked as the run was, and their results delivered. */
+  /**
+   * After a restart: delegations whose run is gone are marked as the run was, and their results
+   * delivered. A delegate on another machine is followed again on its machine's event stream, from the
+   * start: it tells whether the run still runs, how it ended while this Space was down, and its steps.
+   */
   start(): void {
     for (const d of this.store.unsettled()) {
-      if (d.state === "running" || d.state === "waiting") {
+      if ((d.state === "running" || d.state === "waiting") && d.toMachine) {
+        if (d.runId) this.followRemote(d.id);
+        else this.finish(d.id, "interrupted", "ai-space restarted before the delegate's turn started", "");
+      } else if (d.state === "running" || d.state === "waiting") {
         const run = d.runId ? this.runs.get(d.runId) : null;
         if (run?.status === "running") {
           this.follow(d.id, d.runId!);
@@ -366,6 +417,11 @@ export class DelegationService {
   stop(): void {
     this.unwatch?.();
     this.unwatch = null;
+    for (const [id, f] of this.followed) {
+      if (!f.abort) continue;
+      f.abort.abort();
+      this.followed.delete(id);
+    }
   }
 
   /** Resolves once the deliveries in flight have settled (tests, shutdown). */
@@ -394,7 +450,7 @@ export class DelegationService {
       id: d.id,
       label: delegationLabel(d.id),
       from: { agent: d.fromAgent, session: d.fromSession },
-      to: { agent: d.toAgent, role: d.toRole, title: d.toTitle, machine: d.toMachine, session: d.toSession ?? (d.runId ? (this.runs.get(d.runId)?.sid ?? null) : null), runId: d.runId },
+      to: { agent: d.toAgent, role: d.toRole, title: d.toTitle, machine: d.toMachine, session: this.sessionOfDelegate(d), runId: d.runId },
       state: d.state,
       permission: d.permission,
       orderId: d.orderId,
@@ -404,6 +460,7 @@ export class DelegationService {
       notes: notes.map(noteView),
       delivered: d.delivered === "skipped" ? null : d.delivered,
       asking: [...(this.followed.get(d.id)?.asking.values() ?? [])],
+      unreachableSince: d.unreachableSince === null ? null : new Date(d.unreachableSince).toISOString(),
     };
   }
 
@@ -420,10 +477,10 @@ export class DelegationService {
   }
 
   /** `show`: the record and the tail of the delegate's steps. */
-  show(id: number): { delegation: DelegationView; tail: string[] } {
+  async show(id: number): Promise<{ delegation: DelegationView; tail: string[] }> {
     const view = this.view(id);
     if (!view) throw new DelegationError(404, `unknown delegation ${id}`);
-    return { delegation: view, tail: tailOf(this.linesOf(this.store.get(id)!)) };
+    return { delegation: view, tail: tailOf(await this.linesOf(this.store.get(id)!)) };
   }
 
   // ---------------------------------------------------------------- the delegator's calls
@@ -475,16 +532,23 @@ export class DelegationService {
     const to = typeof input.to === "string" ? input.to.trim() : "";
     if (!to) throw new DelegationError(400, "name the member: a role of the team (engineer) or its agent");
     const parts = to.split("/");
-    if (parts.length > 2) throw new DelegationError(400, `${to} names an agent on ${parts[0]}; delegation stays on this machine in this phase`, "other-machine");
-    const member = parts.length === 2 ? this.opts.team.byAgent(to) : this.opts.team.get(to);
+    if (parts.length > 3) throw new DelegationError(400, `${to} is not a role or an agent (<app>/<agent>, <peer>/<app>/<agent>)`);
+    const member = parts.length >= 2 ? this.opts.team.byAgent(to) : this.opts.team.get(to);
     if (!member) throw new DelegationError(403, `${to} is not a member of the team; the team has ${this.opts.team.list().filter((m) => m.enabled && m.role !== "director").map((m) => m.role).join(", ") || "no one else"}`, "not-member");
     if (member.agent === caller.agent) throw new DelegationError(400, "a delegator cannot delegate to itself", "self");
     if (!member.enabled) throw new DelegationError(403, `${member.role} is disabled on the team`, "disabled");
-    if (!(await this.opts.agentExists(member.agent))) throw new DelegationError(409, `${member.role}'s agent ${member.agent} is not on this Space any more`, "removed");
+    const where = splitDelegate(member.agent);
+    if (where.machine) {
+      const machines = this.opts.machines;
+      if (!machines) throw new DelegationError(400, `${member.role}'s agent ${member.agent} is on ${where.machine}, and this Space reaches no other machine's agents`, "other-machine");
+      const access = machines.access(where.machine);
+      if (!access.ok) throw new DelegationError(access.reason === "offline" ? 503 : 409, `${member.role} runs on ${where.machine}: ${access.error}`, access.reason === "offline" ? "machine-offline" : access.reason === "no-agents" ? "machine-no-agents" : "machine-unlisted");
+      if (!machines.hasAgent(where.machine, where.agent)) throw new DelegationError(409, `${member.role}'s agent ${where.agent} is not on ${where.machine} any more (its last snapshot does not list it)`, "removed");
+    } else if (!(await this.opts.agentExists(member.agent))) throw new DelegationError(409, `${member.role}'s agent ${member.agent} is not on this Space any more`, "removed");
     let earlier: Delegation | undefined;
     if (input.continue !== undefined) {
       earlier = this.own(caller, Number(input.continue));
-      if (earlier.toAgent !== member.agent) throw new DelegationError(400, `${delegationLabel(earlier.id)} went to ${earlier.toRole}, not ${member.role}`);
+      if (delegateOf(earlier) !== member.agent) throw new DelegationError(400, `${delegationLabel(earlier.id)} went to ${earlier.toRole}, not ${member.role}`);
       if (earlier.state === "running" || earlier.state === "waiting") throw new DelegationError(409, `${delegationLabel(earlier.id)} is still running: add to it (say) or stop it first`);
       if (!this.sessionOfDelegate(earlier)) throw new DelegationError(409, `${delegationLabel(earlier.id)} has no session to continue`);
     }
@@ -497,8 +561,8 @@ export class DelegationService {
       images.push(img);
     }
     const context = this.opts.orders?.of(session) ?? { orderId: null, topicId: null };
-    const d = this.store.create({ fromAgent: caller.agent, fromSession: session, fromRun: caller.runId, toAgent: member.agent, toRole: member.role, toTitle: member.title, permission: member.permission, orderId: ids[0] ?? context.orderId, continued: earlier?.id ?? null }, brief);
-    const [app, agent] = member.agent.split("/") as [string, string];
+    const d = this.store.create({ fromAgent: caller.agent, fromSession: session, fromRun: caller.runId, toAgent: where.agent, toMachine: where.machine, toRole: member.role, toTitle: member.title, permission: member.permission, orderId: ids[0] ?? context.orderId, continued: earlier?.id ?? null }, brief);
+    const [app, agent] = where.agent.split("/") as [string, string];
     const toSession = earlier ? this.sessionOfDelegate(earlier) : null;
     const permissionMode = PERMISSION_MODE[member.permission];
     const body = {
@@ -508,8 +572,22 @@ export class DelegationService {
       ...(permissionMode ? { permissionMode } : {}),
       interactive: true,
     };
-    const req = Object.assign(new Request(`http://space.local/api/agents/${app}/${agent}/chat`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }), { params: { app, agent } });
-    const res = await this.opts.chat(req);
+    let res: Response;
+    if (where.machine) {
+      // On the peer: its chat route, through the peer client (the hub's link is the owner there).
+      try {
+        res = await this.opts.machines!.request(where.machine, peerAgentPath(where.agent, "/chat"), { method: "POST", headers: { "content-type": "application/json", accept: "text/event-stream" }, body: JSON.stringify(body), signal: AbortSignal.timeout(60_000) });
+      } catch (e) {
+        const reason = clip(String((e as Error).message ?? e), 300);
+        this.store.note(d.id, "result", `The delegate's turn did not start: ${where.machine} did not answer (${reason})`);
+        this.store.patch(d.id, { state: "error", endedAt: this.now(), delivered: "skipped" });
+        this.changed(d.id);
+        throw new DelegationError(502, `${member.role}'s turn did not start: ${where.machine} did not answer (${reason})`, "machine-offline");
+      }
+    } else {
+      const req = Object.assign(new Request(`http://space.local/api/agents/${app}/${agent}/chat`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }), { params: { app, agent } });
+      res = await this.opts.chat(req);
+    }
     const runId = res.headers.get("x-run-id");
     if (!res.ok || !runId) {
       let reason = await res.text().catch(() => "");
@@ -525,20 +603,22 @@ export class DelegationService {
     await res.body?.cancel().catch(() => {});
     this.store.patch(d.id, { runId, ...(toSession ? { toSession } : {}) });
     this.publish("delegation.started", { id: d.id, ...(d.orderId !== null ? { order: d.orderId } : {}), ...(context.topicId !== null ? { topic: context.topicId } : {}), from: caller.agent, to: member.agent, role: member.role });
-    this.follow(d.id, runId);
+    if (where.machine) this.followRemote(d.id);
+    else this.follow(d.id, runId);
     this.changed(d.id);
     return this.view(d.id)!;
   }
 
   /** `say`: the message added to the delegate's running turn, or the reason it was not. Never queued. */
-  async say(caller: RunCaller, id: number, message: string): Promise<{ ok: true } | { ok: false; reason: "ended" | "unsupported"; error: string }> {
+  async say(caller: RunCaller, id: number, message: string): Promise<SayOutcome> {
     const d = this.own(caller, id);
     const text = typeof message === "string" ? message.trim() : "";
     if (!text) throw new DelegationError(400, "the message is empty");
     if (text.length > MAX_SAY) throw new DelegationError(400, `the message is ${text.length} characters; the limit is ${MAX_SAY}`);
-    let outcome: { ok: true } | { ok: false; reason: "ended" | "unsupported"; error: string };
-    const running = (d.state === "running" || d.state === "waiting") && !!d.runId && this.runs.get(d.runId)?.status === "running";
-    if (!running) outcome = { ok: false, reason: "ended", error: `${delegationLabel(id)} has ended; start again with --continue ${id} to go on in its session` };
+    let outcome: SayOutcome;
+    const running = (d.state === "running" || d.state === "waiting") && !!d.runId && (d.toMachine ? true : this.runs.get(d.runId)?.status === "running");
+    if (d.toMachine && running) outcome = await this.sayRemote(d, text);
+    else if (!running) outcome = { ok: false, reason: "ended", error: `${delegationLabel(id)} has ended; start again with --continue ${id} to go on in its session` };
     else if (!this.runs.steerable(d.runId!)) outcome = { ok: false, reason: "unsupported", error: "the delegate's runtime cannot take a message while it runs; stop it and start again, or wait for the result" };
     else {
       try {
@@ -564,14 +644,42 @@ export class DelegationService {
     return outcome;
   }
 
+  /** A message for a delegate on another machine: its run's steer route there. */
+  private async sayRemote(d: Delegation, text: string): Promise<SayOutcome> {
+    const m = this.opts.machines!;
+    const path = peerAgentPath(d.toAgent, `/runs/${encodeURIComponent(d.runId!)}`);
+    const unreachable = (e: unknown): SayOutcome => ({ ok: false, reason: "unreachable", error: `${d.toMachine} did not answer (${clip(String((e as Error).message ?? e), 200)}); the message was not sent` });
+    let res: Response;
+    try {
+      res = await m.request(d.toMachine, `${path}/steer`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ message: text }), signal: AbortSignal.timeout(15_000) });
+    } catch (e) {
+      return unreachable(e);
+    }
+    if (res.ok) {
+      await res.body?.cancel().catch(() => {});
+      return { ok: true };
+    }
+    const why = await errorText(res);
+    if (res.status !== 409) return res.status === 404 ? { ok: false, reason: "ended", error: `${delegationLabel(d.id)}'s run is no longer on ${d.toMachine}` } : unreachable(new Error(`HTTP ${res.status}: ${why}`));
+    // Refused: still running there (the runtime takes no message now), or it ended just now.
+    let status: string | undefined;
+    try {
+      const r = await m.request(d.toMachine, path, { signal: AbortSignal.timeout(8_000) });
+      status = ((await r.json()) as { run?: { status?: string } }).run?.status;
+    } catch { /* unknown: read as ended below only when it says so */ }
+    return status === "running"
+      ? { ok: false, reason: "unsupported", error: `the delegate's runtime did not take the message now (${why})` }
+      : { ok: false, reason: "ended", error: `${delegationLabel(d.id)} ended just now; start again with --continue ${d.id} to go on in its session` };
+  }
+
   /** `stop`: the delegate's turn is stopped; answers with what it had said up to then. */
-  halt(caller: RunCaller | null, id: number): { stopped: boolean; last: string } {
+  async halt(caller: RunCaller | null, id: number): Promise<{ stopped: boolean; last: string }> {
     const d = this.own(caller, id);
     if ((d.state !== "running" && d.state !== "waiting") || !d.runId) return { stopped: false, last: this.resultText(d) };
-    const last = finalText(this.linesOf(d));
+    const last = finalText(await this.linesOf(d));
     const by = caller ? "delegator" : "person";
     this.stopping.set(id, by);
-    const stopped = this.runs.stop(d.runId);
+    const stopped = d.toMachine ? await this.stopRemote(d) : this.runs.stop(d.runId);
     if (!stopped) this.stopping.delete(id);
     else {
       this.store.note(id, "stop", by === "person" ? "Stopped by the person." : "Stopped by the delegator.", { reason: by });
@@ -581,17 +689,44 @@ export class DelegationService {
     return { stopped, last };
   }
 
+  /** Stop a delegate on another machine; throws when the machine does not answer (the run may go on there). */
+  private async stopRemote(d: Delegation): Promise<boolean> {
+    let res: Response;
+    try {
+      res = await this.opts.machines!.request(d.toMachine, peerAgentPath(d.toAgent, `/runs/${encodeURIComponent(d.runId!)}/stop`), { method: "POST", signal: AbortSignal.timeout(15_000) });
+    } catch (e) {
+      this.stopping.delete(d.id);
+      throw new DelegationError(502, `${d.toMachine} did not answer (${clip(String((e as Error).message ?? e), 200)}); ${delegationLabel(d.id)} may still be running there`, "unreachable");
+    }
+    if (res.status === 404) return false;
+    if (!res.ok) {
+      this.stopping.delete(d.id);
+      throw new DelegationError(502, `${d.toMachine} refused the stop: ${await errorText(res)}`, "unreachable");
+    }
+    return ((await res.json().catch(() => ({}))) as { stopped?: boolean }).stopped === true;
+  }
+
   // ---------------------------------------------------------------- the delegate's run
 
   private sessionOfDelegate(d: Delegation): string | null {
+    if (d.toMachine) return d.toSession;
     return d.toSession ?? (d.runId ? (this.runs.get(d.runId)?.sid ?? null) : null);
   }
 
-  private linesOf(d: Delegation): string[] {
+  private async linesOf(d: Delegation): Promise<string[]> {
     const live = this.followed.get(d.id)?.lines;
     if (live) return live;
     if (!d.runId) return [];
     const lines: string[] = [];
+    if (d.toMachine) {
+      // An ended run on another machine: its events read once from there (nothing when it does not answer).
+      try {
+        const res = await this.opts.machines!.request(d.toMachine, peerAgentPath(d.toAgent, `/runs/${encodeURIComponent(d.runId)}/events`), { headers: { accept: "text/event-stream" }, signal: AbortSignal.timeout(8_000) });
+        if (res.ok && res.body) await readRunEvents(res.body, { onEvent: (_, line) => lines.push(line), onEnd: () => {} }, 8_000);
+        else await res.body?.cancel().catch(() => {});
+      } catch { /* not reachable now */ }
+      return lines;
+    }
     this.runs.subscribe(d.runId, 0, { onEvent: (e) => lines.push(e.line), onEnd: () => {} })?.();
     return lines;
   }
@@ -600,43 +735,51 @@ export class DelegationService {
     return [...this.store.notes(d.id)].reverse().find((n) => n.kind === "result")?.text ?? "";
   }
 
+  /**
+   * One event line of a delegate's run: kept, and what it means for the record (the delegate's
+   * session, a message it read, an approval it waits on). `effects` false: a replayed line whose
+   * effect is recorded already (a remote run read again after a restart), kept for the steps only.
+   */
+  private onLine(id: number, entry: Followed, line: string, effects = true): void {
+    entry.lines.push(line);
+    const kind = /^\s*\{\s*"type"\s*:\s*"(approval_request|approval_resolved|steer|system)"/.exec(line)?.[1];
+    if (!kind) return;
+    let p: { id?: unknown; title?: unknown; tool?: unknown; text?: unknown; subtype?: unknown; session_id?: unknown; questions?: { question?: unknown }[] };
+    try {
+      p = JSON.parse(line) as typeof p;
+    } catch {
+      return;
+    }
+    if (kind === "system") {
+      if (p.subtype === "init" && typeof p.session_id === "string" && !this.store.get(id)?.toSession) this.store.patch(id, { toSession: p.session_id });
+      return;
+    }
+    if (kind === "steer") {
+      if (!effects) return;
+      const text = typeof p.text === "string" ? p.text : "";
+      if (this.store.markRead(id, text)) this.changed(id);
+      else entry.unread.push(text);
+      return;
+    }
+    if (typeof p.id !== "string") return;
+    if (kind === "approval_request") {
+      const asked = typeof p.questions?.[0]?.question === "string" ? p.questions[0].question : typeof p.title === "string" && p.title ? p.title : `Approve ${String(p.tool ?? "a step")}`;
+      entry.asking.set(p.id, clip(String(asked), 200));
+      this.store.patch(id, { state: "waiting" });
+    } else {
+      entry.asking.delete(p.id);
+      if (!entry.asking.size && this.store.get(id)?.state === "waiting") this.store.patch(id, { state: "running" });
+    }
+    this.changed(id);
+  }
+
   private follow(id: number, runId: string): void {
     if (this.followed.has(id)) return;
     // `unread`: messages the runtime reported read before `say` recorded them (Codex answers its steer after the item starts).
-    const entry = { lines: [] as string[], asking: new Map<string, string>(), unread: [] as string[] };
+    const entry: Followed = { lines: [], asking: new Map(), unread: [] };
     this.followed.set(id, entry);
     const off = this.runs.subscribe(runId, 0, {
-      onEvent: (ev) => {
-        entry.lines.push(ev.line);
-        const kind = /^\s*\{\s*"type"\s*:\s*"(approval_request|approval_resolved|steer|system)"/.exec(ev.line)?.[1];
-        if (!kind) return;
-        let p: { id?: unknown; title?: unknown; tool?: unknown; text?: unknown; subtype?: unknown; session_id?: unknown; questions?: { question?: unknown }[] };
-        try {
-          p = JSON.parse(ev.line) as typeof p;
-        } catch {
-          return;
-        }
-        if (kind === "system") {
-          if (p.subtype === "init" && typeof p.session_id === "string" && !this.store.get(id)?.toSession) this.store.patch(id, { toSession: p.session_id });
-          return;
-        }
-        if (kind === "steer") {
-          const text = typeof p.text === "string" ? p.text : "";
-          if (this.store.markRead(id, text)) this.changed(id);
-          else entry.unread.push(text);
-          return;
-        }
-        if (typeof p.id !== "string") return;
-        if (kind === "approval_request") {
-          const asked = typeof p.questions?.[0]?.question === "string" ? p.questions[0].question : typeof p.title === "string" && p.title ? p.title : `Approve ${String(p.tool ?? "a step")}`;
-          entry.asking.set(p.id, clip(String(asked), 200));
-          this.store.patch(id, { state: "waiting" });
-        } else {
-          entry.asking.delete(p.id);
-          if (!entry.asking.size && this.store.get(id)?.state === "waiting") this.store.patch(id, { state: "running" });
-        }
-        this.changed(id);
-      },
+      onEvent: (ev) => this.onLine(id, entry, ev.line),
       onEnd: (run) => {
         const sid = run.sid ?? run.sessionId;
         if (sid) this.store.patch(id, { toSession: sid });
@@ -651,12 +794,126 @@ export class DelegationService {
     }
   }
 
+  /**
+   * Follow a delegate's run on another machine until it ends: its event stream there, from the start
+   * (the steps are rebuilt; what `to_seq` covers is not applied again), read again after the last
+   * seq whenever it drops. While the machine does not answer the delegation stays as it is, with
+   * `unreachable_since`; past `REMOTE_GIVE_UP_MS` it ends `interrupted`. A run the machine no longer
+   * knows ends the same way.
+   */
+  private followRemote(id: number): void {
+    if (this.followed.has(id)) return;
+    const entry: Followed = { lines: [], asking: new Map(), unread: [], abort: new AbortController() };
+    this.followed.set(id, entry);
+    void this.remoteLoop(id, entry).catch((e) => this.log(`${delegationLabel(id)}: following it failed: ${(e as Error).message}`));
+  }
+
+  private async remoteLoop(id: number, entry: Followed): Promise<void> {
+    const machines = this.opts.machines;
+    const giveUp = this.opts.remote?.giveUpMs ?? REMOTE_GIVE_UP_MS;
+    const idleMs = this.opts.remote?.idleMs ?? REMOTE_IDLE_MS;
+    const waits = this.opts.remote?.retryMs ?? REMOTE_RETRY_MS;
+    const signal = entry.abort!.signal;
+    let after = 0;
+    let failures = 0;
+    const end = (state: DelegationState, error: string) => {
+      this.followed.delete(id);
+      this.finish(id, state, error, finalText(entry.lines));
+    };
+    while (!signal.aborted) {
+      const d = this.store.get(id);
+      if (!d || ENDED_STATES.includes(d.state) || !d.runId) {
+        this.followed.delete(id);
+        return;
+      }
+      if (!machines) return end("interrupted", `this Space no longer reaches ${d.toMachine}`);
+      const path = peerAgentPath(d.toAgent, `/runs/${encodeURIComponent(d.runId)}`);
+      let problem = "";
+      try {
+        const res = await machines.request(d.toMachine, `${path}/events?after=${after}`, { headers: { accept: "text/event-stream" }, signal });
+        if (res.status === 404) {
+          await res.body?.cancel().catch(() => {});
+          return end("interrupted", `the delegate's run is no longer on ${d.toMachine}`);
+        }
+        if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}: ${await errorText(res)}`);
+        this.reachable(id);
+        failures = 0;
+        let ended: { status?: string; error?: string } | null = null;
+        const done = await readRunEvents(res.body, {
+          onEvent: (seq, line) => {
+            if (seq <= after) return;
+            after = seq;
+            const fresh = seq > (this.store.get(id)?.toSeq ?? 0);
+            this.onLine(id, entry, line, fresh);
+            if (fresh && /^\s*\{\s*"type"\s*:\s*"steer"/.test(line)) this.store.patch(id, { toSeq: seq });
+          },
+          onEnd: (line) => {
+            try {
+              const ev = JSON.parse(line) as { type?: string; status?: string; error?: string };
+              if (ev.type === "error") ended = { status: ev.status, error: ev.error };
+            } catch { /* not JSON */ }
+          },
+        }, idleMs, signal);
+        if (done) {
+          // How it ended, and its session, from the run's record there; the stream's last line if that does not answer.
+          let run: { status?: string; error?: string | null; sid?: string | null; sessionId?: string | null } | undefined;
+          try {
+            const r = await machines.request(d.toMachine, path, { signal: AbortSignal.timeout(8_000) });
+            if (r.ok) run = ((await r.json()) as { run?: typeof run }).run;
+          } catch { /* the stream said enough */ }
+          const status = run?.status ?? (ended as { status?: string } | null)?.status ?? "done";
+          const sid = run?.sid ?? run?.sessionId;
+          if (sid) this.store.patch(id, { toSession: sid });
+          return end((ENDED_STATES as readonly string[]).includes(status) ? (status as DelegationState) : "error", run?.error ?? (ended as { error?: string } | null)?.error ?? "");
+        }
+        problem = "the event stream ended early";
+      } catch (e) {
+        if (signal.aborted) return;
+        problem = clip(String((e as Error).message ?? e), 200);
+      }
+      // Dropped or not reachable: wait, and read again after the last seq.
+      if (problem !== "the event stream ended early" || failures > 0) this.unreachable(id, problem);
+      const since = this.store.get(id)?.unreachableSince;
+      if (since !== null && since !== undefined && this.now() - since >= giveUp) {
+        return end("interrupted", `${d.toMachine} did not answer for ${Math.round(giveUp / 3_600_000) || "<1"} h (${problem}); the run may have gone on there`);
+      }
+      const wait = waits[Math.min(failures, waits.length - 1)] ?? 1_000;
+      failures++;
+      await new Promise<void>((resolve) => {
+        const t = setTimeout(resolve, wait);
+        signal.addEventListener("abort", () => { clearTimeout(t); resolve(); }, { once: true });
+      });
+    }
+  }
+
+  /** The delegate's machine answers (again). */
+  private reachable(id: number): void {
+    if (this.store.get(id)?.unreachableSince === null) return;
+    this.store.patch(id, { unreachableSince: null });
+    this.log(`${delegationLabel(id)}: its machine answers again`);
+    this.changed(id);
+  }
+
+  /** The delegate's machine does not answer: since when, once. */
+  private unreachable(id: number, why: string): void {
+    const d = this.store.get(id);
+    if (!d || d.unreachableSince !== null) return;
+    this.store.patch(id, { unreachableSince: this.now() });
+    this.log(`${delegationLabel(id)}: ${d.toMachine} does not answer (${why}); it stays running until it does`);
+    this.changed(id);
+  }
+
   /** The delegated run ended: the result is recorded, published, and delivered to the delegator. */
   private finish(id: number, state: DelegationState, error: string, reply: string): void {
     const d = this.store.get(id);
     if (!d || ENDED_STATES.includes(d.state)) return;
     const by = this.stopping.get(id);
     this.stopping.delete(id);
+    const f = this.followed.get(id);
+    if (f?.abort) {
+      f.abort.abort();
+      this.followed.delete(id);
+    }
     const text = clip(reply.trim() || (error ? `(no reply; ${error})` : "(no reply)"), MAX_RESULT);
     this.store.note(id, "result", text, { ...(error && state !== "done" ? { reason: clip(error, 300) } : {}) });
     this.store.patch(id, { state, endedAt: this.now(), ...(by === "delegator" ? { delivered: "skipped" } : {}) });
@@ -668,7 +925,8 @@ export class DelegationService {
   /** The message a result is delivered as: which delegation, how it ended, the reply (trimmed, with where the rest is). */
   private resultMessage(d: Delegation): string {
     const text = this.resultText(d);
-    const where = d.toSession ? `${d.toAgent}, session ${d.toSession}` : d.toAgent;
+    const agent = d.toMachine ? `${d.toAgent} on ${d.toMachine}` : d.toAgent;
+    const where = d.toSession ? `${agent}, session ${d.toSession}` : agent;
     return [
       resultHeader(d.id, d.toRole, d.state),
       `${delegationLabel(d.id)} to ${d.toTitle || d.toRole} ended: ${d.state}. Check the result against your brief; tell the person what was done and what is left.`,
@@ -785,6 +1043,19 @@ export class DelegationService {
   private now(): number {
     return (this.opts.now ?? Date.now)();
   }
+}
+
+/** A followed delegate run: its lines so far, what it waits on, messages read before `say` recorded them, and (another machine's) the stream's abort. */
+type Followed = { lines: string[]; asking: Map<string, string>; unread: string[]; abort?: AbortController };
+
+/** A refusal's `error`, else its status. */
+async function errorText(res: Response): Promise<string> {
+  const text = await res.text().catch(() => "");
+  try {
+    const e = (JSON.parse(text) as { error?: unknown }).error;
+    if (typeof e === "string") return clip(e, 300);
+  } catch { /* text */ }
+  return clip(text || `HTTP ${res.status}`, 300);
 }
 
 function noteView(n: DelegationNote): DelegationNoteView {

@@ -31,7 +31,8 @@ type Settings = { topicDays: number; notify: string };
 type ListView = { topics: TopicView[]; sorting: number; settings: Settings; channels: string[]; full: boolean };
 type Permission = "ask" | "edit" | "full";
 type Member = { role: string; title: string; i18n?: { zh?: { title?: string } }; agent: string; summary: string; model: string | null; permission: Permission; enabled: boolean; builtin: boolean; updatedAt: string };
-type TeamAgent = { id: string; title: string; description: string; builtin?: boolean };
+/** An agent a member may be; a peer's carries its machine, whether it answers, why it cannot be used, and its machine's models. */
+type TeamAgent = { id: string; title: string; description: string; builtin?: boolean; peer?: string; offline?: boolean; unavailable?: string; models?: ModelChoice[] };
 type TeamView = { members: Member[]; options: ModelChoice[]; permissions: Permission[]; agents: TeamAgent[] };
 type Message = { role: "user"; text: string } | { role: "ai"; text: string; steps?: HistoryStep[] };
 
@@ -463,7 +464,11 @@ function MemberRow({ member: m, team, put }: { member: Member; team: TeamView; p
   const saveSummary = () => {
     if (summary.trim() !== m.summary.trim()) void change({ summary });
   };
-  const agentTitle = team.agents.find((a) => a.id === m.agent)?.title;
+  const info = team.agents.find((a) => a.id === m.agent);
+  const agentTitle = info?.title;
+  // A member on another machine takes that machine's models; its permission applies there.
+  const machine = m.agent.split("/").length === 3 ? m.agent.split("/")[0]! : "";
+  const options = machine ? (info?.models ?? []) : team.options;
   return (
     <div className={`orders-member${m.enabled ? "" : " off"}${m.permission === "full" ? " full" : ""}`}>
       <div className="orders-member-head">
@@ -477,15 +482,21 @@ function MemberRow({ member: m, team, put }: { member: Member; team: TeamView; p
           </button>
         )}
       </div>
-      <small className="orders-member-agent">{agentTitle ? `${agentTitle} · ${m.agent}` : m.agent}</small>
+      <small className="orders-member-agent">
+        {agentTitle ? `${agentTitle} · ${m.agent}` : m.agent}
+        {machine && ` · ${t("orders.team.onMachine", { machine })}`}
+        {machine && info?.offline && ` · ${t("orders.team.offline")}`}
+        {machine && !info && ` · ${t("orders.team.gone", { machine })}`}
+      </small>
+      {machine && info?.unavailable && <p className="orders-warn">{info.unavailable}</p>}
       <textarea className="orders-member-summary" rows={2} value={summary} placeholder={t("orders.team.summaryHint")} aria-label={t("orders.team.summary")} onChange={(e) => setSummary(e.target.value)} onBlur={saveSummary} />
       <div className="orders-member-opts">
         <label>
           <span>{t("orders.team.model")}</span>
           <select className="setselect" value={m.model ?? ""} onChange={(e) => void change({ model: e.target.value || null })}>
             <option value="">{t("orders.modelDefault")}</option>
-            {m.model && !team.options.some((o) => o.value === m.model) && <option value={m.model}>{m.model}</option>}
-            {team.options.map((o) => (
+            {m.model && !options.some((o) => o.value === m.model) && <option value={m.model}>{m.model}</option>}
+            {options.map((o) => (
               <option key={o.value} value={o.value} disabled={!!o.unavailable && o.value !== m.model}>
                 {o.value} · {o.model}
               </option>
@@ -512,6 +523,7 @@ function MemberRow({ member: m, team, put }: { member: Member; team: TeamView; p
         )}
       </div>
       {m.permission === "full" && <p className="orders-warn">{t("orders.team.fullWarning", { name: shownTitle })}</p>}
+      {machine && m.permission !== "ask" && <p className="orders-warn">{t("orders.team.peerTrust", { name: shownTitle, machine })}</p>}
     </div>
   );
 }
@@ -547,10 +559,19 @@ function AddMember({ team, put }: { team: TeamView; put: (body: { members?: Memb
         <span>{t("orders.team.add")}</span>
         <select className="setselect" value={agent} onChange={(e) => pick(e.target.value)}>
           <option value="">{t("orders.team.pickAgent")}</option>
-          {choices.map((a) => (
+          {choices.filter((a) => !a.peer).map((a) => (
             <option key={a.id} value={a.id}>
               {a.title} · {a.id}
             </option>
+          ))}
+          {[...new Set(choices.filter((a) => a.peer).map((a) => a.peer!))].map((peer) => (
+            <optgroup key={peer} label={t("orders.team.machineGroup", { machine: peer })}>
+              {choices.filter((a) => a.peer === peer).map((a) => (
+                <option key={a.id} value={a.id} disabled={!!a.offline || !!a.unavailable} title={a.unavailable}>
+                  {a.title} · {a.id}{a.offline ? ` (${t("orders.team.offline")})` : a.unavailable ? ` (${t("orders.team.unavailable")})` : ""}
+                </option>
+              ))}
+            </optgroup>
           ))}
         </select>
       </label>
