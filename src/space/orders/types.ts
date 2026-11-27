@@ -7,8 +7,8 @@
 export const TOPIC_STATES = ["working", "needs-you", "done", "failed"] as const;
 export type TopicState = (typeof TOPIC_STATES)[number];
 
-/** How an order reached its topic: the model's decision, the fallback when the model gave none, or the person. */
-export type RoutedBy = "model" | "fallback" | "person";
+/** How an order reached its topic: the model's decision, the fallback when the model gave none, the person, or an import of the old path (orders/import.ts). */
+export type RoutedBy = "model" | "fallback" | "person" | "import";
 
 export const ORDER_VIA = ["voice", "type", "screenshot", "share", "pick", "paste"] as const;
 export type OrderVia = (typeof ORDER_VIA)[number];

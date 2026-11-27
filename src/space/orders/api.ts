@@ -1,5 +1,6 @@
 import type { DelegationView } from "../agents/delegation-view.ts";
 import type { TeamStore } from "../team/store.ts";
+import { ImportError, importOrders } from "./import.ts";
 import type { OrdersService } from "./service.ts";
 import type { OrdersStore } from "./store.ts";
 import { MAX_IMAGE_BYTES, type Order, OrdersError, type Topic, orderLabel, orderUrl } from "./types.ts";
@@ -12,13 +13,14 @@ import { MAX_IMAGE_BYTES, type Order, OrdersError, type Topic, orderLabel, order
  *   POST   /api/orders                     { text, id?, via?, topic?, image?: { mediaType, data } } a typed order (the page)
  *   GET    /api/orders/settings            { topicDays, notify } and the notify channels
  *   PUT    /api/orders/settings            { topicDays?, notify? }
- *   GET    /api/orders/topics/:id          one topic with its orders
+ *   GET    /api/orders/topics/:id          one topic with its orders (and an imported room's transcript)
  *   PATCH  /api/orders/topics/:id          { title?, archived? }
  *   GET    /api/orders/:id                 one order and its topic (a deep link's target)
  *   DELETE /api/orders/:id                 the order and its screenshot's file
  *   POST   /api/orders/:id/move            { topic } or { title } (a new topic); nothing is started
  *   POST   /api/orders/:id/resend          hand the order to its topic's Director again
  *   GET    /api/orders/:id/image           the screenshot, to the owner only, never cached
+ *   POST   /api/orders/import              { kind: decree | hive, from?, images?, machine?, hiveMachine?, dryRun? } → { report } (import.ts)
  *
  * The capture target `space/order` is not a route here: it is the bus's built-in capability
  * (`captureHandler`), reached through `POST /api/capture/text|image?to=space/order` like any target.
@@ -38,6 +40,8 @@ export type OrdersApiOptions = {
   channels?: () => string[];
   /** The delegations of a Director session (docs/orders.md#delegation), oldest first. */
   delegations?: (session: string) => DelegationView[];
+  /** `POST /api/orders/import` (orders/import.ts): this Space's data directory and name; absent = 404. */
+  imports?: { dataDir: string; spaceName: string; fetch?: typeof fetch };
 };
 
 /** The page's typed order: words, and a pasted picture as base64 (about 4/3 of the picture's cap). */
@@ -137,6 +141,34 @@ export function createOrdersRoutes(opts: OrdersApiOptions): Routes {
       }),
     },
 
+    // The old path's history (docs/orders.md#importing-the-old-path): reads the app's data, adds what is not here.
+    "/api/orders/import": {
+      POST: owner(async (req) => {
+        if (!opts.imports) return error(404, "imports are not available here");
+        const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
+        if (!body || typeof body !== "object") return error(400, "the body must be JSON { kind: decree | hive, from?, images?, machine?, hiveMachine?, dryRun? }");
+        const str = (k: string) => (typeof body[k] === "string" && (body[k] as string).trim() ? (body[k] as string).trim() : undefined);
+        if (body.kind !== "decree" && body.kind !== "hive") return error(400, "kind must be decree or hive");
+        try {
+          const report = await importOrders(store, {
+            kind: body.kind,
+            ...(str("from") ? { from: str("from") } : {}),
+            ...(str("images") ? { images: str("images") } : {}),
+            ...(str("machine") ? { machine: str("machine") } : {}),
+            ...(str("hiveMachine") ? { hiveMachine: str("hiveMachine") } : {}),
+            dryRun: body.dryRun === true,
+            dataDir: opts.imports.dataDir,
+            spaceName: opts.imports.spaceName,
+            ...(opts.imports.fetch ? { fetch: opts.imports.fetch } : {}),
+          });
+          return json({ ok: true, report });
+        } catch (e) {
+          if (e instanceof ImportError) return error(400, e.message);
+          throw e;
+        }
+      }),
+    },
+
     "/api/orders/settings": {
       GET: owner(() => json(settingsView())),
       PUT: owner(async (req) => {
@@ -150,7 +182,8 @@ export function createOrdersRoutes(opts: OrdersApiOptions): Routes {
         const t = store.topic(idOf(req));
         if (!t) return error(404, `unknown topic ${req.params.id}`);
         const orders = store.ofTopic(t.id);
-        return json({ ok: true, topic: listed(t, orders.length), orders: orders.map(orderView), delegations: t.sessionId && opts.delegations ? opts.delegations(t.sessionId) : [], full: service.full(t) });
+        const transcript = store.transcript(t.id);
+        return json({ ok: true, topic: listed(t, orders.length), orders: orders.map(orderView), delegations: t.sessionId && opts.delegations ? opts.delegations(t.sessionId) : [], full: service.full(t), ...(transcript ? { transcript: { source: transcript.source, given: transcript.givenAt !== null, lines: transcript.lines.map((l) => ({ at: new Date(l.at).toISOString(), who: l.who, text: l.text })) } } : {}) });
       }),
       PATCH: owner(async (req) => {
         const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;

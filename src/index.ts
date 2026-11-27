@@ -870,7 +870,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       ["owner", createRouterRoutes({ router })],
       ["owner", createUsageRoutes({ service: usage, knownApp: (app) => Boolean(registry.get(app)), routerKey })],
       ["owner", feedbackRoutes],
-      ["owner", createOrdersRoutes({ service: orders, store: ordersStore, team, callerApp, channels: () => notify.channelViews().map((c) => c.name), delegations: (sid) => delegations.ofSession(sid) })],
+      ["owner", createOrdersRoutes({ service: orders, store: ordersStore, team, callerApp, channels: () => notify.channelViews().map((c) => c.name), delegations: (sid) => delegations.ofSession(sid), imports: { dataDir: ws.data, spaceName: config.name } })],
       ["owner", createTeamRoutes({
         team,
         callerApp,

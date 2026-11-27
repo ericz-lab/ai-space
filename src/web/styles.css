@@ -2442,6 +2442,10 @@ a.wb-tank-cell:hover { background: var(--glass-strong); }
 .orders-convo { display: flex; flex-direction: column; gap: 6px; padding-top: 6px; border-top: 1px solid var(--glass-border); }
 .orders-msg { font-size: 13px; line-height: 1.5; padding: 6px 10px; border-radius: 10px; overflow-wrap: anywhere; }
 .orders-msg.person { align-self: flex-end; max-width: 85%; white-space: pre-wrap; background: var(--glass-strong); }
+.orders-imported { display: flex; flex-direction: column; gap: 6px; padding: 6px 0; border-bottom: 1px solid var(--glass-border); }
+.orders-imported > summary { cursor: pointer; font-size: 13px; color: var(--muted, inherit); }
+.orders-imported[open] { max-height: 60vh; overflow-y: auto; }
+.orders-imported .orders-msg small { display: block; opacity: 0.7; }
 .orders-msg.director { background: var(--glass); }
 .orders-rename { min-width: 0; flex: 1 1 160px; cursor: text; font-family: inherit; }
 /* A topic that waits for the person, or works: a mark beside its state, not only the dot's colour. */

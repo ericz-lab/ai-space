@@ -36,12 +36,33 @@ CREATE TABLE IF NOT EXISTS orders (
 );
 CREATE INDEX IF NOT EXISTS orders_topic ON orders(topic_id, id);
 CREATE TABLE IF NOT EXISTS panel_kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS order_transcripts (
+  topic_id  INTEGER PRIMARY KEY,
+  source    TEXT NOT NULL,
+  lines     TEXT NOT NULL,
+  given_at  INTEGER
+);
 `;
+
+/** After the added columns: an import key is on one row at most (orders/import.ts). */
+const IMPORT_INDEXES = `
+CREATE UNIQUE INDEX IF NOT EXISTS orders_import ON orders(import_key) WHERE import_key IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS order_topics_import ON order_topics(import_key) WHERE import_key IS NOT NULL;
+`;
+
+/** The marker in `run_id` of an imported order: taken already, never dispatched. */
+export const IMPORTED_RUN = "imported";
+
+/** One message of an imported room (hive), as the topic shows it read-only and the first new turn reads it. */
+export type TranscriptLine = { at: number; who: string; text: string };
+export type Transcript = { source: string; lines: TranscriptLine[]; givenAt: number | null };
 
 /** Columns added after the first schema; each is added once to an older table. */
 const ADDED: [table: string, column: string, decl: string][] = [
   ["order_topics", "run_id", "TEXT"],
   ["order_topics", "summary", "TEXT NOT NULL DEFAULT ''"],
+  ["order_topics", "import_key", "TEXT"],
+  ["orders", "import_key", "TEXT"],
 ];
 
 type TopicRow = { id: number; title: string; session_id: string | null; run_id: string | null; created_at: number; last_active_at: number; state: string; summary: string; archived: number };
@@ -64,6 +85,7 @@ export class OrdersStore {
       const columns = db.query<{ name: string }, []>(`PRAGMA table_info(${table})`).all();
       if (!columns.some((c) => c.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${decl}`);
     }
+    db.exec(IMPORT_INDEXES);
   }
 
   // ---------------------------------------------------------------- orders
@@ -201,6 +223,75 @@ export class OrdersStore {
 
   touch(id: number): void {
     this.db.query("UPDATE order_topics SET last_active_at = ? WHERE id = ?").run(this.now(), id);
+  }
+
+  // ---------------------------------------------------------------- imports (orders/import.ts)
+
+  orderByImportKey(key: string): Order | undefined {
+    const row = this.db.query<OrderRow, [string]>("SELECT * FROM orders WHERE import_key = ?").get(key);
+    return row ? orderOf(row) : undefined;
+  }
+
+  topicByImportKey(key: string): Topic | undefined {
+    const row = this.db.query<TopicRow, [string]>("SELECT * FROM order_topics WHERE import_key = ?").get(key);
+    return row ? topicOf(row) : undefined;
+  }
+
+  /** A topic of an old app's: no session, `done`, as old as its activity there. */
+  importTopic(t: { key: string; title: string; createdAt: number; lastActiveAt: number; summary: string }): Topic {
+    return topicOf(
+      this.db
+        .query<TopicRow, [string, number, number, string, string]>("INSERT INTO order_topics (title, created_at, last_active_at, state, summary, import_key) VALUES (?, ?, ?, 'done', ?, ?) RETURNING *")
+        .get(t.title, t.createdAt, t.lastActiveAt, t.summary, t.key)!,
+    );
+  }
+
+  /** An order of an old app's, in its topic, taken already (`IMPORTED_RUN`): nothing dispatches it. */
+  async importOrder(o: { key: string; topicId: number; text: string; via: OrderVia | null; createdAt: number; image?: { bytes: Uint8Array; mime: string } }): Promise<Order> {
+    const path = o.image ? await this.writeImage(o.key, o.image) : null;
+    const row = this.db
+      .query<OrderRow, [string, number, string, string | null, string | null, string | null, number | null, number, string, string]>(
+        "INSERT INTO orders (client_id, topic_id, text, via, image_path, image_mime, image_bytes, created_at, run_id, routed_by, import_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'import', ?) RETURNING *",
+      )
+      .get(`import:${o.key}`, o.topicId, o.text, o.via, path, o.image?.mime ?? null, o.image?.bytes.byteLength ?? null, o.createdAt, IMPORTED_RUN, o.key)!;
+    return orderOf(row);
+  }
+
+  /** An imported order moved to another topic, or given the text and picture of the app it came from. */
+  async patchImported(id: number, p: { topicId?: number; text?: string; image?: { bytes: Uint8Array; mime: string } }): Promise<void> {
+    if (p.topicId !== undefined) this.db.query("UPDATE orders SET topic_id = ? WHERE id = ?").run(p.topicId, id);
+    if (p.text !== undefined) this.db.query("UPDATE orders SET text = ? WHERE id = ?").run(p.text, id);
+    if (p.image) {
+      const key = this.get(id)?.clientId.replace(/^import:/, "") ?? String(id);
+      const path = await this.writeImage(key, p.image);
+      this.db.query("UPDATE orders SET image_path = ?, image_mime = ?, image_bytes = ? WHERE id = ?").run(path, p.image.mime, p.image.bytes.byteLength, id);
+    }
+  }
+
+  private async writeImage(key: string, image: { bytes: Uint8Array; mime: string }): Promise<string> {
+    const path = join(this.imageDir, `import-${key.replace(/[^A-Za-z0-9._-]+/g, "_")}.${EXT[image.mime] ?? "bin"}`);
+    await mkdir(this.imageDir, { recursive: true });
+    await Bun.write(path, image.bytes);
+    return path;
+  }
+
+  setTranscript(topicId: number, source: string, lines: TranscriptLine[]): void {
+    this.db.query("INSERT INTO order_transcripts (topic_id, source, lines) VALUES (?, ?, ?) ON CONFLICT(topic_id) DO UPDATE SET source = excluded.source, lines = excluded.lines").run(topicId, source, JSON.stringify(lines));
+  }
+
+  transcript(topicId: number): Transcript | undefined {
+    const row = this.db.query<{ source: string; lines: string; given_at: number | null }, [number]>("SELECT source, lines, given_at FROM order_transcripts WHERE topic_id = ?").get(topicId);
+    if (!row) return undefined;
+    let lines: TranscriptLine[] = [];
+    try {
+      lines = JSON.parse(row.lines) as TranscriptLine[];
+    } catch { /* unreadable: none */ }
+    return { source: row.source, lines, givenAt: row.given_at };
+  }
+
+  /** The first new turn in the topic was given the transcript. */
+  transcriptGiven(topicId: number): void {
+    this.db.query("UPDATE order_transcripts SET given_at = ? WHERE topic_id = ? AND given_at IS NULL").run(this.now(), topicId);
   }
 
   // ---------------------------------------------------------------- settings

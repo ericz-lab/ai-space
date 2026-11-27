@@ -254,13 +254,14 @@ function TopicDetail({ topic, focusAt, onChanged }: { topic: TopicView; focusAt:
   const [orders, setOrders] = useState<OrderView[] | null>(null);
   const [delegations, setDelegations] = useState<DelegationView[] | null>(null);
   const [messages, setMessages] = useState<Message[] | null>(null);
+  const [imported, setImported] = useState<ImportedTranscript | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [stopping, setStopping] = useState(false);
   const [err, setErr] = useState("");
   const root = useRef<HTMLDivElement>(null);
   const load = () => {
-    getJson<{ orders: OrderView[]; topic?: TopicView; delegations?: DelegationView[] }>(`/api/orders/topics/${topic.id}`)
-      .then((d) => { setOrders(d.orders); setDelegations(d.topic?.delegations ?? d.delegations ?? null); })
+    getJson<{ orders: OrderView[]; topic?: TopicView; delegations?: DelegationView[]; transcript?: ImportedTranscript }>(`/api/orders/topics/${topic.id}`)
+      .then((d) => { setOrders(d.orders); setDelegations(d.topic?.delegations ?? d.delegations ?? null); setImported(d.transcript ?? null); })
       .catch((e) => setErr(String((e as Error).message || e)));
     if (topic.sessionId)
       getJson<{ messages: Message[] }>(`${DIRECTOR_BASE}/sessions/${encodeURIComponent(topic.sessionId)}`)
@@ -302,6 +303,7 @@ function TopicDetail({ topic, focusAt, onChanged }: { topic: TopicView; focusAt:
           ))}
         </div>
       ) : null}
+      {imported && <ImportedView transcript={imported} />}
       {(orders ?? []).map((o) => (
         <div key={o.id} className={`orders-order${o.waiting ? " waiting" : ""}`}>
           <div className="task-meta">
@@ -309,6 +311,7 @@ function TopicDetail({ topic, focusAt, onChanged }: { topic: TopicView; focusAt:
             <span title={dateTime(o.createdAt, lang)}>{relTime(o.createdAt, lang)}</span>
             {o.via && VIA_KEY[o.via] && <span>{t(VIA_KEY[o.via]!)}</span>}
             {o.waiting && <span className="task-on">{t("orders.waiting")}</span>}
+            {o.routedBy === "import" && <span>{t("orders.importedOrder")}</span>}
           </div>
           <div className="inbox-text">{o.text}</div>
           {o.image && (
@@ -378,6 +381,25 @@ function TopicDetail({ topic, focusAt, onChanged }: { topic: TopicView; focusAt:
         </button>
       </div>
     </div>
+  );
+}
+
+/** An imported room's conversation (hive): read-only, folded; the first new turn in the topic was given it. */
+type ImportedTranscript = { source: string; given: boolean; lines: { at: string; who: string; text: string }[] };
+
+function ImportedView({ transcript: tr }: { transcript: ImportedTranscript }) {
+  const { lang, t } = useLang();
+  return (
+    <details className="orders-imported">
+      <summary>{t("orders.imported", { source: tr.source, n: tr.lines.length })}</summary>
+      <p className="task-desc">{t(tr.given ? "orders.importedGiven" : "orders.importedNote")}</p>
+      {tr.lines.map((l, i) => (
+        <div key={i} className={`orders-msg${l.who === "person" ? " person" : ""}`}>
+          <small title={dateTime(l.at, lang)}>{l.who === "person" ? t("orders.importedPerson") : l.who} · {relTime(l.at, lang)}</small>
+          <div className="inbox-text">{l.text}</div>
+        </div>
+      ))}
+    </details>
   );
 }
 

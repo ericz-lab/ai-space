@@ -2,6 +2,7 @@ import { RunStateError, type RunInfo, type RunRegistry } from "../agents/runs.ts
 import type { ChatImage } from "../agents/images.ts";
 import { finalText } from "../feedback/prompt.ts";
 import { PERMISSION_MODE, type TeamStore } from "../team/store.ts";
+import { transcriptPrompt } from "./import.ts";
 import { DIRECTOR_AGENT, turnMessage } from "./prompt.ts";
 import { type Candidate, SORT_SYSTEM, fallbackTitle, parseDecision, sortPrompt } from "./sort.ts";
 import { lastWords, parseStatus, stripStatus } from "./status.ts";
@@ -86,6 +87,8 @@ export type SubmitInput = {
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
+/** The chat route's longest message (agents/api.ts MAX_MESSAGE). */
+const MAX_TURN_MESSAGE = 20_000;
 
 export class OrdersService {
   private readonly store: OrdersStore;
@@ -421,8 +424,11 @@ export class OrdersService {
       }
       const director = this.opts.team.director();
       const permissionMode = PERMISSION_MODE[director.permission];
+      // An imported topic's first turn: the old room's conversation goes before the orders, trimmed to what the chat takes.
+      const imported = topic.sessionId ? undefined : this.store.transcript(topicId);
+      const room = imported && imported.givenAt === null && imported.lines.length ? Math.min(12_000, MAX_TURN_MESSAGE - message.length - 400) : 0;
       const body = {
-        message,
+        message: room >= 1_000 ? `${transcriptPrompt(imported!.source, imported!.lines, room)}\n\n${message}` : message,
         ...(images.length ? { images } : {}),
         ...(topic.sessionId ? { sessionId: topic.sessionId } : director.model ? { model: director.model } : {}),
         ...(permissionMode ? { permissionMode } : {}),
@@ -450,6 +456,7 @@ export class OrdersService {
       }
       await res.body?.cancel().catch(() => {});
       this.store.taken(waiting.map((o) => o.id), runId);
+      if (room >= 1_000) this.store.transcriptGiven(topicId);
       this.store.patchTopic(topicId, { runId });
       this.store.touch(topicId);
       this.setState(topicId, "working");

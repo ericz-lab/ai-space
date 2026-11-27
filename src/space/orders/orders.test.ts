@@ -204,6 +204,30 @@ describe("topic decision", () => {
     for (let i = 1; i <= 20; i++) expect(big).toContain(`Topic ${i}:`);
   });
 
+  test("an imported topic's first new turn is given the old room's conversation, once; imported orders never wait", async () => {
+    const h = harness();
+    const topic = h.store.importTopic({ key: "hive/2", title: "Notes header", createdAt: 1, lastActiveAt: 2, summary: "Fixed." });
+    await h.store.importOrder({ key: "decree/mac/1", topicId: topic.id, text: "Fix the header", via: "voice", createdAt: 1 });
+    h.store.setTranscript(topic.id, "hive · Notes header", [{ at: 1, who: "person", text: "Fix the header" }, { at: 2, who: "engineer", text: "Fixed: it no longer overlaps." }]);
+    await h.service.idle();
+    expect(h.bodies).toEqual([]);
+    await h.service.submit({ clientId: uuid(), text: "and the footer", topicId: topic.id });
+    await h.service.idle();
+    const first = String(h.bodies[0]!.message);
+    expect(first).toStartWith("〔This topic was imported from hive · Notes header.");
+    expect(first).toContain("engineer: Fixed: it no longer overlaps.");
+    expect(first).toContain("and the footer");
+    expect(first.split("Fix the header").length).toBe(2); // in the transcript only: the imported order is not handed over again
+    expect(h.bodies[0]!.sessionId).toBeUndefined();
+    expect(h.store.transcript(topic.id)!.givenAt).toBeNumber();
+    h.turns[0]!.end(`Done.\n${statusLine("done")}`, "sid-imported");
+    await h.service.idle();
+    await h.service.submit({ clientId: uuid(), text: "and the logo", topicId: topic.id });
+    await h.service.idle();
+    expect(h.bodies[1]).toMatchObject({ sessionId: "sid-imported" });
+    expect(String(h.bodies[1]!.message)).not.toContain("imported from");
+  });
+
   test("continue, new, an answer to the waiting topic, and the fallbacks", async () => {
     let answer: string | undefined | Promise<string | undefined> = '{"new": "Weather"}';
     const h = harness({ decide: () => answer });
