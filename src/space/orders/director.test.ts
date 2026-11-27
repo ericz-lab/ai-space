@@ -96,7 +96,7 @@ const said = (id: string) => linesOf(id).flatMap((l) => (l.type === "assistant" 
 describe("the Director on the chat route", () => {
   test("is listed beside the Space Assistant and the Fix Engineer", async () => {
     const r = (await (await fetch(`${base}/api/agents`)).json()) as { agents: { id: string; title: string; i18n?: { zh?: { title?: string } } }[] };
-    expect(r.agents.find((a) => a.id === "space/director")).toMatchObject({ title: "Director", i18n: { zh: { title: "总管" } } });
+    expect(r.agents.find((a) => a.id === "space/director")).toMatchObject({ title: "Director", i18n: { zh: { title: "总监" } } });
   });
 
   test("an order starts an interactive turn with its words and screenshot; the team's permission sets the mode", async () => {

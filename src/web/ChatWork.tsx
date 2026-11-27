@@ -177,7 +177,7 @@ export function DelegationStep({ delegation, id, follow, onChanged }: { delegati
     {brief && <Fold label={t("dlg.brief")} text={brief.text} />}
     {says.map((n) => <div key={n.seq} className="chat-steer chat-dlg-say"><b>↳ {t("dlg.added")}</b> {n.text} <SayFate note={n} /></div>)}
     {d.asking.length > 0 && <div className="chat-dlg-asking">{d.asking.map((a, i) => <p key={i}>{a}</p>)}</div>}
-    {follow && run.steps.length > 0 && <div className="chat-dlg-run"><RunSteps steps={run.steps} live={run.live} onAnswer={(rid, decision, answers) => postAnswer(base!, d.to.runId!, rid, decision, answers).then((e) => (e === null ? null : t("chat.approval.failed", { error: e })))} /></div>}
+    {follow && run.steps.length > 0 && <div className="chat-dlg-run"><RunSteps steps={run.steps} live={run.live} steerBy={d.from.agent === "space/director" ? t("dlg.director") : d.from.agent} onAnswer={(rid, decision, answers) => postAnswer(base!, d.to.runId!, rid, decision, answers).then((e) => (e === null ? null : t("chat.approval.failed", { error: e })))} /></div>}
     {stop && <p className="chat-dlg-note">{t(stop.reason === "person" ? "dlg.stoppedByYou" : stop.reason === "delegator" ? "dlg.stoppedByDelegator" : "dlg.stopNote")}{stop.text ? ` · ${stop.text}` : ""}</p>}
     {result && <Fold label={t("dlg.result")} text={result.text} markdown />}
     {d.delivered === "held" && <p className="chat-dlg-note">{t("dlg.held")}</p>}
@@ -211,9 +211,10 @@ export function DelegationResult({ text }: { text: string }) {
 /**
  * A followed run's steps drawn as the chat draws a live reply: tool calls stacked, text as
  * Markdown (through `text` when the caller hides part of it), approvals and questions answered
- * through `onAnswer` while it runs, notices, added messages, delegations.
+ * through `onAnswer` while it runs, notices, added messages, delegations. An added message is the
+ * person's ("You") unless `steerBy` names who added it (a delegate's run: its delegator).
  */
-export function RunSteps({ steps, live, onAnswer, text = (s) => s }: { steps: ChatStep[]; live: boolean; onAnswer?: (requestId: string, decision: "allow" | "deny", answers?: Record<string, string[]>) => Promise<string | null>; text?: (s: string) => string }) {
+export function RunSteps({ steps, live, onAnswer, text = (s) => s, steerBy }: { steps: ChatStep[]; live: boolean; onAnswer?: (requestId: string, decision: "allow" | "deny", answers?: Record<string, string[]>) => Promise<string | null>; text?: (s: string) => string; steerBy?: string }) {
   const { t } = useLang();
   const answer = live && onAnswer ? onAnswer : undefined;
   return <>{stepGroups(steps).map((step) => Array.isArray(step) ?
@@ -224,7 +225,7 @@ export function RunSteps({ steps, live, onAnswer, text = (s) => s }: { steps: Ch
     step.kind === "notice" ? <NoticeStep key={step.id} step={step} /> :
     step.kind === "delegation" ? <DelegationStep key={step.id} delegation={step.delegation} id={step.delegationId} /> :
     parseResultHeader(step.text) ? <DelegationResult key={step.id} text={step.text} /> :
-    <div key={step.id} className="chat-steer"><b>↳ {t("chat.steerYou")}</b> {step.text}</div>,
+    <div key={step.id} className="chat-steer"><b>↳ {steerBy ?? t("chat.steerYou")}</b> {step.text}</div>,
   )}</>;
 }
 
