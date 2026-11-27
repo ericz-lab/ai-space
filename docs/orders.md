@@ -1,6 +1,6 @@
 # Orders: a spoken order handled by a built-in Director, who may delegate
 
-Status: phases 1 and 2 ([Phases](#phases)) are implemented as [Phase 1 as built](#phase-1-as-built) and [Phase 2 as built](#phase-2-as-built) describe: the capture target, the orders store, topics, the Director, the `space/order.*` events, the notification and the Orders page (phase 1); the team table and its page section, the built-in Engineer, delegation with its run token, routes, CLI, record, result delivery, chat step and `space/delegation.*` events (phase 2), all on one machine. Importing the old path (phase 3) and delegation across machines (phase 4) are still a proposal. It builds on [panel.md](panel.md) (agent runs, sessions, approvals, steering), [runtimes.md](runtimes.md) (what a live turn can do per runtime), [events.md](events.md#capture) (capture targets), [macos-desktop.md](macos-desktop.md#voice-input) (the capture key and its screenshot) and [peers.md](peers.md) (agents on other machines). It replaces a path that today runs through three apps: `decree`, `hive` and `agent-org`. The person's decisions of 2026-11-27 are built in: one Director per Space, a built-in Engineer and a built-in team (the roster `agent-org` holds today), events on the bus, a permission setting per team member up to full permission, and a notification when a topic waits for the person.
+Status: phases 1 and 2 ([Phases](#phases)) are implemented as [Phase 1 as built](#phase-1-as-built) and [Phase 2 as built](#phase-2-as-built) describe: the capture target, the orders store, topics, the Director, the `space/order.*` events, the notification and the Orders page (phase 1); the team table and its page section, the built-in Engineer, delegation with its run token, routes, CLI, record, result delivery, chat step and `space/delegation.*` events (phase 2); delegation to an agent on another machine (phase 4) and the import of the old path's history (the import half of phase 3), as [Cross-machine and import as built](#cross-machine-and-import-as-built) describes. Retiring the old path (switching the client's default target, removing `decree`, `hive`'s order pieces and `agent-org`) is still a proposal. It builds on [panel.md](panel.md) (agent runs, sessions, approvals, steering), [runtimes.md](runtimes.md) (what a live turn can do per runtime), [events.md](events.md#capture) (capture targets), [macos-desktop.md](macos-desktop.md#voice-input) (the capture key and its screenshot) and [peers.md](peers.md) (agents on other machines). It replaces a path that today runs through three apps: `decree`, `hive` and `agent-org`. The person's decisions of 2026-11-27 are built in: one Director per Space, a built-in Engineer and a built-in team (the roster `agent-org` holds today), events on the bus, a permission setting per team member up to full permission, and a notification when a topic waits for the person.
 
 ## Problem
 
@@ -269,11 +269,19 @@ A delegation appears in the delegator's conversation as a step of a new run even
 
 An approval the delegate asks for is shown on the Orders page under its delegation and answered by the person through the delegate's own approval route. The Director does not answer approvals for others.
 
-### On another machine (phase 2)
+### On another machine
 
-`to` may name `<peer>/<app>/<agent>`. Start, steer, stop and events then go through the peer routes the hub already has (`/api/peers/:peer/agents/…`); the record keeps `to_machine` and the remote run id, and the result is fetched from the peer's run events.
+A member may be `<peer>/<app>/<agent>`: an agent of a peer this Space lists. That is a legacy `SPACE_PEER_<NAME>` peer (its hub token reaches every peer route), or a connection peer whose other Space grants this one `panel` and `agents` (or full trust) on the connection ([peers.md](peers.md#adding-a-peer)). The team routes check the member against the peers' last snapshots; the Team section offers the peers' agents grouped by machine, shows an offline machine's agents but does not let them be added, and leaves out a peer's own Director.
 
-This needs the delegator's machine to list the delegate's machine as a peer. Peering is directional: in today's setup the hub lists the Mac, and the Mac does not list the hub. For a Director on the Mac to delegate to an agent on the hub, the two must list each other (each grants the other the `agents` scope), which also merges their panels. Phase 1 therefore keeps the team on the Director's machine.
+Start, `say`, `stop` and `show` go to the peer's `/api/peer/agents/:app/:agent/…` routes through the hub-side peer client, in process (not over HTTP to this Space itself). The record keeps `to_machine` and the peer's run id. The run is followed on the peer's run events stream: its `system` event gives the delegate's session, `steer` marks a message read, `approval_request` / `approval_resolved` set `waiting` and back, its last text is the result, and its `{"type":"done"}` ends it; the run's status and session then come from `GET …/runs/:id` there. When the stream drops it is read again with `after=<last seq>`; a stream silent for 70 s (the peer's heartbeat is every 20 s) counts as dropped. The brief's screenshot travels in the chat body (at most 4 MiB as stored, well under the peer chat route's 5 MB per image and 15 MB body; over a connection the body is streamed in 32 KiB chunks). The member's permission mode and model apply there: the model is one of that machine's chat models, `runtime/tier` without a machine prefix ([model-machines.md](model-machines.md)).
+
+The person answers the delegate's approvals and questions on the Orders page, through `/api/peers/:peer/agents/…/runs/:id/approvals/:rid`, and stops it there through `POST /api/delegations/:id/stop`.
+
+**Unreachable.** While the peer does not answer, the delegation stays `running` (or `waiting`) with `unreachableSince`, shown as "machine unreachable since …"; it is settled when the peer answers again, with how the run ended there. After **24 h** without an answer it ends `interrupted` and that result is delivered: longer than a run's own 60-minute timeout, so a machine that comes back within the day still reports the real end, and short enough that a lost machine does not hold a delegation for ever. A run the peer no longer knows (404, e.g. pushed out of its last 200 finished runs) ends `interrupted` too. A `say` while it is unreachable is not taken (`reason: "unreachable"`).
+
+**Restart.** After a restart of the delegator's Space a remote delegation in flight is followed again from the start of the peer's stream: the steps are rebuilt, a message already marked read (`to_seq`, the last event whose effect is recorded) is not marked again, and a run that ended while this Space was down is settled at once.
+
+**Direction.** Peering is directional ([peers.md](peers.md#delegation-to-a-peers-agents)): a Director delegates only to agents of machines its own Space lists. In today's setup david (the hub) lists the Mac and the Mac does not list david. For the Mac's Director to delegate to an agent on david, the Mac must list david too (see [Cross-machine and import as built](#cross-machine-and-import-as-built) for the steps). Then each panel also shows the other's apps and agents (the Mac's panel gains david's; david's already has the Mac's). A refusal names what is missing: `machine-unlisted` (this Space lists no such peer: how to add one), `machine-no-agents` (the connection's other side does not grant `agents`: the `space connection scopes` command to run there), `machine-offline` (the peer does not answer: since when).
 
 ## Trust
 
@@ -282,6 +290,7 @@ This needs the delegator's machine to list the delegate's machine as a peer. Pee
 - The run token reaches only its own session's delegations. A delegate cannot delegate.
 - Events tell every app on the Space that an order exists, its first words and how it ended. They never carry the picture. An app that should not see them is not subscribed; the bus has no per-event secrecy today.
 - Full permission removes the approval step for that member. It is off by default and shown wherever it is in force.
+- A member on another machine runs there with the permission its row here says. The peer takes this Space's link (the hub token, or the connection) as its owner, so **a Space that lists a peer can run that peer's agents with any permission mode, Full included**: listing a peer, and granting a connection `agents`, is trusting the listing Space as much as the peer's own owner. The Team section says so when a peer member is given Edit or Full.
 
 ## Failure modes considered
 
@@ -295,6 +304,10 @@ This needs the delegator's machine to list the delegate's machine as a peer. Pee
 | the delegator's runtime cannot take a message while it runs | the result starts a new turn when the current one ends |
 | a delegate and its delegator hand work back and forth | stops at 4 result-triggered turns; the person is asked |
 | the delegate's agent was removed or is not on the team | `start` is refused with the reason |
+| the delegate's machine is not listed, does not grant `agents`, or is down | `start` is refused, naming what is missing |
+| the delegate's event stream drops | read again after the last seq; nothing twice, nothing lost |
+| the delegate's machine is unreachable when its run ends | `running` with "unreachable since"; settled when it answers; `interrupted` after 24 h |
+| this Space restarts with a remote delegate in flight | followed again from the peer's stream; settled if it ended meanwhile |
 
 ## What goes away
 
@@ -310,7 +323,7 @@ This needs the delegator's machine to list the delegate's machine as a peer. Pee
 
 1. **Orders, one machine.** The capture target, the store, topics, `space/director` with its permission setting, the page, the `order.*` events, the notification. An order reaches a Director turn in two steps. The Director can answer, research, record a to-do and ask; it cannot delegate yet.
 2. **Team and delegation, one machine.** The team table and its page section, `space/engineer`, the run token, routes, CLI, the record, result delivery, the chat step, the `delegation.*` events.
-3. **Retire the old path.** Import `decree`'s orders and `hive`'s topic rooms (text and pictures; not the agents' sessions), switch the client's default target, remove the pieces listed above, `agent-org` included.
+3. **Retire the old path.** Import `decree`'s orders and `hive`'s topic rooms (text and pictures; not the agents' sessions; built, see [Importing the old path](#importing-the-old-path)), switch the client's default target, remove the pieces listed above, `agent-org` included (not built).
 4. **Delegation across machines**, once two Spaces that list each other is a supported setup for this.
 
 Each phase is usable alone and is tested before the next: unit tests for the stores, the topic decision (with a stand-in model) and the delegation rules; route tests with the stand-in runtimes in `src/space/runtimes/testing-live.ts`; and steering and stop checked against the real Claude Code and Codex CLIs, as [runtimes.md](runtimes.md) records for the existing routes.
@@ -360,6 +373,34 @@ Only real Claude Code and Codex runs can confirm (the tests use the stand-ins of
 - stop: that stopping a delegate leaves its session resumable for `--continue`, and that `last` is what it had said;
 - delivery as a new turn: a resumed Director session that answers a `〔Delegation #N …〕` message and, when it delegates again, gets a fresh token;
 - that the Engineer follows an app's AGENTS.md and deploy channel, and the Director the brief format and the one-follow-up rule: prompt behaviour no test can show.
+
+## Importing the old path
+
+`space orders import decree [--from <db path or URL>] [--machine NAME]` and `space orders import hive --from <db path> [--hive-machine NAME]` ([cli.md](cli.md#commands)), both with `--images DIR` and `--dry-run`. The Space reads the source; a path is on the Space's machine. The command only reads the two apps and only adds to the orders store: it deletes, moves and uninstalls nothing there. It prints a count per kind (topics, orders, pictures, transcripts, matched, already imported) and every item it skipped with the reason.
+
+- **decree**: each decree becomes an order (its text, source as `via`, time and screenshot file). By default it reads `<workspace>/data/decree/main.db` and the `images/` beside it; `--from` takes another path, or decree's URL (`GET /api/decrees`, the newest 500, and `POST /api/decrees/image` per picture). The db is copied (with its `-wal` and `-shm`) to a temporary directory and the copy is read, so a running decree is never written to.
+- **hive**: each topic room (`rooms.topic_of` set) becomes a topic with the room's decrees as its orders and the room's messages as a read-only **transcript** shown on the topic. The agents' sessions are not imported: the topic has no session, the first new order in it starts a fresh one, and that first turn is given the transcript first (the newest messages within 12,000 characters and what the chat route's 20,000 leave). hive runs on david, so `--from` takes a copy of its db file with `decree-images/` beside it (or `--images`); a URL is refused. Take the copy with SQLite's own backup, so the WAL is included: `ssh david 'sqlite3 <hive data dir>/hive.db ".backup /tmp/hive-copy.db"'`, then `scp david:/tmp/hive-copy.db /tmp/hive/hive.db` and `scp -r david:<hive data dir>/decree-images /tmp/hive/` (the data dir is hive's `SPACE_APP_DATA_DIR`, normally `~/.ai-space/data/hive`).
+- **Matching**: an order's import key is `decree/<machine>/<decree id>`, the machine as hive names it (hive's `decrees.peer`; for a decree taken on hive's own machine, `--hive-machine`). decree's own import uses `--machine`, by default this Space's `SPACE_NAME`. A decree in both apps is one order: in hive's topic, with decree's text and picture, whichever import runs first. A topic's key is `hive/<room id>`. Re-running adds nothing.
+- Decrees in no topic room (decree-only ones, and hive's inbox) go into one topic, **Imported decrees**. Imported orders are taken already (`run_id` = `imported`, `routed_by` = `import`): nothing dispatches or sorts them. Imported topics are `done`, not archived, as old as their last activity; ones older than the look-back window simply fall outside sorting.
+
+## Cross-machine and import as built
+
+Code: `src/space/agents/delegations.ts` (the remote follower, say, stop, restart), `delegations-remote.ts` (the interface and the event-stream reader), `src/space/peers/delegates.ts` (which machines, over the peer hub), `src/space/team/api.ts` (peer members), `src/web/Orders.tsx` and `ChatWork.tsx` (Team section, step), `src/space/orders/import.ts`, `src/cli/orders.ts`. Tests: `src/space/agents/delegations-peer.test.ts` (two Spaces: start, steer, stop, result, approvals through the peer route, a dropped stream, the peer offline at the end, the 24 h bound, restart, refusals), `src/space/orders/import.test.ts`, `src/cli/orders.test.ts`. Where it differs from the sections above or from what was proposed, this is what runs:
+
+- **Calls go to `/api/peer/…`, not `/api/peers/…`.** The service talks to the peer client directly; the hub's `/api/peers/:peer/agents/…` routes are what the page uses for approvals and following.
+- **The model is checked against the peer's snapshot.** A peer member's model must be one of the `modelOptions` the peer's last snapshot gives for that agent; changing a member's agent resets its model to the default.
+- **A peer's Director cannot be a member**, and an offline machine's agent cannot be added (one already on the team stays).
+- **A start while the peer does not answer** but is not yet known down (fewer than two failed snapshots) is tried and recorded as an `error` delegation (`machine-offline`, 502); a known-down peer is refused before anything is recorded (503).
+- **`show` of an ended remote delegation** reads the peer's stream once for the tail; it is empty when the peer does not answer.
+- **The stop route answers 502** when the peer does not answer; the delegation then stays as it is.
+- **The steered message's label**: in a delegation's followed run, a message the Director added is labelled with the delegator (Director / 总管), not "You".
+- **hive is imported from a file only**, not its URL (hive's API has no listing of rooms with their messages). decree's URL mode reads the newest 500 decrees.
+- **Inbox decrees** of hive go to the Imported decrees topic, like decree-only ones.
+- **The import runs in the Space** (`POST /api/orders/import`, the owner's), so `--from` is a path on the Space's machine.
+
+What the operator configures so that the Mac's Director can delegate to an agent on david (today the Mac is david's connection peer and does not list david): nothing new on the Mac's side of the link. The Mac already has its outgoing connection to david, and there is one connection per pair of Spaces; what is missing is david's grant to the Mac on it. On david, find its connection to the Mac (`space connection ls`) and run `space connection scopes <that id> --scopes panel,agents` (add any scope it already grants the Mac to the list, or `--full-trust on`). Within a catalogue round (30 s) the Mac lists david as a connection peer under david's `SPACE_NAME` (`space peer ls` on the Mac); the Mac's panel then also shows david's apps and agents. On the Mac's Orders page add the member (Team → add → On david → e.g. `david/space/engineer`), pick its model from david's list and its permission; Edit or Full there is trusting the Mac as much as david's owner. Peering itself is unchanged; the legacy alternative is `SPACE_PEER_DAVID=<david's URL>` with `SPACE_PEER_DAVID_TOKEN=<david's SPACE_HUB_TOKEN>` in the Mac's `.env` ([peers.md](peers.md#configuration)).
+
+Only real machines can confirm: a delegate run on another machine under the real CLIs (Claude Code reading a steered message there, Codex's steer), the stream over a package connection's channel dropping and resuming through Cloudflare and the network between them, a peer going away for real (sleep, network loss) while a delegate runs, the Mac's Director's turns choosing a peer member from the roster, and the imports on the real data (decree's 11 orders on the Mac, as a copy shows; hive's rooms on david).
 
 ## Decided
 
