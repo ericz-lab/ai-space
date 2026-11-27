@@ -44,7 +44,7 @@ export const SEED: Omit<TeamMember, "updatedAt">[] = [
   {
     role: DIRECTOR_ROLE,
     title: "Director",
-    i18n: { zh: { title: "总监" } },
+    i18n: { zh: { title: "总管" } },
     agent: "space/director",
     summary: "Takes every order: answers, looks things up, records to-dos, delegates to the team and asks the person when an order needs more.",
     model: null,
@@ -99,8 +99,6 @@ export class TeamStore {
     for (const m of SEED) seed.run(m.role, m.title, JSON.stringify(m.i18n), m.agent, m.summary, m.model, m.permission, m.enabled ? 1 : 0, m.builtin ? 1 : 0, this.now());
     // Phase 1 seeded the Director with a summary that said it does not delegate; an untouched one follows the seed.
     db.query("UPDATE team_members SET summary = ? WHERE role = ? AND summary = ?").run(SEED[0]!.summary, DIRECTOR_ROLE, "Takes every order: answers, looks things up, records to-dos and asks the person when an order needs more.");
-    // The Director's Chinese title was seeded as 总管; an untouched one follows the seed (总监).
-    db.query("UPDATE team_members SET i18n = ? WHERE role = ? AND i18n = ?").run(JSON.stringify(SEED[0]!.i18n), DIRECTOR_ROLE, JSON.stringify({ zh: { title: "总管" } }));
   }
 
   list(): TeamMember[] {

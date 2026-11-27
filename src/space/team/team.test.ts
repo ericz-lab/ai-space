@@ -39,15 +39,6 @@ describe("the team", () => {
     expect(new TeamStore(db).get("engineer")).toMatchObject({ permission: "full", summary: "mine" });
   });
 
-  test("a Director row seeded with the title 总管 becomes 总监, unless the person changed it", () => {
-    const db = new Database(":memory:");
-    new TeamStore(db);
-    db.query("UPDATE team_members SET i18n = ? WHERE role = 'director'").run(JSON.stringify({ zh: { title: "总管" } }));
-    expect(new TeamStore(db).director().i18n).toEqual({ zh: { title: "总监" } });
-    db.query("UPDATE team_members SET i18n = ? WHERE role = 'director'").run(JSON.stringify({ zh: { title: "大总管" } }));
-    expect(new TeamStore(db).director().i18n).toEqual({ zh: { title: "大总管" } });
-  });
-
   test("a phase-1 Director row gets the summary that mentions delegation, unless the person changed it", () => {
     const db = new Database(":memory:");
     db.exec("CREATE TABLE team_members (role TEXT PRIMARY KEY, title TEXT NOT NULL, i18n TEXT NOT NULL DEFAULT '{}', agent TEXT NOT NULL, summary TEXT NOT NULL DEFAULT '', model TEXT, permission TEXT NOT NULL DEFAULT 'ask', enabled INTEGER NOT NULL DEFAULT 1, builtin INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL)");
