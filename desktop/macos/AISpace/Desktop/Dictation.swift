@@ -5,7 +5,7 @@ import Combine
 import SwiftUI
 
 /// Voice input in any app (docs/macos-desktop.md#voice-input): holding fn (FnKey) records, the
-/// words show live in a capsule at the bottom of the screen (LiveVoice), and on release the text
+/// words show live in a large overlay above the bottom of the screen (LiveVoice, DictationHUD), and on release the text
 /// goes once into whatever field has the keyboard, through the clipboard and a paste
 /// (DictationRules). What the clipboard held comes back afterwards. Provisional text is never typed
 /// into the field and corrected: that cannot be done reliably across apps.
@@ -37,6 +37,7 @@ final class Dictation {
     init(model: AppModel) {
         self.model = model
         live.$state.combineLatest(live.$text).sink { [weak self] state, text in self?.hud.follow(state, text: text) }.store(in: &watchers)
+        live.$level.sink { [weak self] level in self?.hud.level(level) }.store(in: &watchers)
         live.$error.sink { [weak self] error in
             guard let self, let error else { return }
             // Asked again next time: the Space may have lost its voice since it said it had one.
@@ -52,12 +53,9 @@ final class Dictation {
         self.destination = destination
         choosing = true
         released = false
-        // Before the capsule shows, which is also left out of the picture by its window.
+        // Before the overlay shows, which is also left out of the picture by its window.
         shot = takeShot(destination)
-        hud.attached = false
-        hud.space = (model.selected ?? model.store.defaultConnection)?.name
-        hud.hint = DictationRules.listeningHint(destination)
-        hud.follow(.starting, text: "")
+        hud.begin(destination, space: (model.selected ?? model.store.defaultConnection)?.name)
         Task {
             await start(destination)
             choosing = false
@@ -103,6 +101,7 @@ final class Dictation {
                 hud.note(DictationRules.noTargetNote(space: c.name))
                 return
             }
+            hud.target = target.displayTitle()
             // A target that takes words only never gets the picture: it is dropped here.
             if !CaptureShotRules.takesImage(target) { shot = nil }
             if let shot = self.shot {
@@ -131,7 +130,7 @@ final class Dictation {
         let title = target.displayTitle()
         let id = UUID()
         sending = true
-        hud.sending(DictationRules.tail(text))
+        hud.sending(text)
         Task {
             defer { sending = false }
             // Taken long before the words are in; one still on its way is waited for briefly only.
@@ -166,9 +165,9 @@ final class Dictation {
             if let failure {
                 // Not transient: this is the only copy of what was said (the words; never the picture).
                 write(text, to: NSPasteboard.general, transient: false)
-                hud.note(DictationRules.failedNote(title: title, reason: failure))
+                hud.note(DictationRules.failedNote(title: title, reason: failure), clipboard: true)
             } else {
-                hud.note(CaptureShotRules.sentNote(title: title, label: answer?.label, shot: route == .image), done: true)
+                hud.kept(label: answer?.label, text: text, shot: route == .image)
             }
         }
     }
@@ -203,12 +202,12 @@ final class Dictation {
             if !NSApp.sendAction(#selector(NSText.paste(_:)), to: nil, from: nil) {
                 delivery = .clipboardOnly
                 write(text, to: board, transient: false)
-                hud.note(String(localized: "The text is on the clipboard. Press ⌘V to paste it."))
+                hud.note(String(localized: "The text is on the clipboard. Press ⌘V to paste it."), clipboard: true)
             }
         case .systemPaste:
             postCommandV()
         case .clipboardOnly:
-            hud.note(String(localized: "The text is on the clipboard. Press ⌘V to paste it. To have it go in by itself, allow AI Space in System Settings → Privacy & Security → Accessibility."))
+            hud.note(String(localized: "The text is on the clipboard. Press ⌘V to paste it. To have it go in by itself, allow AI Space in System Settings → Privacy & Security → Accessibility."), clipboard: true)
         }
         let written = board.changeCount
         DispatchQueue.main.asyncAfter(deadline: .now() + DictationRules.restoreDelay) {
@@ -245,165 +244,6 @@ final class Dictation {
             let event = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_V), keyDown: down)
             event?.flags = .maskCommand
             event?.post(tap: .cghidEventTap)
-        }
-    }
-}
-
-/// The capsule at the bottom of the screen that says what voice input is doing. It never takes
-/// the keyboard or the pointer, so the field being dictated into keeps both.
-@MainActor
-final class DictationHUD {
-    enum Look: Equatable {
-        case listening(String)
-        /// Released: what was heard so far, until the final text is in; or a note on its way to an app.
-        case transcribing(String)
-        /// `done`: a note was kept by its app, rather than something gone wrong.
-        case note(String, done: Bool)
-    }
-
-    private var look: Look?
-    /// The name of the Space that listens, shown small beside what is heard.
-    var space: String?
-    /// What it says while it listens and nothing is heard yet: which key to let go of.
-    var hint = DictationRules.listeningHint(.field)
-    private lazy var panel: NSPanel = makePanel()
-    private var host: NSHostingView<DictationHUDView>?
-    /// Counts what was shown, so a note's timer hides only that note.
-    private var shown = 0
-
-    func follow(_ state: LiveVoice.State, text: String) {
-        switch state {
-        case .starting, .recording:
-            show(.listening(text.isEmpty ? hint : DictationRules.tail(DictationRules.tidy(text))))
-        case .finishing: show(.transcribing(DictationRules.tail(DictationRules.tidy(text))))
-        case .idle:
-            // A note just shown (a failed transcription) outlives the end of the recording.
-            if case .note = look { return }
-            hide()
-        }
-    }
-
-    /// A note on its way to its app, after the recording ended.
-    func sending(_ text: String) { show(.transcribing(text)) }
-
-    /// A screenshot goes with the note: a small mark beside the words while it listens and sends.
-    var attached = false {
-        didSet {
-            guard attached != oldValue, let look else { return }
-            if case .note = look { return }
-            show(look)
-        }
-    }
-
-    /// The capsule's window, left out of the screenshot.
-    var windowNumber: Int { panel.windowNumber }
-
-    func note(_ text: String, done: Bool = false) {
-        show(.note(text, done: done))
-        let mine = shown
-        DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
-            guard let self, self.shown == mine else { return }
-            self.hide()
-        }
-    }
-
-    private func show(_ look: Look) {
-        shown += 1
-        self.look = look
-        let panel = self.panel
-        guard let host else { return }
-        // Set, not observed: the size below must be the new look's, measured now.
-        host.rootView = DictationHUDView(look: look, space: space, attached: attached)
-        host.layoutSubtreeIfNeeded()
-        let size = host.fittingSize
-        let pointer = NSEvent.mouseLocation
-        let screen = NSScreen.screens.first { NSMouseInRect(pointer, $0.frame, false) } ?? NSScreen.main
-        guard let visible = screen?.visibleFrame else { return }
-        panel.setFrame(NSRect(x: visible.midX - size.width / 2, y: visible.minY + 72, width: size.width, height: size.height), display: true)
-        panel.orderFrontRegardless()
-    }
-
-    private func hide() {
-        shown += 1
-        look = nil
-        panel.orderOut(nil)
-    }
-
-    private func makePanel() -> NSPanel {
-        let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 240, height: 40),
-                            styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-        panel.level = .statusBar
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle, .stationary]
-        panel.isOpaque = false
-        panel.backgroundColor = .clear
-        panel.hasShadow = true
-        panel.hidesOnDeactivate = false
-        panel.isReleasedWhenClosed = false
-        panel.animationBehavior = .none
-        panel.isExcludedFromWindowsMenu = true
-        panel.ignoresMouseEvents = true
-        let host = NSHostingView(rootView: DictationHUDView(look: nil, space: nil, attached: false))
-        panel.contentView = host
-        self.host = host
-        return panel
-    }
-}
-
-struct DictationHUDView: View {
-    let look: DictationHUD.Look?
-    let space: String?
-    /// A screenshot goes with the note.
-    let attached: Bool
-
-    var body: some View {
-        HStack(spacing: 8) {
-            switch look {
-            case .listening(let text):
-                Image(systemName: "mic.fill").foregroundStyle(Theme.danger).symbolEffect(.pulse, isActive: true)
-                Text(verbatim: text).lineLimit(3).fixedSize(horizontal: false, vertical: true)
-                screenshotMark
-                listener
-            case .transcribing(let text):
-                ProgressView().controlSize(.small)
-                if text.isEmpty { Text("Transcribing…") }
-                else { Text(verbatim: text).lineLimit(3).fixedSize(horizontal: false, vertical: true).foregroundStyle(.secondary) }
-                screenshotMark
-                listener
-            case .note(let text, let done):
-                Image(systemName: done ? "checkmark.circle.fill" : "mic.slash").foregroundStyle(done ? Theme.success : Color.secondary)
-                Text(verbatim: text).fixedSize(horizontal: false, vertical: true)
-            case nil:
-                EmptyView()
-            }
-        }
-        .font(.callout)
-        .foregroundStyle(Theme.text)
-        .frame(maxWidth: 420)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(Color.primary.opacity(0.14), lineWidth: 1))
-        .padding(4)
-        .accessibilityElement(children: .combine)
-    }
-
-    /// What leaves the Mac besides the words: the screenshot of the display.
-    @ViewBuilder private var screenshotMark: some View {
-        if attached {
-            Label("Screenshot", systemImage: "camera.viewfinder").font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                .padding(.horizontal, 6).padding(.vertical, 2)
-                .background(Color.primary.opacity(0.08), in: Capsule())
-                .accessibilityLabel(Text("A screenshot goes with it"))
-        }
-    }
-
-    /// Which Space hears it: the one chosen at the top left of the main window.
-    @ViewBuilder private var listener: some View {
-        if let space {
-            Text(verbatim: space).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                .padding(.horizontal, 6).padding(.vertical, 2)
-                .background(Color.primary.opacity(0.08), in: Capsule())
-                .accessibilityLabel(Text("Listening with \(space)"))
         }
     }
 }
