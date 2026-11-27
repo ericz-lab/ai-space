@@ -2215,11 +2215,10 @@ a.wb-tank-cell:hover { background: var(--glass-strong); }
 /* A coal card in the light scheme takes the light accent undeepened: deepening only loses contrast there. */
 :root[data-widget-style="mono"]:not([data-theme="dark"]) .widgets > .widget:nth-child(even) { --c-mix: 100%; --c-on: #000000; }
 :root[data-widget-style="mono"][data-theme="dark"] .widgets > .widget:nth-child(even) { --c-mix: 85%; }
-/* Black or white on the accent by its luminance (WCAG's Y is xyz-d65's y): the crossing is at 0.179. */
-@supports (color: color(from red xyz-d65 clamp(0, (0.179 - y) * 1e6, 1) y z)) {
-  :root[data-widget-style="mono"] .widget {
-    --on-accent: color(from var(--accent) xyz-d65 clamp(0, (0.179 - y) * 1e6, 0.9505) clamp(0, (0.179 - y) * 1e6, 1) clamp(0, (0.179 - y) * 1e6, 1.089));
-  }
+/* Black or white on the accent by its luminance (WCAG's Y is xyz-d65's y): the crossing is at 0.179.
+   The feature test lives in JS (markRelColorMath in mono-accent.ts sets data-rel-color-math): Bun's CSS parser rejects channel math in an @supports condition. */
+:root[data-widget-style="mono"][data-rel-color-math] .widget {
+  --on-accent: color(from var(--accent) xyz-d65 clamp(0, (0.179 - y) * 1e6, 0.9505) clamp(0, (0.179 - y) * 1e6, 1) clamp(0, (0.179 - y) * 1e6, 1.089));
 }
 :root[data-widget-style="mono"] .widgets.editing .widget { outline-color: color-mix(in srgb, var(--m-ink) 28%, transparent); }
 

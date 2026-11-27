@@ -4,11 +4,14 @@ import { startDeviceUsage } from "./device-usage.ts";
 import App from "./App.tsx";
 import { type AuthState, SIGNED_OUT, SignIn, loadAuth, safeNext, watchSignOut } from "./Auth.tsx";
 import { LOCALE, LangContext, loadLang } from "./i18n.ts";
+import { markRelColorMath } from "./mono-accent.ts";
 import { initAppearance } from "./theme.ts";
 
 // The saved appearance is applied before the first render; index.html's inline script has
 // already painted it from the boot record, so this confirms it and starts listening.
 initAppearance();
+// Before the first render too, so a mono card never shows the fallback mark first.
+markRelColorMath();
 watchSignOut();
 
 /** The root owns the page language (saved preference, else the browser's) and provides it; see docs/i18n.md. */

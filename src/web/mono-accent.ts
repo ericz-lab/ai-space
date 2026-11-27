@@ -61,3 +61,21 @@ export function monoAccent(themeAccent: string, surface: MonoSurface): { accent:
   const accent = deepen(themeAccent, MONO_MIX[surface]);
   return { accent, on: monoOn(accent), contrast: contrast(accent, MONO_SURFACES[surface].card) };
 }
+
+/**
+ * The mark on a mono card's accent fill is black or white in css too, by relative-colour math on
+ * the deepened accent (styles.css, "Black or white on the accent"). Whether the browser can do
+ * that math is tested here, not in an `@supports` condition: Bun's CSS parser, which bundles the
+ * panel, rejects channel math there and fails the whole page. Without the attribute the card's
+ * fixed `--c-on` stays.
+ */
+export const REL_COLOR_MATH_ATTR = "data-rel-color-math";
+export const REL_COLOR_MATH_TEST = { property: "color", value: "color(from red xyz-d65 clamp(0, (0.179 - y) * 1e6, 1) y z)" } as const;
+
+/** Sets `data-rel-color-math` on <html> when the browser computes relative-colour math; a no-op without `CSS.supports`. */
+export function markRelColorMath(root: { setAttribute(name: string, value: string): void } | undefined = globalThis.document?.documentElement): boolean {
+  const css = (globalThis as { CSS?: { supports?: (property: string, value: string) => boolean } }).CSS;
+  const ok = !!root && typeof css?.supports === "function" && css.supports(REL_COLOR_MATH_TEST.property, REL_COLOR_MATH_TEST.value);
+  if (ok) root.setAttribute(REL_COLOR_MATH_ATTR, "");
+  return ok;
+}

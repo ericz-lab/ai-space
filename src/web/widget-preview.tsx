@@ -7,6 +7,7 @@ import { WidgetFeed, type WidgetView } from "../space/panel/widgets.ts";
 import { LayoutStore, orderBy, withLayout } from "../space/panel/layout.ts";
 import type { WidgetInfo } from "./api.ts";
 import { translate } from "./i18n.ts";
+import { REL_COLOR_MATH_ATTR, REL_COLOR_MATH_TEST } from "./mono-accent.ts";
 import { PreviewSources, liveCards, previewCards } from "./widget-preview-fixtures.ts";
 import { accentVars, type PreviewData, PreviewApp, presetAccents, previewAccent } from "./widget-preview-app.tsx";
 
@@ -110,6 +111,7 @@ export async function previewPage(url: URL, preview = previewFeed(), layout?: La
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>ai-space widget preview</title>
+  <script>${relColorMathScript()}</script>
   <link rel="stylesheet" href="/styles.css">
   <link rel="stylesheet" href="/preview.css">
   <style>:root { --widget-alpha: ${opacity / 100}; }</style>
@@ -161,6 +163,15 @@ export async function previewPage(url: URL, preview = previewFeed(), layout?: La
   </script>
 </body>
 </html>`;
+}
+
+/**
+ * markRelColorMath (mono-accent.ts) as an inline script, run in <head> before the stylesheets so
+ * the mark on a mono accent fill never flashes; the same attribute and test string.
+ */
+export function relColorMathScript(): string {
+  const { property, value } = REL_COLOR_MATH_TEST;
+  return `if (window.CSS && CSS.supports && CSS.supports(${JSON.stringify(property)}, ${JSON.stringify(value)})) document.documentElement.setAttribute(${JSON.stringify(REL_COLOR_MATH_ATTR)}, '');`;
 }
 
 /** A rounded square in the card's colour with its short text, as the preview's app icons. */
