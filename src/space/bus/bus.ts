@@ -94,6 +94,9 @@ export class CallError extends Error {
 
 export type AppCapabilities = { app: string; provides: Capability[]; publishes: EventPublication[]; consumes: EventConsumption[] };
 
+/** A capability ai-space answers itself (`syncBuiltin`): the request as the app's service would get it. */
+export type InProcessHandler = (req: Request) => Promise<Response>;
+
 export class Bus {
   private readonly store: BusStore;
   private readonly events: BusOptions["events"];
@@ -104,6 +107,8 @@ export class Bus {
   private readonly log: (message: string) => void;
   private readonly onDead?: BusOptions["onDead"];
   private readonly specs = new Map<string, { events: EventsSpec; provides: Capability[] }>();
+  /** Capabilities answered in process, by `<app>/<name>`: ai-space's own (docs/events.md#events-of-ai-space-itself). */
+  private readonly inProcess = new Map<string, InProcessHandler>();
   private readonly listeners = new Map<string, Set<StreamListener>>();
   /** Per app or consumer key: how to end each open stream (revoke, rotate). */
   private readonly closers = new Map<string, Set<() => void>>();
@@ -157,8 +162,19 @@ export class Bus {
     }
   }
 
+  /**
+   * ai-space's own entry in the catalogue, under the reserved name `space`: the events it publishes
+   * and the capabilities it answers in process (no service port). It is listed, delivered, called
+   * and mirrored to a hub like an app's.
+   */
+  syncBuiltin(app: string, spec: AppBusSpec, handlers: Record<string, InProcessHandler>): void {
+    this.syncApp(app, spec);
+    for (const [name, handler] of Object.entries(handlers)) this.inProcess.set(`${app}/${name}`, handler);
+  }
+
   forget(app: string): void {
     this.specs.delete(app);
+    for (const key of [...this.inProcess.keys()]) if (key.startsWith(`${app}/`)) this.inProcess.delete(key);
   }
 
   apps(): string[] {
@@ -478,6 +494,8 @@ export class Bus {
     const cap = this.capability(app, name);
     if (!cap) throw new CallError(404, this.specs.has(app) ? `${app} does not provide "${name}"` : `unknown app: ${app}`);
     if (cap.callers && !cap.callers.includes(caller)) throw new CallError(403, `${app}/${name} does not accept calls from ${caller}`);
+    const own = this.inProcess.get(`${app}/${name}`);
+    if (own) return this.callInProcess(own, caller, app, cap, req);
     const port = this.servicePort(app);
     const appFetch = this.appFetch?.(app);
     if (!port && !appFetch) throw new CallError(503, `${app} has no running service to call`);
@@ -514,6 +532,41 @@ export class Bus {
     this.log(`call ${caller} → ${app}/${name}: ${res.status} in ${rec.durationMs}ms`);
     const contentType = res.headers.get("content-type") ?? undefined;
     return { status: res.status, ...(contentType ? { contentType } : {}), body, record: rec };
+  }
+
+  /** A call ai-space answers itself: the same headers, timeout and record as one to an app's service. */
+  private async callInProcess(handler: InProcessHandler, caller: string, app: string, cap: Capability, req: CallRequest): Promise<CallResult> {
+    const startedAt = this.now();
+    const record = (status: number, ok: boolean, error?: string): CallRecord =>
+      this.store.addCall({ caller, app, capability: cap.name, status, ok, durationMs: Math.max(0, this.now() - startedAt), ...(error ? { error } : {}), at: startedAt });
+    const signals = [AbortSignal.timeout(cap.timeoutMs), ...(req.signal ? [req.signal] : [])];
+    const signal = signals.length === 1 ? signals[0]! : AbortSignal.any(signals);
+    let status: number;
+    let contentType: string | undefined;
+    let body: ArrayBuffer;
+    try {
+      const request = new Request(`http://space.local${cap.path}`, {
+        method: cap.method,
+        headers: { ...(req.contentType ? { "content-type": req.contentType } : {}), ...(req.accept ? { accept: req.accept } : {}), "x-space-caller": caller, "x-space-capability": cap.name },
+        ...(req.body !== undefined && req.body !== null && cap.method !== "GET" ? { body: req.body } : {}),
+        signal,
+      });
+      const aborted = new Promise<never>((_, reject) => signal.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "TimeoutError" })), { once: true }));
+      const res = await Promise.race([handler(request), aborted]);
+      status = res.status;
+      contentType = res.headers.get("content-type") ?? undefined;
+      body = await res.arrayBuffer();
+    } catch (err) {
+      const timedOut = (err as Error).name === "TimeoutError" || signal.aborted;
+      const error = timedOut ? `no answer within ${Math.round(cap.timeoutMs / 1000)}s` : `failed: ${(err as Error).message ?? String(err)}`;
+      const rec = record(timedOut ? 0 : 500, false, error);
+      this.log(`call ${caller} → ${app}/${cap.name}: ${error}`);
+      throw Object.assign(new CallError(timedOut ? 504 : 500, error), { record: rec });
+    }
+    const ok = status >= 200 && status <= 299;
+    const rec = record(status, ok, ok ? undefined : String(status));
+    this.log(`call ${caller} → ${app}/${cap.name}: ${status} in ${rec.durationMs}ms (in process)`);
+    return { status, ...(contentType ? { contentType } : {}), body, record: rec };
   }
 }
 
