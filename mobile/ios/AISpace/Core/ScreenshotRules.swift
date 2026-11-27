@@ -64,6 +64,8 @@ enum ScreenshotRules {
         var peer: String?
         let title: String
         var i18n: I18n?
+        /// What it takes (`image`, `text` or both); absent from a Space older than the text kind.
+        var kinds: [String]?
 
         func displayTitle(lang: String = Lang.current) -> String { Lang.pick(title, i18n, \.title, lang: lang) }
     }

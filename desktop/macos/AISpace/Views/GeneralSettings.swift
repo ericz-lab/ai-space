@@ -1,3 +1,4 @@
+import AppKit
 import ApplicationServices
 import SwiftUI
 
@@ -9,6 +10,8 @@ struct GeneralSettings: View {
     /// The Space's places for a spoken note (`GET /api/capture`, `textTargets`); nil until read.
     @State private var captureTargets: [ScreenshotRules.Target]?
     @State private var captureTargetsFailed = false
+    /// Screen Recording is granted, for the screenshot with a note; read again while it is missing.
+    @State private var screenGranted = ScreenShot.granted
 
     /// The Space that transcribes, and so the one whose apps get a note.
     private var listening: Connection? { model.selected ?? store.defaultConnection }
@@ -46,11 +49,27 @@ struct GeneralSettings: View {
             Toggle("Hold right ⌥ to capture", isOn: $prefs.voiceCapture)
                 .onChange(of: prefs.voiceCapture) { _, on in
                     if on, !AXIsProcessTrusted() { AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": true] as CFDictionary) }
+                    if on, prefs.voiceCaptureScreenshot { askForScreen() }
                 }
             Text("Hold the right ⌥ key in any app and say something: when you let go, the words are sent to an app of the Space as a note, and typed nowhere. A tap, or ⌥ with another key, works as before. Seeing the key in other apps needs AI Space allowed in System Settings → Privacy & Security → Accessibility.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             if prefs.voiceCapture, let space = listening {
                 captureDestination(space)
+            }
+            if prefs.voiceCapture {
+                Toggle("Attach a screenshot", isOn: $prefs.voiceCaptureScreenshot)
+                    .onChange(of: prefs.voiceCaptureScreenshot) { _, on in if on { askForScreen() } }
+                Text("A picture of the screen you are working on goes with the words, when the app takes pictures, in case what you say is about what is on it.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                if prefs.voiceCaptureScreenshot, !screenGranted {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("AI Space is not allowed to record the screen yet, so notes go without a screenshot.")
+                            .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        Spacer()
+                        Button("Open Screen Recording Settings") { NSWorkspace.shared.open(ScreenShot.settingsURL) }
+                            .controlSize(.small)
+                    }
+                }
             }
             if prefs.voiceCapture, !AXIsProcessTrusted() {
                 Text("AI Space is not allowed under Accessibility yet, so right ⌥ is seen only while AI Space is in front.")
@@ -90,6 +109,7 @@ struct GeneralSettings: View {
         .formStyle(.grouped)
         .frame(width: 520)
         .task(id: "\(prefs.voiceCapture) \(listening?.id.uuidString ?? "")") { await loadCaptureTargets() }
+        .task(id: prefs.voiceCapture && prefs.voiceCaptureScreenshot) { await watchScreenGrant() }
     }
 
     /// Where right ⌥ sends a note: a picker when the Space has several places, else what there is.
@@ -111,6 +131,23 @@ struct GeneralSettings: View {
                     ForEach(targets) { Text(verbatim: $0.displayTitle()).tag($0.id) }
                 }
             }
+        }
+    }
+
+    /// The system's Screen Recording prompt, once; after that the button opens the pane.
+    private func askForScreen() {
+        screenGranted = ScreenShot.granted
+        guard !screenGranted, !prefs.screenshotAsked else { return }
+        prefs.screenshotAsked = true
+        ScreenShot.ask()
+    }
+
+    /// The grant may be given in System Settings while this is open.
+    private func watchScreenGrant() async {
+        screenGranted = ScreenShot.granted
+        while !screenGranted, prefs.voiceCapture, prefs.voiceCaptureScreenshot, !Task.isCancelled {
+            try? await Task.sleep(for: .seconds(2))
+            screenGranted = ScreenShot.granted
         }
     }
 
