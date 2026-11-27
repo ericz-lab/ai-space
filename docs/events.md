@@ -175,6 +175,18 @@ The orders ([orders.md](orders.md#events)). None carries the picture or a path t
 
 `order.issued` comes before the order's `order.sorted`. A repeated client id publishes nothing.
 
+### delegation.started, delegation.noted, delegation.ended
+
+Delegation ([orders.md](orders.md#delegation)). None carries the brief, an added message or the result in full.
+
+| event | when | data |
+| --- | --- | --- |
+| `space/delegation.started` | an agent's turn delegated work to a team member | `{ id, order?, topic?, from, to, role }` (`from` and `to` are agents, `role` the member's) |
+| `space/delegation.noted` | a message was added to it, or it was stopped | `{ id, kind: say \| stop, taken? }` (`taken`: the runtime accepted the message) |
+| `space/delegation.ended` | the delegate's turn ended | `{ id, state: done \| error \| stopped \| timeout \| interrupted, summary }` (`summary`: at most 600 characters of the result) |
+
+A delegation interrupted by a restart publishes its `delegation.ended` at the next start.
+
 ### peer.renamed
 
 `space/peer.renamed` `{ from, to, id }`: the operator renamed a peer of this hub (`space peer rename`, [peers.md](peers.md#renaming-a-peer)). By the time it is published, ai-space has already moved its own state (the `.env` line, snapshots, cursors, layout, ledgers); `id` is the peer's stable id (`/api/peers` shows it too), `null` when the peer is an older ai-space that sends none.
