@@ -116,9 +116,9 @@ test("the panel's own tiles: every one of them, with the panel's pictures and pa
   // The picture shipped for a tile is the file the Space serves for it by default.
   expect(Object.fromEntries(Object.entries(BUILTIN_ART).map(([name, file]) => [name, `/${file}`]))).toEqual({ ...BUILTIN_ICONS });
   for (const file of Object.values(BUILTIN_ART)) expect(await Bun.file(`${import.meta.dir}/../../../../src/web/public/${file}`).exists()).toBe(true);
-  expect(BUILTIN_NAMES.map(builtinArt)).toEqual(["store.svg", "inbox.svg", "shortcuts.svg", "terminal.svg", undefined, "settings.svg"]);
+  expect(BUILTIN_NAMES.map(builtinArt)).toEqual(["store.svg", "orders.svg", "inbox.svg", "shortcuts.svg", "terminal.svg", undefined, "settings.svg"]);
   // Inbox, Terminal and Settings are this client's own views; the others are pages of the panel.
-  expect(BUILTIN_NAMES.map(builtinPage)).toEqual(["/?page=store", undefined, "/?page=shortcuts", undefined, "/", undefined]);
+  expect(BUILTIN_NAMES.map(builtinPage)).toEqual(["/?page=store", "/?page=orders", undefined, "/?page=shortcuts", undefined, "/", undefined]);
   // A screen copied from the panel keeps its App Store tile.
   expect(copyPanel([{ id: HOME, name: "", items: BUILTINS.map((b) => `builtin:${b}`) }])[0]!.items).toEqual(BUILTINS.map((b) => `builtin:${b}`));
 });

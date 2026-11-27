@@ -474,7 +474,7 @@ export class MainWindow {
     else if (name === "terminal") this.show("terminal");
     else if (name === "settings") showSettings(this.window, this.model);
     // The web panel, and the App Store and Shortcuts, which only the panel has: its page of that name.
-    else if (space && page) this.openPanel(space, page, name === "store" ? tw("store.title") : name === "shortcuts" ? t("shortcuts") : undefined);
+    else if (space && page) this.openPanel(space, page, name === "store" ? tw("store.title") : name === "orders" ? tw("orders.title") : name === "shortcuts" ? t("shortcuts") : undefined);
   }
 
   /** A link: another app's tab, a page of the Space, or the browser. */

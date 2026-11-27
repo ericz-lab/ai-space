@@ -2410,3 +2410,41 @@ a.wb-tank-cell:hover { background: var(--glass-strong); }
   :root[data-widget-style="mono"] :is(.wb-btn, .wa-btn, .wa-send, .wb-copy, .widget-refresh) { transition: none; }
 }
 /* ======================================== end of mono ======================================== */
+
+/* Orders (docs/orders.md#the-page): topics in the Inbox's rows, a box for a typed order, the Director's conversation. */
+.orders { width: min(640px, 94vw); }
+.orders-warn { margin: 0; padding: 8px 16px; font-size: 12px; color: var(--tone-warning); border-bottom: 1px solid var(--glass-border); }
+.orders-settings .orders-warn { padding: 0; border: none; }
+.orders-settings { display: flex; flex-direction: column; gap: 8px; padding: 10px 16px; border-bottom: 1px solid var(--glass-border); font-size: 13px; }
+.orders-settings label { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.orders-settings .setselect { max-width: 100%; min-width: 0; }
+.orders-settings .task-desc { margin: 0; }
+.orders-box { padding: 10px 16px; border-bottom: 1px solid var(--glass-border); }
+.orders-box.inside { padding: 8px 0; border: none; }
+.orders-input { display: flex; align-items: flex-end; gap: 6px; }
+.orders-input textarea {
+  flex: 1; min-width: 0; resize: vertical; padding: 8px 10px; border-radius: 10px; font: inherit; font-size: 13px;
+  background: var(--glass); color: var(--text); border: 1px solid var(--glass-border);
+}
+.orders-input textarea:focus-visible { outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 35%, transparent); }
+.orders-thumb { display: inline-flex; align-items: flex-start; gap: 4px; margin-top: 6px; }
+.orders-thumb img { max-height: 72px; max-width: 160px; border-radius: 8px; border: 1px solid var(--glass-border); }
+.orders-err { margin: 6px 0 0; font-size: 12px; color: var(--danger); }
+.orders-failed { color: var(--tone-negative); }
+.orders-row .status { width: 8px; flex: none; }
+.orders-detail { display: flex; flex-direction: column; gap: 10px; }
+.orders-asking { padding: 8px 10px; border-radius: 10px; font-size: 13px; background: color-mix(in srgb, var(--warning) 12%, transparent); border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent); }
+.orders-order { display: flex; flex-direction: column; gap: 4px; }
+.orders-order.waiting .inbox-text { opacity: 0.75; }
+.orders-order-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.orders-order-actions .inbox-pill { font-size: 11px; }
+.orders-shot { display: block; max-width: 100%; max-height: 220px; border-radius: 8px; border: 1px solid var(--glass-border); }
+.orders-convo { display: flex; flex-direction: column; gap: 6px; padding-top: 6px; border-top: 1px solid var(--glass-border); }
+.orders-msg { font-size: 13px; line-height: 1.5; padding: 6px 10px; border-radius: 10px; overflow-wrap: anywhere; }
+.orders-msg.person { align-self: flex-end; max-width: 85%; white-space: pre-wrap; background: var(--glass-strong); }
+.orders-msg.director { background: var(--glass); }
+.orders-rename { min-width: 0; flex: 1 1 160px; cursor: text; font-family: inherit; }
+@media (max-width: 600px) {
+  .orders-detail { padding-left: 8px; }
+  .orders-settings label { flex-direction: column; align-items: stretch; }
+}

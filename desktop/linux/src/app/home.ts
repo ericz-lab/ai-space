@@ -49,6 +49,7 @@ export type HomeActions = {
  */
 const BUILTINS: { name: Builtin; icon: string; label: () => string }[] = [
   { name: "store", icon: "system-software-install-symbolic", label: () => tw("store.title") },
+  { name: "orders", icon: "document-edit-symbolic", label: () => tw("orders.title") },
   { name: "inbox", icon: "mail-unread-symbolic", label: () => t("inbox") },
   { name: "shortcuts", icon: "starred-symbolic", label: () => t("shortcuts") },
   { name: "terminal", icon: "utilities-terminal-symbolic", label: () => t("terminal") },

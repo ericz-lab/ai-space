@@ -132,7 +132,7 @@ export type GatewaySpeechInfo = {
 };
 
 /** Icons of the panel's own tiles; `/api/apps` returns the active icon pack's over these. */
-export const BUILTIN_ICONS = { store: "/store.svg", inbox: "/inbox.svg", shortcuts: "/shortcuts.svg", terminal: "/terminal.svg", settings: "/settings.svg" };
+export const BUILTIN_ICONS = { store: "/store.svg", orders: "/orders.svg", inbox: "/inbox.svg", shortcuts: "/shortcuts.svg", terminal: "/terminal.svg", settings: "/settings.svg" };
 export type BuiltinIcons = typeof BUILTIN_ICONS;
 
 export type AppInfo = {

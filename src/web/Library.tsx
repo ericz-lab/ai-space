@@ -22,6 +22,7 @@ const FILTERS: { value: Filter; label: Key }[] = [
 ];
 const BUILTIN_TEXT: Record<Builtin, { title: Key; blurb: Key; fallback: string }> = {
   store: { title: "store.title", blurb: "store.blurb", fallback: "🛍️" },
+  orders: { title: "orders.title", blurb: "orders.blurb", fallback: "📜" },
   inbox: { title: "inbox.title", blurb: "inbox.blurb", fallback: "📥" },
   shortcuts: { title: "sc.title", blurb: "sc.blurb", fallback: "⚡" },
   terminal: { title: "term.title", blurb: "term.blurb", fallback: "⌨️" },

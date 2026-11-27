@@ -17,6 +17,7 @@ import Activity from "./Activity.tsx";
 import AppModels from "./AppModels.tsx";
 import Events from "./Events.tsx";
 import Inbox from "./Inbox.tsx";
+import Orders from "./Orders.tsx";
 import Library, { libraryEntries } from "./Library.tsx";
 import Omnibox from "./Omnibox.tsx";
 import Shortcuts from "./Shortcuts.tsx";
@@ -54,7 +55,7 @@ import { type Align, type LayoutWrite, applyWrite } from "./widget-layout.ts";
 type Prefs = { noPop?: boolean; noPet?: boolean; noWidget?: boolean; petBuiltin?: string };
 
 /** Floating panels over the page; one at a time. */
-type Panel = "settings" | "chat" | "tasks" | "terminal" | "inbox" | "shortcuts" | "store";
+type Panel = "settings" | "chat" | "tasks" | "terminal" | "inbox" | "shortcuts" | "store" | "orders";
 
 /**
  * What is behind the page: the three glow blobs, or the preset's backdrop (theme.ts) framed from
@@ -197,6 +198,9 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
   const openTerminal = () => setPanel("terminal");
   const openInbox = () => setPanel("inbox");
   const openShortcuts = () => setPanel("shortcuts");
+  const openOrders = () => setPanel("orders");
+  // The order a link (`#order=<id>`) names, for the Orders window to open its topic.
+  const [orderFocus, setOrderFocus] = useState<{ order: number; at: number } | null>(null);
   const openStore = () => setPanel("store");
   /** The App Store as a tile opens it: a page in a new tab, over the page in the phone app. */
   const showStore = () => {
@@ -265,6 +269,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
     if (!link) return;
     if (link.open !== "chat") {
       setLink(null);
+      if (link.open === "orders" && link.order) setOrderFocus({ order: link.order, at: Date.now() });
       setPanel(link.open);
       return;
     }
@@ -737,7 +742,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
   // The details under the pointer: shown on the library's tiles (Home, left of the screens), not on
   // the screens' own tiles, and not in add mode.
   const builtinText = (b: Builtin) =>
-    b === "store" ? { title: t("store.title"), blurb: t("store.blurb"), fallback: "🛍️" } : b === "inbox" ? { title: t("inbox.title"), blurb: t("inbox.blurb"), fallback: "📥" } : b === "shortcuts" ? { title: t("sc.title"), blurb: t("sc.blurb"), fallback: "⚡" } : b === "terminal" ? { title: t("term.title"), blurb: t("term.blurb"), fallback: "⌨️" } : { title: t("settings.title"), blurb: t("settings.blurb"), fallback: "⚙️" };
+    b === "store" ? { title: t("store.title"), blurb: t("store.blurb"), fallback: "🛍️" } : b === "orders" ? { title: t("orders.title"), blurb: t("orders.blurb"), fallback: "📜" } : b === "inbox" ? { title: t("inbox.title"), blurb: t("inbox.blurb"), fallback: "📥" } : b === "shortcuts" ? { title: t("sc.title"), blurb: t("sc.blurb"), fallback: "⚡" } : b === "terminal" ? { title: t("term.title"), blurb: t("term.blurb"), fallback: "⌨️" } : { title: t("settings.title"), blurb: t("settings.blurb"), fallback: "⚙️" };
   // A built-in page's tab is named after it, as an app's is.
   useEffect(() => {
     if (PAGE) document.title = `${PAGE === "chat" ? localized(lang, chatAgent).title : builtinText(PAGE).title} · ai-space`;
@@ -818,7 +823,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
   // One screen: its tiles (apps, agents, the panel's own) in a grid, then its widget cards. A key
   // whose entry is gone (uninstalled, a peer that left) is skipped and stays in the layout.
   const builtinTile = (b: Builtin, key: string, onRemove: () => void, drag: DragProps) => {
-    const open = b === "store" ? openStore : b === "inbox" ? openInbox : b === "shortcuts" ? openShortcuts : b === "terminal" ? openTerminal : openSettings;
+    const open = b === "store" ? openStore : b === "orders" ? openOrders : b === "inbox" ? openInbox : b === "shortcuts" ? openShortcuts : b === "terminal" ? openTerminal : openSettings;
     const text = builtinText(b);
     return (
       <Tile
@@ -966,7 +971,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
 
   /** An entry's title for the App usage window; a key whose entry is gone shows as itself. */
   const nameOf = (kind: UsageKind, key: string) => {
-    if (kind === "builtin") return key === "store" ? t("store.title") : key === "inbox" ? t("inbox.title") : key === "shortcuts" ? t("sc.title") : key === "terminal" ? t("term.title") : key === "settings" ? t("settings.title") : key;
+    if (kind === "builtin") return key === "store" ? t("store.title") : key === "orders" ? t("orders.title") : key === "inbox" ? t("inbox.title") : key === "shortcuts" ? t("sc.title") : key === "terminal" ? t("term.title") : key === "settings" ? t("settings.title") : key;
     const found = kind === "app" ? apps.find((a) => a.id === key) : agents.find((a) => a.id === key);
     return found ? localized(lang, found).title : key;
   };
@@ -1215,6 +1220,7 @@ export default function App({ onLang }: { onLang: (lang: Lang) => void }) {
       <Tasks open={panel === "tasks"} onClose={close} onBack={openSettings} />
       <Terminal open={panel === "terminal"} onClose={close} />
       <Inbox open={panel === "inbox"} onClose={close} onSummary={setInbox} />
+      <Orders open={panel === "orders"} onClose={close} focus={orderFocus} />
       <Shortcuts open={panel === "shortcuts"} onClose={close} onOpenTasks={openTasks} />
       {/* Mounted only while open: it reads the catalog when it mounts. */}
       {panel === "store" && <Store open onClose={close} onChange={storeChanged} openUrl={appUrl} />}
