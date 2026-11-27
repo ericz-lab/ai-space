@@ -49,6 +49,14 @@ final class Preferences: ObservableObject {
     /// A spoken note sent to an app while right ⌥ is held (Dictation.swift, `.capture`): off until
     /// the operator turns it on, for the same reason as fn.
     @Published var voiceCapture: Bool { didSet { defaults.set(voiceCapture, forKey: "voiceCaptureRightOption") } }
+    /// A screenshot of the display under the pointer goes with a right-⌥ note when its app takes
+    /// pictures (CaptureShotRules): on by default, and only with Screen Recording granted.
+    @Published var voiceCaptureScreenshot: Bool { didSet { defaults.set(voiceCaptureScreenshot, forKey: "voiceCaptureScreenshot") } }
+    /// The system's Screen Recording prompt was shown once for it, at a press or from Settings.
+    var screenshotAsked: Bool {
+        get { defaults.bool(forKey: "voiceCaptureScreenshotAsked") }
+        set { defaults.set(newValue, forKey: "voiceCaptureScreenshotAsked") }
+    }
     /// Where right ⌥ sends a note on each Space: connection id → capture target id (`GET /api/capture`).
     @Published var voiceCaptureTargets: [String: String] { didSet { defaults.set(voiceCaptureTargets, forKey: "voiceCaptureTargets") } }
     /// What voice input is transcribed in (VoiceLanguage): "" the app's language, "auto" detect, or a code.
@@ -108,6 +116,7 @@ final class Preferences: ObservableObject {
         quickChat = Shortcut(rawValue: defaults.string(forKey: "quickChat") ?? "") ?? .optionSpace
         voiceInput = defaults.bool(forKey: "voiceInputFn")
         voiceCapture = defaults.bool(forKey: "voiceCaptureRightOption")
+        voiceCaptureScreenshot = defaults.object(forKey: "voiceCaptureScreenshot") as? Bool ?? true
         voiceCaptureTargets = defaults.dictionary(forKey: "voiceCaptureTargets") as? [String: String] ?? [:]
         voiceLanguage = defaults.string(forKey: VoiceLanguage.defaultsKey) ?? VoiceLanguage.sameAsApp
         // Voice input once had a Space of its own here; it follows the selected Space now.

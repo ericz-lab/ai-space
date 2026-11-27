@@ -427,6 +427,14 @@
 "Sent to %@ · %@" = "已记到%@ · %@";
 "Could not send to %@ (%@). The text is on the clipboard." = "没能记到%@（%@）。文字已在剪贴板里。";
 "the app did not keep it" = "应用没有收下";
+"Sent to %@ · with a screenshot" = "已记到%@ · 含截图";
+"Sent to %@ · %@ · with a screenshot" = "已记到%@ · %@ · 含截图";
+"Screenshot" = "截图";
+"A screenshot goes with it" = "会附带一张屏幕截图";
+"Attach a screenshot" = "附带屏幕截图";
+"A picture of the screen you are working on goes with the words, when the app takes pictures, in case what you say is about what is on it." = "接收的应用能收图片时，会把你正在用的那块屏幕截一张图，和这句话一起发过去，说的内容可能和屏幕上的东西有关。";
+"AI Space is not allowed to record the screen yet, so notes go without a screenshot." = "AI Space 还没有屏幕录制权限，所以记录发出时不带截图。";
+"Open Screen Recording Settings" = "打开屏幕录制设置";
 "Voice input failed." = "语音输入失败。";
 "Could not record audio." = "无法录音。";
 "The voice connection is too slow." = "语音连接太慢。";

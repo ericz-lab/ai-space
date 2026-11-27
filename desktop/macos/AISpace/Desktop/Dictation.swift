@@ -10,7 +10,9 @@ import SwiftUI
 /// (DictationRules). What the clipboard held comes back afterwards. Provisional text is never typed
 /// into the field and corrected: that cannot be done reliably across apps.
 /// Holding right ⌥ records the same way, but the text is sent to an app of the Space as a note
-/// (`POST /api/capture/text`, the `.capture` destination) and never pasted.
+/// (`POST /api/capture/text`, the `.capture` destination) and never pasted. With it goes a
+/// screenshot of the display under the pointer when the app takes pictures too (ScreenShot,
+/// CaptureShotRules), as one `POST /api/capture/image`.
 @MainActor
 final class Dictation {
     private unowned let model: AppModel
@@ -27,6 +29,9 @@ final class Dictation {
     private var choosing = false
     /// fn came up while a Space was being chosen: nothing is recorded.
     private var released = false
+    /// The screenshot of this right-⌥ press, taken when the hold is recognised; nil for fn, with
+    /// the setting off or without Screen Recording.
+    private var shot: NoteShot?
     private static let transient = NSPasteboard.PasteboardType("org.nspasteboard.TransientType")
 
     init(model: AppModel) {
@@ -47,6 +52,9 @@ final class Dictation {
         self.destination = destination
         choosing = true
         released = false
+        // Before the capsule shows, which is also left out of the picture by its window.
+        shot = takeShot(destination)
+        hud.attached = false
         hud.space = (model.selected ?? model.store.defaultConnection)?.name
         hud.hint = DictationRules.listeningHint(destination)
         hud.follow(.starting, text: "")
@@ -91,52 +99,94 @@ final class Dictation {
                 return
             }
             target = DictationRules.captureTarget(list.textTargets ?? [], chosen: Preferences.shared.voiceCaptureTargets[c.id.uuidString])
-            guard target != nil else {
+            guard let target else {
                 hud.note(DictationRules.noTargetNote(space: c.name))
                 return
+            }
+            // A target that takes words only never gets the picture: it is dropped here.
+            if !CaptureShotRules.takesImage(target) { shot = nil }
+            if let shot = self.shot {
+                Task { [weak self] in
+                    guard let self, await shot.value() != nil, self.shot === shot, !self.sending else { return }
+                    self.hud.attached = true
+                }
             }
         }
         // Released before the Space answered: too short to have said anything.
         guard !released else { hud.follow(.idle, text: ""); return }
         listener = space.api.base
         let api = space.api
+        let shot = self.shot
         live.start(api: api) { [weak self] text in
-            if let target { self?.send(text, to: target, api: api) } else { self?.insert(text) }
+            if let target { self?.send(text, to: target, api: api, shot: shot) } else { self?.insert(text) }
         }
     }
 
     /// A note to the app: never into the field. Sent once with a fresh id, and again with the same
-    /// id after a network error; when it does not arrive the text is left on the clipboard.
-    private func send(_ text: String, to target: ScreenshotRules.Target, api: SpaceAPI) {
+    /// id after a network error; when it does not arrive the text is left on the clipboard. With a
+    /// screenshot it goes as one picture with the words, and as the words alone when the target
+    /// refuses the picture (CaptureShotRules.next).
+    private func send(_ text: String, to target: ScreenshotRules.Target, api: SpaceAPI, shot: NoteShot?) {
         let text = DictationRules.tidy(text)
         let title = target.displayTitle()
-        let body = DictationRules.captureBody(text: text, id: UUID())
-        let path = DictationRules.capturePath(to: target)
+        let id = UUID()
         sending = true
         hud.sending(DictationRules.tail(text))
         Task {
             defer { sending = false }
+            // Taken long before the words are in; one still on its way is waited for briefly only.
+            let picture = await shot?.value(within: CaptureShotRules.wait)
+            var route = CaptureShotRules.route(target, shot: picture != nil)
+            hud.attached = route == .image
+            var retried = false
             var failure: String?
             var answer: DictationRules.CaptureAnswer?
-            for attempt in 0..<2 {
+            for _ in 0..<CaptureShotRules.maxTries {
                 do {
-                    let data = try await api.send("POST", path, json: body)
+                    let data: Data
+                    if route == .image, let picture {
+                        data = try await api.upload(CaptureShotRules.imagePath(to: target), field: "file",
+                            filename: CaptureShotRules.filename, mimeType: CaptureShotRules.mimeType, data: picture,
+                            fields: CaptureShotRules.fields(text: text, id: id), timeout: 60)
+                    } else {
+                        route = .text
+                        data = try await api.send("POST", DictationRules.capturePath(to: target), json: DictationRules.captureBody(text: text, id: id))
+                    }
                     answer = try? JSONDecoder().decode(DictationRules.CaptureAnswer.self, from: data)
                     failure = DictationRules.kept(answer) ? nil : String(localized: "the app did not keep it")
                     break
                 } catch {
                     failure = HubStore.message(error)
-                    if attempt > 0 || !DictationRules.retries(error) { break }
+                    guard let next = CaptureShotRules.next(after: error, route: route, retried: retried) else { break }
+                    if next == route { retried = true }
+                    if next != route { hud.attached = false }
+                    route = next
                 }
             }
             if let failure {
-                // Not transient: this is the only copy of what was said.
+                // Not transient: this is the only copy of what was said (the words; never the picture).
                 write(text, to: NSPasteboard.general, transient: false)
                 hud.note(DictationRules.failedNote(title: title, reason: failure))
             } else {
-                hud.note(DictationRules.sentNote(title: title, label: answer?.label), done: true)
+                hud.note(CaptureShotRules.sentNote(title: title, label: answer?.label, shot: route == .image), done: true)
             }
         }
+    }
+
+    /// A screenshot for this press when CaptureShotRules says so; the first use without the grant
+    /// shows the system's Screen Recording prompt once, and that note goes as words only.
+    private func takeShot(_ destination: DictationRules.Destination) -> NoteShot? {
+        let prefs = Preferences.shared
+        let granted = ScreenShot.granted
+        if CaptureShotRules.asks(destination, enabled: prefs.voiceCaptureScreenshot, granted: granted, askedBefore: prefs.screenshotAsked) {
+            prefs.screenshotAsked = true
+            ScreenShot.ask()
+        }
+        guard CaptureShotRules.takes(destination, enabled: prefs.voiceCaptureScreenshot, granted: granted) else { return nil }
+        let shot = NoteShot()
+        let excluded = [hud.windowNumber]
+        Task { shot.finish(await ScreenShot.take(excluding: excluded)) }
+        return shot
     }
 
     /// The transcript goes through the clipboard: written, pasted, and the earlier contents put
@@ -236,6 +286,18 @@ final class DictationHUD {
     /// A note on its way to its app, after the recording ended.
     func sending(_ text: String) { show(.transcribing(text)) }
 
+    /// A screenshot goes with the note: a small mark beside the words while it listens and sends.
+    var attached = false {
+        didSet {
+            guard attached != oldValue, let look else { return }
+            if case .note = look { return }
+            show(look)
+        }
+    }
+
+    /// The capsule's window, left out of the screenshot.
+    var windowNumber: Int { panel.windowNumber }
+
     func note(_ text: String, done: Bool = false) {
         show(.note(text, done: done))
         let mine = shown
@@ -251,7 +313,7 @@ final class DictationHUD {
         let panel = self.panel
         guard let host else { return }
         // Set, not observed: the size below must be the new look's, measured now.
-        host.rootView = DictationHUDView(look: look, space: space)
+        host.rootView = DictationHUDView(look: look, space: space, attached: attached)
         host.layoutSubtreeIfNeeded()
         let size = host.fittingSize
         let pointer = NSEvent.mouseLocation
@@ -280,7 +342,7 @@ final class DictationHUD {
         panel.animationBehavior = .none
         panel.isExcludedFromWindowsMenu = true
         panel.ignoresMouseEvents = true
-        let host = NSHostingView(rootView: DictationHUDView(look: nil, space: nil))
+        let host = NSHostingView(rootView: DictationHUDView(look: nil, space: nil, attached: false))
         panel.contentView = host
         self.host = host
         return panel
@@ -290,6 +352,8 @@ final class DictationHUD {
 struct DictationHUDView: View {
     let look: DictationHUD.Look?
     let space: String?
+    /// A screenshot goes with the note.
+    let attached: Bool
 
     var body: some View {
         HStack(spacing: 8) {
@@ -297,11 +361,13 @@ struct DictationHUDView: View {
             case .listening(let text):
                 Image(systemName: "mic.fill").foregroundStyle(Theme.danger).symbolEffect(.pulse, isActive: true)
                 Text(verbatim: text).lineLimit(3).fixedSize(horizontal: false, vertical: true)
+                screenshotMark
                 listener
             case .transcribing(let text):
                 ProgressView().controlSize(.small)
                 if text.isEmpty { Text("Transcribing…") }
                 else { Text(verbatim: text).lineLimit(3).fixedSize(horizontal: false, vertical: true).foregroundStyle(.secondary) }
+                screenshotMark
                 listener
             case .note(let text, let done):
                 Image(systemName: done ? "checkmark.circle.fill" : "mic.slash").foregroundStyle(done ? Theme.success : Color.secondary)
@@ -321,6 +387,16 @@ struct DictationHUDView: View {
         .accessibilityElement(children: .combine)
     }
 
+    /// What leaves the Mac besides the words: the screenshot of the display.
+    @ViewBuilder private var screenshotMark: some View {
+        if attached {
+            Label("Screenshot", systemImage: "camera.viewfinder").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(Color.primary.opacity(0.08), in: Capsule())
+                .accessibilityLabel(Text("A screenshot goes with it"))
+        }
+    }
+
     /// Which Space hears it: the one chosen at the top left of the main window.
     @ViewBuilder private var listener: some View {
         if let space {
@@ -329,5 +405,33 @@ struct DictationHUDView: View {
                 .background(Color.primary.opacity(0.08), in: Capsule())
                 .accessibilityLabel(Text("Listening with \(space)"))
         }
+    }
+}
+
+/// A screenshot being taken: its bytes once done (nil when it failed).
+@MainActor
+final class NoteShot {
+    private var data: Data?
+    private var done = false
+    private var waiting: [CheckedContinuation<Void, Never>] = []
+
+    func finish(_ data: Data?) {
+        self.data = data
+        done = true
+        waiting.forEach { $0.resume() }
+        waiting = []
+    }
+
+    /// The bytes, waiting for the picture however long it takes.
+    func value() async -> Data? {
+        if !done { await withCheckedContinuation { waiting.append($0) } }
+        return data
+    }
+
+    /// The bytes, or nil when the picture is not in within `seconds`: the words never wait longer.
+    func value(within seconds: TimeInterval) async -> Data? {
+        let deadline = Date().addingTimeInterval(seconds)
+        while !done, Date() < deadline { try? await Task.sleep(for: .milliseconds(50)) }
+        return done ? data : nil
     }
 }
