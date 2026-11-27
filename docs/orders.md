@@ -1,6 +1,6 @@
 # Orders: a spoken order handled by a built-in Director, who may delegate
 
-Status: proposal. Nothing here is implemented. It builds on [panel.md](panel.md) (agent runs, sessions, approvals, steering), [runtimes.md](runtimes.md) (what a live turn can do per runtime), [events.md](events.md#capture) (capture targets), [macos-desktop.md](macos-desktop.md#voice-input) (the capture key and its screenshot) and [peers.md](peers.md) (agents on other machines). It replaces a path that today runs through three apps: `decree`, `hive` and `agent-org`.
+Status: proposal. Nothing here is implemented. It builds on [panel.md](panel.md) (agent runs, sessions, approvals, steering), [runtimes.md](runtimes.md) (what a live turn can do per runtime), [events.md](events.md#capture) (capture targets), [macos-desktop.md](macos-desktop.md#voice-input) (the capture key and its screenshot) and [peers.md](peers.md) (agents on other machines). It replaces a path that today runs through three apps: `decree`, `hive` and `agent-org`. The person's decisions of 2026-11-27 are built in: one Director per Space, a built-in Engineer and a built-in team (the roster `agent-org` holds today), events on the bus, a permission setting per team member up to full permission, and a notification when a topic waits for the person.
 
 ## Problem
 
@@ -32,16 +32,17 @@ ai-space on that machine
    └─ panel page "Orders": topics, state, screenshot, approvals, delegations
 ```
 
-Two features, specified below in this order:
+Three parts, specified below in this order:
 
 - **Orders**: a built-in capture target, the order store, topics, the built-in Director, the panel page.
+- **Team**: who exists to do the work (built-in Director and Engineer, plus app agents the person adds) and what each may do.
 - **Delegation**: an agent starts a run of another agent, may add a message to it while it runs, may stop it, and gets the result back in its own session. The Director is its first user, but it is a platform feature of its own.
 
 ## What stays where it is
 
 - A chat turn still runs on the machine where its agent lives ([model-machines.md](model-machines.md#the-rule)). The Director lives on the machine that receives the order.
 - Adding a message to a running turn and stopping a turn are the runtimes' own functions (Claude Code's stdin message and `interrupt`, Codex's `turn/steer` and `turn/interrupt`); the platform already wraps them as `POST …/runs/:id/steer` and `…/stop` ([panel.md](panel.md)). Delegation calls those. It adds no mechanism of its own for either.
-- `hive` and `agent-org` remain ordinary apps (a group chat of agents, an organisation chart). They are no longer on an order's path.
+- `hive` remains an ordinary app (a group chat of agents). It is no longer on an order's path. `agent-org`'s roster moves into the platform as the team; the app is retired with the old path.
 
 ## Orders
 
@@ -100,8 +101,8 @@ A third built-in agent, `space/director`, next to `space/assistant` and `space/u
   - A brief for a delegate is self-contained: goal, where, what counts as done, what not to touch, and anything read from the screenshot written out in words.
   - When a delegate's result comes back, check it against the brief and tell the person what was done and what is left. Say only what the record shows.
 - **Working directory**: the workspace root (as Space Assistant), so it can read `app-src/` and the platform docs.
-- **Runtime and model**: the Space's chat default, changeable on the Orders page.
-- **Permission**: no `permissionMode` (the read-only tier). Anything beyond it becomes an approval the person answers on the page.
+- **Runtime and model, permission**: from its team entry ([Team](#team)). By default the Space's chat model and the read-only tier, where anything beyond reading becomes an approval the person answers on the page.
+- **One per Space.** There is one Director and one set of topics, whoever of the Space's users gives the order.
 - **Turns are interactive** (`interactive: true`), which is what makes approvals and steering possible.
 
 The orders service starts a turn in process, the way the feedback service starts the Fix Engineer (`localFixer` in `src/space/feedback/fixer.ts`): it builds the chat request with the order's words, the screenshot as a chat image, and the topic's session id.
@@ -122,6 +123,25 @@ A topic's state is computed, not reported by a callback:
 
 "The Director's last turn ended with a question" is the one thing run state cannot tell. The Director ends each turn with a status line, as it does in `hive` today (`〔状态: needs-you〕`, hidden from the page); the service reads it. A missing line counts as `done`.
 
+### Notification
+
+When a topic becomes `needs-you` (an approval, a question from a runtime, or the Director asking), the Space sends one notification through the notify service ([notify.md](notify.md)): the topic's title, what is being asked in one line, and the link to the order. A setting on the Orders page (`orders.notify`, default on) chooses the channel or turns it off. A topic that stays `needs-you` is not notified again; `done` and `failed` are not notified.
+
+### Events
+
+The Space publishes these on the bus as its own (`space/…`), so that an app can react (record a to-do, count, mirror to a chat app). Publishing under the reserved name `space` is new: today only apps publish.
+
+| event | when | data |
+| --- | --- | --- |
+| `space/order.issued` | an order is stored | `{ id, text, via, image?: { mime, bytes }, createdAt, url }` |
+| `space/order.sorted` | it has a topic | `{ id, topic: { id, title, new }, by }` |
+| `space/order.state` | its topic's state changes | `{ topic, state, order?, summary? }` |
+| `space/delegation.started` | a delegation starts | `{ id, order?, topic?, from, to, role }` |
+| `space/delegation.noted` | a message is added or it is stopped | `{ id, kind, taken? }` |
+| `space/delegation.ended` | it ends | `{ id, state, summary }` |
+
+No event carries the picture or the full text of a brief or result: `summary` is at most 600 characters, and a consumer that needs more reads the routes with the owner's rights. A hub mirrors a peer's events as for any app.
+
 ### The page
 
 A new built-in page `orders` (the places a built-in page touches: `src/web/screens.ts`, `panel-link.ts`, `App.tsx`, `Library.tsx`, `i18n.ts`):
@@ -132,22 +152,54 @@ A new built-in page `orders` (the places a built-in page touches: `src/web/scree
 
 Opening `url` from the client's confirmation lands on the order.
 
+## Team
+
+Who can do work, and with what rights. This is what `agent-org` (positions and bindings) and `hive`'s per-member settings hold today; it becomes a platform table and a section of the Orders page.
+
+### Built-in members
+
+| member | agent | what it is |
+| --- | --- | --- |
+| Director | `space/director` | takes every order; described [above](#the-built-in-director) |
+| Engineer | `space/engineer` | a fourth built-in agent: changes an app's source in `app-src/<app>/`, runs its checks and deploys it by the app's own channel. Its prompt is in `src/space/orders/prompt.ts` and reuses the shared skill the Fix Engineer uses for a fix (`skills/app-fix/SKILL.md`); its working directory is the workspace root |
+
+The Fix Engineer (`space/ui-fixer`) stays what it is: the agent behind "Fix this" on a page. Whether the two should become one agent is left open; they differ in who briefs them and how the result is returned.
+
+### Members the person adds
+
+Any agent of this Space (phase 4: or of a peer), for example `ai-design/designer` as the Designer. A member is a row:
+
+| field | meaning |
+| --- | --- |
+| `role` | a short name the Director uses (`engineer`, `designer`), unique |
+| `title`, `i18n` | the name shown |
+| `agent` | `<app>/<agent>` |
+| `summary` | what to give this member, in one or two lines; goes into the Director's prompt. Defaults to the agent's description |
+| `model` | optional; else the agent's default |
+| `permission` | see below |
+| `enabled` | a disabled member is not offered to the Director |
+
+Table `team_members` in `space.db` (`src/space/team/store.ts`), seeded with the two built-in rows; routes `GET/PUT /api/team` (owner only). Only the Director delegates in this proposal, so the team is flat: no reporting lines are stored. The organisation chart `agent-org` draws is not carried over.
+
+### Permission
+
+Each member, the Director included, has one of the permission modes the runtimes already know (`PERMISSION_MODES` in `src/space/runtimes/types.ts`):
+
+| setting | mode sent | what the member may do without asking |
+| --- | --- | --- |
+| Ask (default for the Director) | none | read; anything else is an approval |
+| Edit (default for the Engineer) | `acceptEdits` | also change files in its working directory |
+| Full | `bypassPermissions` | run any command as the service's user, including deploys and deletions, with no approval |
+
+Full is the person's to give, to any member, the Director too. The page says in one line what it means on this machine, and shows a mark on every topic and delegation that runs with it. The Director's own rules (ask first for the platform, several apps, data deletion, deploys, spending) are in its prompt and still apply under Full; they are instructions, not a barrier, and the page says so.
+
 ## Delegation
 
 An agent hands a piece of work to another agent, may add to it or stop it, and hears back when it ends. It has only these two controls over a running delegate, by the person's decision: **stop** and **add a message**. A change of direction is a stop followed by a new delegation.
 
 ### What a delegate may be
 
-A setting lists who may be delegated to (`orders.team`, edited on the Orders page):
-
-```json
-[
-  { "role": "engineer", "agent": "product-desk/developer", "permissionMode": "acceptEdits" },
-  { "role": "designer", "agent": "ai-design/designer" }
-]
-```
-
-Each entry names an agent of this Space (phase 2: or `<peer>/<app>/<agent>`), an optional model, and the permission mode its delegated runs get. The roles and their agents' descriptions are written into the Director's prompt. An agent not on the list cannot be delegated to. This replaces the roster `hive` reads from `agent-org`.
+An enabled member of the [team](#team), named by its role. An agent that is not a member cannot be delegated to. The delegated run gets the member's model and permission mode.
 
 ### Who may call
 
@@ -178,7 +230,7 @@ space delegate stop  <id>
 space delegate show  <id>
 ```
 
-- **start** opens an interactive turn of the delegate with the brief as its message and the team entry's model and permission mode. `continue` starts it on the session of an earlier delegation of the same delegator (the delegate remembers what it did); without it the delegate starts a fresh session. `images` passes an order's screenshot along as a chat image. It answers at once with the delegation's id; it does not wait for the work.
+- **start** opens an interactive turn of the delegate with the brief as its message and the member's model and permission mode. `continue` starts it on the session of an earlier delegation of the same delegator (the delegate remembers what it did); without it the delegate starts a fresh session. `images` passes an order's screenshot along as a chat image. It answers at once with the delegation's id; it does not wait for the work.
 - **say** calls the run's `steer`. What that does is the runtime's:
 
   | runtime | a message added to the running turn | when the turn has ended |
@@ -228,7 +280,8 @@ This needs the delegator's machine to list the delegate's machine as a peer. Pee
 - A screenshot holds whatever was on the screen. It is stored on the machine that took the order and sent to the model provider of the Director's runtime, and to a delegate's when the Director passes it on. The client's setting and mark ([macos-desktop.md](macos-desktop.md#voice-input)) stay the person's control.
 - The Director is read-only by default. Every write goes through an approval or through a delegate whose permission mode the person set in the team.
 - The run token reaches only its own session's delegations. A delegate cannot delegate.
-- No event is published for orders or delegations in phase 1. Other apps cannot observe them. (See open questions.)
+- Events tell every app on the Space that an order exists, its first words and how it ended. They never carry the picture. An app that should not see them is not subscribed; the bus has no per-event secrecy today.
+- Full permission removes the approval step for that member. It is off by default and shown wherever it is in force.
 
 ## Failure modes considered
 
@@ -250,22 +303,30 @@ This needs the delegator's machine to list the delegate's machine as a peer. Pee
 | `decree` app (store, page, `issue`, `report`, `image`) | the orders store and page; the app is retired after its orders are imported |
 | `hive`: decree inbox, topic rooms, screenshot fetch, status reports, the lead's hand-back logic | removed from `hive`; it stays a group chat |
 | `hive` installed on the Mac as an agent host (`HIVE_MAIN_URL`) | removed |
-| `agent-org` roster and bindings on the order path | the team setting |
+| `agent-org` app (roster, bindings, organisation chart) | the team table; the app is retired, its chart is not carried over |
 | event mirroring and bus calls between two machines for one order | none: one machine |
 
 ## Phases
 
-1. **Orders, one machine.** The capture target, the store, topics, `space/director`, the page. An order reaches a Director turn in two steps. The Director can answer, research, record a to-do and ask; it cannot delegate yet.
-2. **Delegation, one machine.** The run token, routes, CLI, the record, result delivery, the chat step, the team setting.
-3. **Retire the old path.** Import `decree`'s orders and `hive`'s topic rooms (text and pictures; not the agents' sessions), switch the client's default target, remove the pieces listed above.
+1. **Orders, one machine.** The capture target, the store, topics, `space/director` with its permission setting, the page, the `order.*` events, the notification. An order reaches a Director turn in two steps. The Director can answer, research, record a to-do and ask; it cannot delegate yet.
+2. **Team and delegation, one machine.** The team table and its page section, `space/engineer`, the run token, routes, CLI, the record, result delivery, the chat step, the `delegation.*` events.
+3. **Retire the old path.** Import `decree`'s orders and `hive`'s topic rooms (text and pictures; not the agents' sessions), switch the client's default target, remove the pieces listed above, `agent-org` included.
 4. **Delegation across machines**, once two Spaces that list each other is a supported setup for this.
 
 Each phase is usable alone and is tested before the next: unit tests for the stores, the topic decision (with a stand-in model) and the delegation rules; route tests with the stand-in runtimes in `src/space/runtimes/testing-live.ts`; and steering and stop checked against the real Claude Code and Codex CLIs, as [runtimes.md](runtimes.md) records for the existing routes.
 
+## Decided
+
+| question | decision (2026-11-27) |
+| --- | --- |
+| one Director per Space, or per person | one per Space |
+| which agent is the engineer | a built-in one, `space/engineer`; the roster is built in too |
+| events on the bus | published |
+| permissions | a setting per member; Full may be given |
+| a notification when a topic waits | sent |
+
 ## Open questions
 
-1. **Events.** Should `order.issued`, `order.finished` and `delegation.ended` be published on the bus so that apps can react (a to-do, statistics)? Proposed: not until an app needs one.
-2. **Where the engineer works.** The app sources and deploy channels the engineer needs are on the Mac, so an engineer agent on the Mac covers phase 2. Which agent that is (an existing app's, or a second built-in agent) is not decided here.
-3. **One Director per Space, or per person.** This proposal has one. A Space with several users under `SPACE_AUTH=builtin` would need orders and topics per user.
-4. **The status line.** Reading `needs-you` from the Director's last line is the one convention left from `hive`. A `space order ask` command would be stricter; it costs a tool call per question.
-5. **Notifications.** When a topic becomes `needs-you` or `done` while the page is closed, should the Space notify ([notify.md](notify.md))? Proposed: yes for `needs-you`, as a setting.
+1. **The status line.** Reading `needs-you` from the Director's last line is the one convention left from `hive`. A `space order ask` command would be stricter; it costs a tool call per question. Proposed: keep the line.
+2. **Fix Engineer and Engineer.** Two built-in agents that change app source. Merge them, or keep one per way of being briefed?
+3. **Several users.** With one Director per Space, every signed-in user of a Space under `SPACE_AUTH=builtin` sees and adds to the same topics. Whether orders should record who gave them is not decided.
