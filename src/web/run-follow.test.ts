@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { agentPath, followRun, postAnswer, SseParser } from "./run-follow.ts";
+import { agentPath, followRun, historyBeforeRun, postAnswer, SseParser } from "./run-follow.ts";
 
 test("the parser joins split chunks, skips comments and drops events already seen", () => {
   const p = new SseParser();
@@ -42,4 +42,19 @@ test("an unknown run rejects with the Space's reason; an answer reports a refusa
 test("an agent's route base, here or on a peer", () => {
   expect(agentPath("space/engineer")).toBe("/api/agents/space/engineer");
   expect(agentPath("ai-design/designer", "hub")).toBe("/api/peers/hub/agents/ai-design/designer");
+});
+
+test("the transcript before a running turn is cut at the run's own message, wherever it stands", () => {
+  const u = (text: string) => ({ role: "user", text });
+  const ai = (text: string) => ({ role: "ai", text });
+  const before = [u("〔Order #9〕 look"), ai("done #9"), u("〔Order #10〕 check"), ai("done #10")];
+  // Not written yet: the whole history comes before the turn.
+  expect(historyBeforeRun(before, "〔Order #11〕 fix")).toEqual(before);
+  // Written with a first reply and a message steered in after it: cut at the run's message, not the last one.
+  expect(historyBeforeRun([...before, u("〔Order #11〕 fix"), ai("on it"), u("〔Order #12〕 also")], "〔Order #11〕 fix")).toEqual(before);
+  // The runtime was given a note before the message (chat cards' changes): still the run's message.
+  expect(historyBeforeRun([...before, u("You changed: x\n\n〔Order #11〕 fix"), ai("on it")], " 〔Order #11〕 fix ")).toEqual(before);
+  // A turn the agent started by itself has no message: nothing is cut.
+  expect(historyBeforeRun(before, "")).toEqual(before);
+  expect(historyBeforeRun(before, null)).toEqual(before);
 });

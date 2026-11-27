@@ -124,6 +124,20 @@ export const agentPath = (agent: string, machine?: string | null) => {
   return `${machine ? `/api/peers/${encodeURIComponent(machine)}` : "/api"}/agents/${encodeURIComponent(app)}/${encodeURIComponent(name)}`;
 };
 
+/**
+ * A session's transcript up to a turn that is still running on it: the transcript is written as
+ * the turn goes, so it may already hold the turn, from its own message on, and showing both would
+ * show the turn twice. The cut is at the last of the person's messages that holds the run's message
+ * (the runtime may have been given a note before it, docs/chat-cards.md); a transcript without it
+ * is the history before the turn, whole. An empty message (a turn the agent started by itself) cuts nothing.
+ */
+export function historyBeforeRun<M extends { role: string; text: string }>(history: M[], message: string | null | undefined): M[] {
+  const own = (message ?? "").trim();
+  if (!own) return history;
+  const at = history.findLastIndex((m) => m.role === "user" && m.text.includes(own));
+  return at >= 0 ? history.slice(0, at) : history;
+}
+
 /** What `useLiveRun` knows of a run: its steps so far, whether it still runs, and its message (to cut a transcript at). */
 export type LiveRun = { steps: ChatStep[]; live: boolean; message: string | null; error: string };
 

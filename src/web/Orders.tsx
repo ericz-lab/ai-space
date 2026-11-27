@@ -11,7 +11,7 @@ import { type ModelChoice, dateTime, getJson, relTime, sendJson } from "./api.ts
 import { type Key, useLang } from "./i18n.ts";
 import { PAGE, chatHref } from "./panel-link.ts";
 import { pollWhileVisible } from "./poll.ts";
-import { postAnswer, stopRunAt, useLiveRun } from "./run-follow.ts";
+import { historyBeforeRun, postAnswer, stopRunAt, useLiveRun } from "./run-follow.ts";
 
 // Orders window (docs/orders.md#the-page): every order the person gave, by topic.
 // - A topic is one matter with its own Director conversation; its mark says when it needs the person or works.
@@ -287,11 +287,7 @@ function TopicDetail({ topic, focusAt, onChanged }: { topic: TopicView; focusAt:
     stopRunAt(DIRECTOR_BASE, topic.runId).catch((e) => { setStopping(false); setErr(t("chat.stopFailed", { error: (e as Error).message })); });
   };
   // The transcript may already hold the running turn: cut it at the run's own message.
-  let history = messages ?? [];
-  if (run.live && run.message) {
-    const at = history.findLastIndex((m) => m.role === "user" && m.text.trim() === run.message!.trim());
-    if (at >= 0) history = history.slice(0, at);
-  }
+  const history = run.live ? historyBeforeRun(messages ?? [], run.message) : messages ?? [];
   const shownDelegations = topic.delegations ?? delegations ?? [];
   return (
     <div className="task-detail orders-detail" ref={root}>

@@ -193,6 +193,8 @@ Each member, the Director included, has one of the permission modes the runtimes
 
 Full is the person's to give, to any member, the Director too. The page says in one line what it means on this machine, and shows a mark on every topic and delegation that runs with it. The Director's own rules (ask first for the platform, several apps, data deletion, deploys, spending) are in its prompt and still apply under Full; they are instructions, not a barrier, and the page says so.
 
+A member has this one permission wherever its turns start. The chat window's permission menu, for an agent that is a team member (the Director, the Engineer, any member the person added, a peer's member as `<peer>/<app>/<agent>`), shows the member's setting (the menu's three tiers are the same three modes), and a change there writes the team (`PUT /api/team`), with the Full warning under the menu. A message typed in that window to a member is sent with the member's mode, so a turn the person starts there and one an order or a delegation starts run with the same rights. For any other agent the menu is the window's own choice, remembered in the browser.
+
 ## Delegation
 
 An agent hands a piece of work to another agent, may add to it or stop it, and hears back when it ends. It has only these two controls over a running delegate, by the person's decision: **stop** and **add a message**. A change of direction is a stop followed by a new delegation.
@@ -268,6 +270,8 @@ The brief is never overwritten. Every later message and the stop are appended, s
 A delegation appears in the delegator's conversation as a step of a new run event `{"type":"delegation","delegation":{…}}`: who it went to, its state, each added message with whether it was read, and the result. It links to the delegate's conversation. Chat cards ([chat-cards.md](chat-cards.md)) are not reused: they belong to an app's CLI output and Space agents get none.
 
 An approval the delegate asks for is shown on the Orders page under its delegation and answered by the person through the delegate's own approval route. The Director does not answer approvals for others.
+
+A chat window that shows the Director's conversation follows the turns orders start on its session as well as its own: when one starts (the `watch` stream's run news), the session's transcript up to that turn's own message is read again, so turns that came and went in between are shown, then the run's message and its events; a turn that started and ended unseen reloads the transcript. Leaving that conversation in the window detaches from such a turn without stopping it.
 
 ### On another machine
 

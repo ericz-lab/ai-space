@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { queuedChatTurn } from "./chat-request.ts";
+import { chatPermOfTeam, queuedChatTurn, teamMemberOf, teamPermOfChat } from "./chat-request.ts";
 
 test("Space Assistant's first send uses its selection even before model options have reached conversation state", () => {
   const bootstrapAgent = { app: "space", name: "assistant" };
@@ -29,4 +29,17 @@ test("agent intent turns retain the original sentence and routing context withou
   const text = "查今天金融新闻";
   const turn = queuedChatTurn({ app: "whymove", name: "curator" }, text, "", "", "plan", { intentId: "financial-news", timezone: "Asia/Seoul" });
   expect(turn).toEqual({ message: text, intentId: "financial-news", timezone: "Asia/Seoul", permissionMode: "plan", model: undefined, interactive: true });
+});
+
+test("a team member's chat permission is the team's, the same three tiers both ways", () => {
+  const members = [{ agent: "space/director", permission: "full" as const }, { agent: "mac/notes/designer", permission: "edit" as const }];
+  expect(teamMemberOf(members, { app: "space", name: "director" })?.permission).toBe("full");
+  expect(teamMemberOf(members, { app: "notes", name: "designer", peer: "mac" })?.permission).toBe("edit");
+  // The same agent on this machine is not the peer's member, and an agent outside the team has none.
+  expect(teamMemberOf(members, { app: "notes", name: "designer" })).toBeUndefined();
+  expect(teamMemberOf(null, { app: "space", name: "director" })).toBeUndefined();
+  for (const p of ["ask", "edit", "full"] as const) expect(teamPermOfChat(chatPermOfTeam(p))).toBe(p);
+  expect(chatPermOfTeam("ask")).toBe("");
+  expect(chatPermOfTeam("full")).toBe("bypassPermissions");
+  expect(teamPermOfChat("something-else")).toBe("ask");
 });
