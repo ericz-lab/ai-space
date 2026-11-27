@@ -31,11 +31,13 @@ import { readTranscript } from "./transcript.ts";
 import { CardBook, parseCard, parseItemStates, transcriptCards, withoutChangesNote } from "./cards.ts";
 import { resolveLink } from "../panel/view.ts";
 import { fixerSystemPrompt } from "../feedback/prompt.ts";
+import { DIRECTOR_AGENT, directorSystemPrompt } from "../orders/prompt.ts";
 
 /**
  * HTTP surface for agents, shaped as a Bun.serve `routes` table.
  *
- *   GET  /api/agents                              every agent of every visible app, plus the space agent, then the peers' agents
+ *   GET  /api/agents                              every agent of every visible app, plus the space's own (Space Assistant,
+ *                                                 the Director, the Fix Engineer), then the peers' agents
  *   POST /api/agents/:app/:agent/chat             { message, sessionId?, model?, permissionMode?, effort?, interactive? } → SSE of a new background run (x-run-id)
  *   GET  /api/agents/runs?recent=<s>&agent=        runs newest first: running ones and those that ended in the last `recent` seconds
  *   GET  /api/agents/:app/:agent/runs              the agent's runs (same query)
@@ -109,6 +111,8 @@ export type AgentsApiOptions = {
    * (docs/chat-cards.md); absent: cards are shown as they were printed and have no actions.
    */
   cardCall?: (app: string, capability: string, body: string) => Promise<{ status: number; body: string }>;
+  /** The Director's model from its team row (docs/orders.md#team): a new conversation with it runs on this; absent or undefined, the default. */
+  directorModel?: () => string | null | undefined;
 };
 
 /** The space's own agent: the default chat identity, working in the workspace root. */
@@ -147,6 +151,27 @@ export function fixerAgentView(runtimes?: RuntimeRegistry, defaultModel?: string
     i18n: { zh: { title: "修复工程师", description: "处理 app 页面上「随手改」按钮发来的问题：只改这个 app 的源码，跑检查、部署，再交回给你验收。" } },
     avatar: "/assistant.svg",
     appIcon: "🛠",
+    runtime: runtimes ? baseRuntime(runtimes, defaultModel) : "claude",
+    ...(runtimes ? { modelOptions: chatOptions(runtimes) } : {}),
+  };
+}
+
+/**
+ * The space's Director (docs/orders.md#the-built-in-director): takes every order, spoken or typed,
+ * one conversation per topic. The orders service starts its turns; the person can chat with it too.
+ */
+export { DIRECTOR_AGENT };
+
+export function directorAgentView(runtimes?: RuntimeRegistry, defaultModel?: string): AgentView {
+  return {
+    id: `${SPACE_APP}/${DIRECTOR_AGENT}`,
+    app: SPACE_APP,
+    name: DIRECTOR_AGENT,
+    title: "Director",
+    description: "Takes your orders, spoken or typed, one conversation per topic: answers, looks things up, records to-dos, and asks you when an order needs more.",
+    i18n: { zh: { title: "总管", description: "接你的口谕（说的或打的），一个话题一个对话：回答、查资料、记待办，需要你拿主意时会问你。" } },
+    avatar: "/assistant.svg",
+    appIcon: "📜",
     runtime: runtimes ? baseRuntime(runtimes, defaultModel) : "claude",
     ...(runtimes ? { modelOptions: chatOptions(runtimes) } : {}),
   };
@@ -330,6 +355,10 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
       const prompt = [fixerSystemPrompt(opts.ws.home, skillDir ? join(skillDir, "scope.ts") : undefined), skill ? `--- The app-fix skill ---\n${skill.slice(0, MAX_CONTEXT)}` : ""].filter(Boolean).join("\n\n");
       return { id: `${SPACE_APP}/${FIXER_AGENT}`, runtime: baseRuntime(opts.runtimes, baseDefault()), cwd: opts.ws.home, systemPrompt: prompt, tools: [], app: SPACE_APP };
     }
+    if (app === SPACE_APP && name === DIRECTOR_AGENT) {
+      const model = opts.directorModel?.() ?? undefined;
+      return { id: `${SPACE_APP}/${DIRECTOR_AGENT}`, runtime: model?.includes("/") ? model.slice(0, model.indexOf("/")) : baseRuntime(opts.runtimes, baseDefault()), ...(model ? { model } : {}), cwd: opts.ws.home, systemPrompt: withCatalogue(directorSystemPrompt(opts.ws.home), SPACE_APP), tools: [], app: SPACE_APP };
+    }
     const entry = registry.get(app);
     const a = entry?.manifest.agents.find((x) => x.name === name);
     if (!entry || !a) throw new NotFound(`unknown agent: ${app}/${name}`);
@@ -420,7 +449,7 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
       GET: async (req) => {
         const lay = layout.read();
         const hidden = new Set(lay.hidden);
-        const agents: AgentView[] = [spaceAgentView(opts.runtimes, baseDefault()), fixerAgentView(opts.runtimes, baseDefault())];
+        const agents: AgentView[] = [spaceAgentView(opts.runtimes, baseDefault()), directorAgentView(opts.runtimes, baseDefault()), fixerAgentView(opts.runtimes, baseDefault())];
         for (const { manifest } of registry.list()) {
           if (hidden.has(manifest.app) || manifest.status === "archived") continue;
           for (const a of manifest.agents) {

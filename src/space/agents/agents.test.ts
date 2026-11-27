@@ -116,7 +116,7 @@ describe("agents api", () => {
 
   test("lists the space agent and the apps' agents", async () => {
     const r = (await (await fetch(`${base}/api/agents`)).json()) as { agents: { id: string }[] };
-    expect(r.agents.map((a) => a.id)).toEqual(["notes/coder", "notes/librarian", "space/assistant", "space/ui-fixer"]);
+    expect(r.agents.map((a) => a.id)).toEqual(["notes/coder", "notes/librarian", "space/assistant", "space/director", "space/ui-fixer"]);
     expect(r.agents.find((a) => a.id === "space/assistant")).toMatchObject({
       title: "Space Assistant",
       i18n: { zh: { title: "空间助手" } },

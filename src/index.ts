@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { Inbox, NotifyService, NotifyStore, createNotifyRoutes, createTaskNotifier, loadChannels, parseNotifySpec } from "./space/notify/index.ts";
-import { RunRegistry, SessionStore, callerAppOf, createAgentRoutes, fixerAgentView, spaceAgentView } from "./space/agents/index.ts";
+import { RunRegistry, SessionStore, callerAppOf, createAgentRoutes, directorAgentView, fixerAgentView, spaceAgentView } from "./space/agents/index.ts";
 import { AppRegistry, HealthProbe, IconPacks, LayoutStore, PetFeed, SpaceMood, WidgetFeed, createPanelRoutes, linkPrompt, parseLinkAnswer, runStopCommand } from "./space/panel/index.ts";
 import { ConnectionPeers, PeerHub, PeerLedgers, PeerStore, createAdoptHandler, createConnectionPeerServe, createMigrateRoutes, createPeerRoutes, createPeerServeHandlers, createPeerServeRoutes, loadPeers, peerRuntimes, renamePeer } from "./space/peers/index.ts";
 import { ModelService, ModelStore, RuntimeHealth, createModelRoutes, createPeerModelRoutes, createPeerUsageRoutes, recordAgentRun } from "./space/model/index.ts";
@@ -18,7 +18,10 @@ import { ChatService, ChatStore, createChatRoutes } from "./space/chat/index.ts"
 import { buildWidget } from "./web/chat-widget/build.ts";
 import { RuntimeRegistry, loadRuntimes } from "./space/runtimes/index.ts";
 import { refreshCodexTiers } from "./space/runtimes/codex-upgrade.ts";
-import { Bus, BusStore, Consumers, capabilityCaller, createBusRoutes, isConsumerKey } from "./space/bus/index.ts";
+import { Bus, BusStore, Consumers, SPACE_BUS_SPEC, capabilityCaller, createBusRoutes, isConsumerKey } from "./space/bus/index.ts";
+import { DIRECTOR_ID, ORDERS_TOPIC_TAG, OrdersService, OrdersStore, SORT_TIMEOUT_MS, SPACE_MODEL_SPEC, captureHandler, createOrdersRoutes } from "./space/orders/index.ts";
+import { TeamStore } from "./space/team/store.ts";
+import { createTeamRoutes } from "./space/team/api.ts";
 import { SpeechService, SpeechStore, buildAdapters, checkGatewayProviders, createSpeechRoutes, loadSpeech } from "./space/speech/index.ts";
 import { type Manifest, Scheduler, Store, createPeerTaskRoutes, createRoutes, effectiveEnabled, loadManifest, runTarget } from "./space/scheduler/index.ts";
 import { createStorageRoutes, parseStorageSpec } from "./space/storage/index.ts";
@@ -220,7 +223,8 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   const model = new ModelService({ store: modelStore, runtimes, maxConcurrency: config.model.maxConcurrency, health: runtimeHealth, gateway: { link: modelGateway.link } });
   // Per app and tag, when a call names no model (docs/model.md#app-models): panel overrides, the manifest, then the default above.
   const appModels = new AppModels(store.db, {
-    manifest: (app) => registry.get(app)?.manifest.model,
+    // ai-space's own calls by tag (docs/orders.md#topics): the orders' topic call runs on the basic tier unless overridden.
+    manifest: (app) => (app === SPACE_APP ? SPACE_MODEL_SPEC : registry.get(app)?.manifest.model),
     fallback: appDefaultModel,
     runnable: (m) => {
       try {
@@ -239,7 +243,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     options: () => [...modelPreferences.options(), ...runtimes.machineTierOptions(), ...gatewayModelOptions(model.gatewayChoices())],
   });
   // The Models page's rows, for this panel and for a hub's (peers/serve.ts).
-  const appModelRouteOpts = { appModels, apps: () => registry.list().map((e) => e.manifest.app), seenTags: (app: string) => modelStore.tags(app, Date.now() - 30 * 86400_000) };
+  const appModelRouteOpts = { appModels, apps: () => [SPACE_APP, ...registry.list().map((e) => e.manifest.app)], seenTags: (app: string) => modelStore.tags(app, Date.now() - 30 * 86400_000) };
   const chatStore = new ChatStore(config.dbPath);
   const chat = new ChatService({ store: chatStore, model, defaultModel: (app, tag) => appModels.resolve(app, tag), fileDir: (app) => join(storage.appDataDir(app), "chat") });
   // A chat turn the last process did not live to finish is closed here, with the text it had saved (docs/chat.md#turn).
@@ -582,7 +586,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
         return c.later + c.review;
       },
       title: (agent) => {
-        const builtin = [spaceAgentView(), fixerAgentView()].find((v) => v.id === agent);
+        const builtin = [spaceAgentView(), directorAgentView(), fixerAgentView()].find((v) => v.id === agent);
         if (builtin) return { en: builtin.title, ...(builtin.i18n?.zh?.title ? { zh: builtin.i18n.zh.title } : {}) };
         const [app, name] = agent.split("/");
         const m = registry.get(app ?? "")?.manifest;
@@ -618,6 +622,8 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
         ? { stopService: (app: string) => runStopCommand(config.serviceStop, app) }
         : {}),
   });
+  // The team (docs/orders.md#team): in this phase the Director's row, its model and permission.
+  const team = new TeamStore(store.db);
   const callerApp = (req: Request) => callerAppOf(req, { operatorToken: config.apiToken, hubToken: config.hubToken, isDevice: (t) => Boolean(auth.verifyDevice(t)), appForToken: (t) => storage.appForToken(t) });
   const agentRoutes = createAgentRoutes({ actionCatalogue: () => shortcuts.catalogue(),
     // The command box's model layer: the space's basic tier, slim, no tools or thinking (docs/shortcuts.md#model-interpretation).
@@ -626,7 +632,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       return r?.outcome.ok ? r.outcome.text : undefined;
     },
     shortcuts: shortcutStore, holdApp: async (app) => packageRuntime.get(app) ? (await packageRuntime.acquire(app, false)).release : undefined, ws, registry, layout, sessions, runs: agentRuns, runtimes, defaultModel: config.chatModel, baseDefaultModel, appModel: (app) => ({ override: appModels.overrides(app).app, manifest: registry.get(app)?.manifest.model?.default }), envFor: appEnvFor, peers, icons, capabilities: () => [...bus.capabilities(), ...peers.capabilities()], sharedSkills: SHARED_SKILLS,
-    callerApp, agentCallers: config.agentCallers,
+    callerApp, agentCallers: config.agentCallers, directorModel: () => team.director().model,
     // Chat cards read and act on their app as the operator (docs/chat-cards.md).
     cardCall: async (app, capability, body) => {
       const r = await bus.call(SPACE_APP, app, capability, { body, contentType: "application/json", accept: "application/json" });
@@ -666,6 +672,35 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     },
   });
   feedback.resume();
+  // Orders (docs/orders.md): the built-in capture target `space/order`, topics sorted by one model call, and turns
+  // of the Director (`space/director`) started in process through the chat route, as the Fix Engineer's are.
+  const ordersStore = new OrdersStore(store.db, { dataDir: ws.data });
+  // A session an order topic points at outlives the chat sessions' retention.
+  sessions.exempt((agent) => (agent === DIRECTOR_ID ? ordersStore.pinnedSessions() : []));
+  const sessionRoute = (agentRoutes["/api/agents/:app/:agent/sessions/:sid"] as { GET: Parameters<typeof localFixer>[0] }).GET;
+  const orders = new OrdersService({
+    store: ordersStore,
+    team,
+    runs: agentRuns,
+    chat: chatRoute,
+    decide: async (prompt, system, signal) => {
+      const r = await model.run(SPACE_APP, { prompt, system, model: appModels.resolve(SPACE_APP, ORDERS_TOPIC_TAG).model, mode: "slim", tag: ORDERS_TOPIC_TAG, tools: [], timeoutMs: SORT_TIMEOUT_MS, maxTokens: 300, thinking: 0 }, signal).catch(() => undefined);
+      return r?.outcome.ok ? r.outcome.text : undefined;
+    },
+    messages: async (sid) => {
+      const res = await sessionRoute(Object.assign(new Request(`http://space.local/api/agents/${DIRECTOR_ID}/sessions/${encodeURIComponent(sid)}`), { params: { app: SPACE_APP, agent: "director", sid } }));
+      return res.ok ? ((await res.json()) as { messages: { role: string; text: string }[] }).messages : [];
+    },
+    publish: (name, data) => scheduler.publish({ app: SPACE_APP, name, data }),
+    notify: async (n) => {
+      await notify.send(SPACE_APP, { level: "warn", title: n.title, text: n.text, url: n.url, key: n.key, windowMs: 1, ...(n.channel ? { channels: [n.channel] } : {}) }, { internal: true });
+    },
+    panelBase: config.router.panelHost ? `https://${config.router.panelHost}` : "",
+    channels: () => notify.channelViews().map((c) => c.name),
+  });
+  // ai-space's own entry in the bus (docs/events.md#events-of-ai-space-itself): its events and the order target.
+  bus.syncBuiltin(SPACE_APP, SPACE_BUS_SPEC, { order: captureHandler(orders) });
+  orders.start();
   const feedbackScript = buildFeedbackScript({ dev: process.env.SPACE_DEV === "1" });
   const uiKit = loadUiKit({ dev: process.env.SPACE_DEV === "1" });
   packageGateway.uiKit = (req) => uiKitResponse(req, uiKit);
@@ -800,6 +835,8 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       ["owner", createRouterRoutes({ router })],
       ["owner", createUsageRoutes({ service: usage, knownApp: (app) => Boolean(registry.get(app)), routerKey })],
       ["owner", feedbackRoutes],
+      ["owner", createOrdersRoutes({ service: orders, store: ordersStore, team, callerApp, channels: () => notify.channelViews().map((c) => c.name) })],
+      ["owner", createTeamRoutes({ team, callerApp, modelOptions: () => runtimes.tierOptions().filter((o) => o.capabilities.chat).map(({ value, runtime, tier, model, unavailable }) => ({ value, runtime, tier, model, ...(unavailable ? { unavailable } : {}) })) })],
       ["owner", createLogsRoutes({ template: config.serviceLogs, token: config.apiToken, knownApp: (app) => Boolean(registry.get(app)), ...(logsToFile() && !env.SPACE_SERVICE_LOGS?.trim() ? { spaceTemplate: `tail -n {lines} {follow} '${join(ws.logs, "space.log").replace(/'/g, `'\\''`)}'` } : {}), ...(supervisor.mode !== "space" ? {} : manager instanceof Launchctl ? { appTemplate: manager.logsTemplate() } : { unitOf: (app: string) => manager.unitName(app) }) })],
       ["owner", createServiceRoutes({ supervisor, hasService: (app) => { const e = registry.get(app); return e ? Boolean(e.manifest.service) : undefined; }, manifest: (app) => registry.get(app)?.manifest })],
       ["owner", agentRoutes],
@@ -918,6 +955,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     clearInterval(probeTimer);
     console.log("[space] shutting down");
     scheduler.stop();
+    orders.stop();
     bus.stop();
     notify.stop();
     peers.stop();

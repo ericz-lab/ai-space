@@ -11,6 +11,7 @@
  *                        `heard: <text>`) or a stop
  *   `huge`               starts an event line over live chat's limit and never ends it or the turn
  *   anything else        `echo: <text> [pid <pid>]`, so a test can tell whether a process was reused
+ * Claude reads these from the message's last line, so a message under a header line (an order's) asks too.
  *
  * Claude only (docs/runtimes.md#background-work):
  *   `bg:<n>`             starts a background Bash job, takes in a Monitor report mid-turn and ends
@@ -102,25 +103,27 @@ async function claude(args: string[]): Promise<void> {
       continue;
     }
     out({ type: "system", subtype: "init", session_id: sid, model, permissionMode: mode });
-    if (said.startsWith("approve:")) {
-      const command = said.slice("approve:".length);
+    // What the message asks for is its last line: a message under a header line (an order's) asks too.
+    const asks = said.slice(said.lastIndexOf("\n") + 1);
+    if (asks.startsWith("approve:")) {
+      const command = asks.slice("approve:".length);
       turn = { waiting: "approval", command };
       out({ type: "assistant", message: { content: [{ type: "tool_use", id: "tool-1", name: "Bash", input: { command } }] }, session_id: sid });
       out({ type: "control_request", request_id: "perm-1", request: { subtype: "can_use_tool", tool_name: "Bash", input: { command }, description: "Run it" } });
-    } else if (said.startsWith("ask:")) {
+    } else if (asks.startsWith("ask:")) {
       turn = { waiting: "question" };
-      const input = { questions: [{ question: said.slice("ask:".length), header: "Pick", options: [{ label: "A", description: "the first" }, { label: "B", description: "" }], multiSelect: false }] };
+      const input = { questions: [{ question: asks.slice("ask:".length), header: "Pick", options: [{ label: "A", description: "the first" }, { label: "B", description: "" }], multiSelect: false }] };
       out({ type: "assistant", message: { content: [{ type: "tool_use", id: "tool-1", name: "AskUserQuestion", input }] }, session_id: sid });
       // The CLI asks the host for this tool in every permission mode.
       out({ type: "control_request", request_id: "perm-1", request: { subtype: "can_use_tool", tool_name: "AskUserQuestion", input, requires_user_interaction: true } });
-    } else if (said === "wait") {
+    } else if (asks === "wait") {
       turn = { waiting: "steer" };
       out({ type: "assistant", message: { content: [{ type: "tool_use", id: "tool-1", name: "Bash", input: { command: "sleep" } }] }, session_id: sid });
-    } else if (said === "huge") {
+    } else if (asks === "huge") {
       turn = { waiting: null };
       process.stdout.write(HUGE_LINE);
-    } else if (said.startsWith("bg:")) {
-      const n = Number(said.slice("bg:".length));
+    } else if (asks.startsWith("bg:")) {
+      const n = Number(asks.slice("bg:".length));
       const job = { task_id: "job-1", task_type: "local_bash", description: "sleep a while" };
       const notice = (body: string) => `<task-notification>\n<task-id>job-1</task-id>\n${body}\n</task-notification>`;
       const origin = { kind: "task-notification", producer: "session-task" };
