@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { accentVars, previewAccent } from "./widget-preview-app.tsx";
-import { previewFeed, previewOpacity, previewPage, previewStyle } from "./widget-preview.tsx";
+import { REL_COLOR_MATH_ATTR, REL_COLOR_MATH_TEST } from "./mono-accent.ts";
+import { previewFeed, previewOpacity, previewPage, previewStyle, relColorMathScript } from "./widget-preview.tsx";
 
 test("preview defaults to 76 and bounds finite opacity inputs", () => {
   for (const value of [null, "", " ", "invalid", "Infinity"]) expect(previewOpacity(value)).toBe(76);
@@ -72,4 +73,24 @@ test("the preview paints the picked accent, Aurora's without one, and lists a sw
   expect(html.match(/<button type="button" data-accent=/g)).toHaveLength(7);
   expect(html).toContain('data-accent="#c2410c" aria-pressed="true" aria-label="Warm"');
   expect(await previewPage(new URL("http://localhost/?accent=%22%3E%3Cscript%3E"))).toContain('style="--accent: #8b5cf6;');
+});
+
+test("the preview tests relative-colour math in <head>, as the panel does, in either card style", async () => {
+  for (const style of ["mono", "default"]) {
+    const html = await previewPage(new URL(`http://localhost/?style=${style}`));
+    const head = html.slice(0, html.indexOf('<link rel="stylesheet"'));
+    expect(head).toContain(`<script>${relColorMathScript()}</script>`);
+  }
+  const run = (supports: ((p: string, v: string) => boolean) | undefined) => {
+    const attrs = new Map<string, string>();
+    const CSS = supports ? { supports } : undefined;
+    const document = { documentElement: { setAttribute: (k: string, v: string) => void attrs.set(k, v) } };
+    new Function("window", "CSS", "document", relColorMathScript())({ CSS }, CSS, document);
+    return attrs;
+  };
+  const asked: string[][] = [];
+  expect(run((p, v) => (asked.push([p, v]), true)).get(REL_COLOR_MATH_ATTR)).toBe("");
+  expect(asked).toEqual([[REL_COLOR_MATH_TEST.property, REL_COLOR_MATH_TEST.value]]);
+  expect(run(() => false).size).toBe(0);
+  expect(run(undefined).size).toBe(0);
 });
