@@ -244,6 +244,19 @@ describe("start", () => {
     expect(heard).toContain("heard: also the label");
   });
 
+  test("a running delegate takes two messages, each read, and is still running after the first", async () => {
+    const d = await director("wait", { plain: true });
+    const del = (await start(d.token, { to: "engineer", brief: "wait" })).body.delegation;
+    await until(() => linesOf(del.to.runId!).some((l) => l.type === "assistant"));
+    expect(await (await call(d.token, "POST", `/api/delegations/${del.id}/steer`, { message: "keep: the label too" })).json()).toEqual({ ok: true });
+    await until(() => !!view(del.id).notes[1]?.readAt);
+    expect(view(del.id).state).toBe("running");
+    expect(await (await call(d.token, "POST", `/api/delegations/${del.id}/steer`, { message: "and the icon" })).json()).toEqual({ ok: true });
+    await until(() => view(del.id).state === "done");
+    expect(view(del.id).notes.map((n) => [n.kind, n.taken, !!n.readAt])).toEqual([["brief", undefined, false], ["say", true, true], ["say", true, true], ["result", undefined, false]]);
+    runs.stop(d.runId);
+  });
+
   test("a message added just as the delegate ends is refused as ended, recorded, never sent twice", async () => {
     const d = await director("wait", { plain: true });
     const del = (await start(d.token, { to: "engineer", brief: "quick" })).body.delegation;

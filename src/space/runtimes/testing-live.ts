@@ -8,7 +8,8 @@
  *   `ask:<question>`     the agent asks the question with the options `A` and `B`, then says
  *                        `answered <answers as JSON>` or `skipped`
  *   `wait`               a long step: the turn waits for a steered message (answered with
- *                        `heard: <text>`) or a stop
+ *                        `heard: <text>`) or a stop; Claude: a steered `keep:<text>` is heard
+ *                        and the turn goes on waiting
  *   `huge`               starts an event line over live chat's limit and never ends it or the turn
  *   anything else        `echo: <text> [pid <pid>]`, so a test can tell whether a process was reused
  * Both read these from the message's last line, so a message under a header line (an order's, a delegation's) asks too.
@@ -47,7 +48,8 @@ async function* lines(): AsyncGenerator<Json> {
 }
 
 async function claude(args: string[]): Promise<void> {
-  const sid = args.includes("--resume") ? args[args.indexOf("--resume") + 1]! : "live-session";
+  // A new conversation's id: `live-session`, or FAKE_LIVE_SESSION for a manual look with several conversations.
+  const sid = args.includes("--resume") ? args[args.indexOf("--resume") + 1]! : process.env.FAKE_LIVE_SESSION || "live-session";
   let model = args.includes("--model") ? args[args.indexOf("--model") + 1]! : "default";
   let mode = args[args.indexOf("--permission-mode") + 1]!;
   const effort = args.includes("--effort") ? args[args.indexOf("--effort") + 1]! : "default";
@@ -105,7 +107,8 @@ async function claude(args: string[]): Promise<void> {
     out({ ...m, session_id: sid, isReplay: true });
     if (turn?.waiting === "steer") {
       text(`heard: ${said}`);
-      result();
+      // `keep:` hears the message and goes on waiting, as a turn that takes it in and works on.
+      if (!said.startsWith("keep:")) result();
       continue;
     }
     out({ type: "system", subtype: "init", session_id: sid, model, permissionMode: mode });
