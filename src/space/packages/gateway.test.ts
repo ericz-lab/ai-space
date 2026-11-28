@@ -4,15 +4,17 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { terminalWebSocket } from "../terminal/api.ts";
-import { Connections } from "./connections.ts";
+import { Connections, type Connection } from "./connections.ts";
 import { PackageGateway, originLabel } from "./gateway.ts";
-import { PackageLinks, createConnectionRoutes } from "./links.ts";
+import { PackageLinks, createConnectionRoutes, type SharedApp } from "./links.ts";
 import { parsePackageManifest } from "./manifest.ts";
 import { PackageRuntime } from "./runtime.ts";
 
 const cleanups: (() => Promise<void> | void)[] = [];
 afterEach(async () => { for (const f of cleanups.splice(0).reverse()) await f(); });
-async function machine(label: string, publicBase?: string) {
+type OpenHandler = (connection: Connection, meta: Record<string, unknown>) => Promise<Response>;
+/** `open: false` is an owner of an older version, which has no `open` operation; a function answers it instead of the gateway. */
+async function machine(label: string, { publicBase, open }: { publicBase?: string; open?: false | OpenHandler } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "space-gateway-")); cleanups.push(() => rm(dir, { recursive: true, force: true }));
   const db = new Database(":memory:"); cleanups.push(() => db.close());
   const connections = new Connections(db, crypto.randomUUID());
@@ -37,18 +39,41 @@ const server = Bun.serve({ hostname: "127.0.0.1", port: Number(process.env.PORT)
   await runtime.register({ manifest, dir, index: { format: 1, target: { os: "any", arch: "any" }, sourceIncluded: true, files: [] } });
   let gateway: PackageGateway;
   const env: Record<string, string | undefined> = {};
-  const links = new PackageLinks(connections, { env, apps: () => [{ app: "notes", title: label, version: "1.0.0" }], handle: (_c, meta, body, signal) => gateway.local(meta, body, signal) });
+  const opens: Record<string, unknown>[] = [];
+  const direct: OpenHandler = open || ((c, meta) => gateway.openFor(c.id, meta.app as string, meta.path ?? "/"));
+  const links = new PackageLinks(connections, { env, apps: () => [{ app: "notes", title: label, version: "1.0.0" }] satisfies SharedApp[], handle: (_c, meta, body, signal) => gateway.local(meta, body, signal),
+    ...(open === false ? {} : { open: (c: Connection, meta: Record<string, unknown>) => { opens.push(meta); return direct(c, meta); } }) });
   cleanups.push(() => links.close());
   gateway = new PackageGateway(runtime, links, connections.spaceId);
   const port = gateway.start(0, publicBase); cleanups.push(() => gateway.close());
-  return { gateway, connections, links, runtime, port, env };
+  return { gateway, connections, links, runtime, port, env, opens, db };
 }
 
-async function browser(gateway: PackageGateway, target: Parameters<PackageGateway["open"]>[0]) {
+/**
+ * `owner` shares `notes` with `opener`, which dials it; `connected` waits for both ends. `sent` lists the `open`
+ * operations the opener sent.
+ */
+async function link(owner: Awaited<ReturnType<typeof machine>>, opener: Awaited<ReturnType<typeof machine>>, apps = ["notes"]) {
+  const invite = owner.connections.create({ remoteSpaceId: opener.connections.spaceId, direction: "incoming", apps });
+  const control = Bun.serve({ hostname: "127.0.0.1", port: 0, routes: createConnectionRoutes({ links: owner.links, token: "operator" }), websocket: terminalWebSocket, fetch: () => new Response("missing", { status: 404 }) });
+  cleanups.push(() => { control.stop(true); });
+  opener.env.LINK_TOKEN = invite.token;
+  const outgoing = opener.connections.create({ remoteSpaceId: owner.connections.spaceId, direction: "outgoing", url: control.url.origin, tokenEnv: "LINK_TOKEN" }).connection;
+  const connected = async () => { for (let i = 0; i < 100; i++) { opener.links.refresh(); if (opener.links.status()[0]?.connected && owner.links.status()[0]?.connected) return; await Bun.sleep(10); } throw new Error("offline"); };
+  await connected();
+  const sent: unknown[] = [];
+  const request = opener.links.request.bind(opener.links);
+  opener.links.request = (id, meta, ...rest) => { if ((meta as { operation?: string }).operation === "open") sent.push(meta); return request(id, meta, ...rest); };
+  return { incoming: invite.connection, target: { app: "notes", spaceId: owner.connections.spaceId, connectionId: outgoing.id }, connected, sent };
+}
+
+/** `port`: the gateway the URL's host is served by when that is not the URL's own port (a public origin's edge in front of it). */
+async function browser(gateway: PackageGateway, target: Parameters<PackageGateway["open"]>[0], port?: number) {
   const opened = await gateway.open(target);
   const url = new URL(opened.url);
   const request = (path: string, init: RequestInit = {}) => {
     const local = new URL(path, url); local.hostname = "127.0.0.1";
+    if (port) { local.protocol = "http:"; local.port = String(port); }
     return fetch(local, { ...init, redirect: "manual", headers: { host: url.host, ...Object.fromEntries(new Headers(init.headers)) } });
   };
   const response = await request(url.pathname + url.search);
@@ -120,7 +145,7 @@ if (process.env.SPACE_TEST_CADDY) test("Caddy HTTPS edge preserves app hosts, se
   const dir = await mkdtemp(join(tmpdir(), "space-caddy-test-")); cleanups.push(() => rm(dir, { recursive: true, force: true }));
   const listener = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } });
   const port = listener.port; listener.stop(true);
-  const m = await machine("edge", `https://apps.localhost:${port}`);
+  const m = await machine("edge", { publicBase: `https://apps.localhost:${port}` });
   const key = join(dir, "key.pem"), cert = join(dir, "cert.pem"), config = join(dir, "Caddyfile");
   const openssl = Bun.spawn(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", key, "-out", cert, "-days", "1", "-subj", "/CN=apps.localhost"], { stdout: "ignore", stderr: "ignore" });
   expect(await openssl.exited).toBe(0);
@@ -187,4 +212,121 @@ test("remote HTTP and WebSocket work over the peer outbound channel and revoke i
   expect(peer.links.status()[0]?.connected).toBe(false);
   expect((await b.request("/api/echo")).status).toBe(502);
   expect(await (await local.request("/api/echo")).json()).toMatchObject({ label: "peer" });
+});
+
+test("an owner with a public gateway hands the opener a ticket on its own origin, bound to the connection", async () => {
+  const owner = await machine("owner", { publicBase: "https://apps.test" }), opener = await machine("opener");
+  const l = await link(owner, opener);
+  const opened = await opener.gateway.open(l.target, "/api/echo?x=1");
+  const url = new URL(opened.url);
+  expect(opened).toMatchObject({ direct: true, spaceId: owner.connections.spaceId, app: "notes" });
+  expect(url.host).toBe(`${originLabel(owner.connections.spaceId, "notes")}.apps.test`);
+  expect(l.sent).toHaveLength(1);
+  // Nothing on the opener's gateway: the browser goes to the owner's.
+  expect((await fetch(`http://127.0.0.1:${opener.port}/`, { headers: { host: url.host } })).status).toBe(404);
+  owner.gateway.usageBeat = () => { throw new Error("another Space's operator does not beat here"); };
+  owner.gateway.feedback = (app) => new Response(`feedback ${app}`);
+  owner.gateway.uiKit = () => new Response("kit");
+  const b = await browser(opener.gateway, l.target, owner.port);
+  expect(b.url.origin).toBe(url.origin);
+  expect(await (await b.request("/api/echo", { method: "POST", headers: { origin: b.url.origin }, body: "direct" })).json()).toMatchObject({ label: "owner", body: "direct", cookie: null });
+  expect((await b.request("/_space/usage.js")).status).toBe(404);
+  expect((await b.request("/_space/usage/beat", { method: "POST", headers: { origin: b.url.origin }, body: "{}" })).status).toBe(404);
+  expect((await b.request("/_space/feedback.js")).status).toBe(404);
+  expect(await (await b.request("/_space/ui.css")).text()).toBe("kit");
+  // The owner's own operator on the same origin keeps its own session, with usage and feedback.
+  owner.gateway.usageBeat = () => {};
+  const own = await browser(owner.gateway, { app: "notes", spaceId: owner.connections.spaceId }, owner.port);
+  expect(own.url.origin).toBe(url.origin);
+  expect((await own.request("/_space/usage.js")).status).toBe(200);
+  expect(await (await own.request("/_space/feedback.js")).text()).toBe("feedback notes");
+  expect((await b.request("/_space/usage.js")).status).toBe(404);
+  expect(owner.opens.map((m) => m.path)).toEqual(["/api/echo?x=1", "/"]);
+  // A path that is not local never leaves the opener.
+  await expect(opener.gateway.open(l.target, "//evil.example")).rejects.toThrow(/local/);
+  // Each request reads the grant itself, not only the change it was told of.
+  owner.db.query("UPDATE package_connections SET apps='[]'").run();
+  expect((await b.request("/api/echo")).status).toBe(401);
+  expect((await own.request("/api/echo")).status).toBe(200);
+});
+
+test("a direct session ends with its grant: requests and sockets in flight are cut, then 401", async () => {
+  const owner = await machine("owner", { publicBase: "https://apps.test" }), opener = await machine("opener");
+  const l = await link(owner, opener);
+  const b = await browser(opener.gateway, l.target, owner.port);
+  const stream = await b.request("/stream");
+  const reader = stream.body!.getReader();
+  expect(new TextDecoder().decode((await reader.read()).value)).toContain("started");
+  const endpoint = new URL("/socket", b.url); endpoint.protocol = "ws:"; endpoint.hostname = "127.0.0.1"; endpoint.port = String(owner.port);
+  const ws = new WebSocket(endpoint, { headers: { host: b.url.host, origin: b.url.origin, cookie: b.cookie } } as unknown as string[]);
+  cleanups.push(() => ws.close());
+  await new Promise<void>((resolve, reject) => { ws.onopen = () => resolve(); ws.onerror = () => reject(new Error("socket failed")); });
+  const echo = new Promise<unknown>((resolve) => { ws.onmessage = (e) => resolve(e.data); });
+  ws.send("direct socket"); expect(await echo).toBe("direct socket");
+  expect(owner.runtime.status("notes")?.leases).toBe(2);
+  const own = await browser(owner.gateway, { app: "notes", spaceId: owner.connections.spaceId }, owner.port);
+  const closed = new Promise<void>((resolve) => { ws.onclose = () => resolve(); });
+  owner.connections.update(l.incoming.id, { apps: [] });
+  expect(await reader.read().then((r) => r.done, () => true)).toBe(true);
+  await closed;
+  for (let i = 0; i < 100 && owner.runtime.status("notes")?.leases; i++) await Bun.sleep(10);
+  expect(owner.runtime.status("notes")?.leases).toBe(0);
+  expect((await b.request("/api/echo")).status).toBe(401);
+  // The owner's own session is not the connection's.
+  expect(await (await own.request("/api/echo")).json()).toMatchObject({ label: "owner" });
+  // Granted again, a new direct open works; disabling the connection ends it as well.
+  owner.connections.update(l.incoming.id, { apps: ["notes"] });
+  const again = await browser(opener.gateway, l.target, owner.port);
+  expect((await again.request("/api/echo")).status).toBe(200);
+  owner.connections.update(l.incoming.id, { enabled: false });
+  expect((await again.request("/api/echo")).status).toBe(401);
+});
+
+test("an app not granted gets no ticket, and the refusal is not remembered", async () => {
+  const owner = await machine("owner", { publicBase: "https://apps.test" }), opener = await machine("opener");
+  const l = await link(owner, opener, []);
+  await expect(opener.gateway.open(l.target)).rejects.toThrow(/not shared/);
+  expect(l.sent).toHaveLength(1); expect(owner.opens).toHaveLength(0);
+  owner.connections.update(l.incoming.id, { apps: ["notes"] });
+  expect((await opener.gateway.open(l.target)).direct).toBe(true);
+  expect(l.sent).toHaveLength(2);
+});
+
+test("an owner without a public gateway, or of an older version, is proxied as before and not asked again", async () => {
+  for (const options of [{}, { publicBase: "https://apps.test", open: false as const }]) {
+    const owner = await machine("owner", options), opener = await machine("opener");
+    const l = await link(owner, opener);
+    const b = await browser(opener.gateway, l.target);
+    expect(b.url.hostname).toMatch(/\.localhost$/);
+    expect(await (await b.request("/api/echo")).json()).toMatchObject({ label: "owner" });
+    expect((await opener.gateway.open(l.target)).direct).toBeUndefined();
+    expect(l.sent).toHaveLength(1);
+    for (const f of cleanups.splice(0).reverse()) await f();
+  }
+});
+
+test("an owner's answer that is not a ticket on that app's origin is not followed", async () => {
+  let answer: { url: unknown } = { url: "" };
+  const owner = await machine("owner", { publicBase: "https://apps.test", open: async () => Response.json(answer) }), opener = await machine("opener");
+  const l = await link(owner, opener);
+  const label = originLabel(owner.connections.spaceId, "notes");
+  const forged = [
+    `https://${originLabel(opener.connections.spaceId, "notes")}.apps.test/_space/package-session?ticket=t`,
+    `https://${label}-x.apps.test/_space/package-session?ticket=t`,
+    `http://${label}.apps.test/_space/package-session?ticket=t`,
+    `https://${label}.apps.test/elsewhere?ticket=t`,
+    `https://${label}.apps.test/_space/package-session?ticket=t&next=https://evil.example`,
+    `https://user:pass@${label}.apps.test/_space/package-session?ticket=t`,
+    `https://${label}/_space/package-session?ticket=t`,
+    "not a url", 42,
+  ];
+  for (const url of forged) {
+    answer = { url };
+    const opened = await opener.gateway.open(l.target);
+    expect(opened.direct).toBeUndefined();
+    expect(new URL(opened.url).hostname).toMatch(/\.localhost$/);
+  }
+  expect(l.sent).toHaveLength(forged.length);
+  answer = { url: `https://${label}.apps.test/_space/package-session?ticket=t` };
+  expect(await opener.gateway.open(l.target)).toMatchObject({ direct: true, url: answer.url });
 });

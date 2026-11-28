@@ -12,10 +12,18 @@ import { USAGE_PATH, USAGE_SCRIPT } from "../usage/script.ts";
 
 type Target = { app: string; spaceId: string; connectionId?: string };
 type Entry = Target & { label: string; origin: string };
-type Session = { entry: Entry; expires: number; path?: string };
+/**
+ * `via` binds a ticket, and the session it becomes, to the connection a direct open came over (`openFor`):
+ * it gets what that connection's grant gives, checked on every request, and ends with the grant.
+ */
+type Session = { entry: Entry; expires: number; path?: string; via?: string };
+/** In-flight work of a `via` session: aborted when its connection or its app grant goes. */
+type Work = { via: string; app: string; controller: AbortController };
 const COOKIE = "__space_package_session";
 const TICKET_PATH = "/_space/package-session";
 const METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"];
+/** How long a hub skips the direct open of a connection whose owner cannot do it (older, or no public gateway). */
+export const NO_DIRECT_MS = 5 * 60_000;
 const PRIVATE_HEADERS = new Set(["host", "origin", "connection", "upgrade", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailer", "transfer-encoding", "content-length", "forwarded"]);
 
 /** An app-only virtual-host server, deliberately separate from the operator panel's routes. */
@@ -24,7 +32,13 @@ export class PackageGateway {
   private readonly tickets = new Map<string, Session>();
   private readonly sessions = new Map<string, Session>();
   private readonly entries = new Map<string, Entry>();
+  private readonly work = new Set<Work>();
+  /** Connections whose owner answered that it cannot open directly, until when (`NO_DIRECT_MS`). */
+  private readonly noDirect = new Map<string, number>();
   private base?: URL;
+  /** Whether `base` is a public HTTPS origin (`SPACE_PACKAGE_BASE_URL`), the only one handed to another Space. */
+  private publicBase = false;
+  private readonly unsubscribe: () => void;
   /** Records a local app's usage heartbeat; set once the usage service exists. Unset, the paths are 404. */
   usageBeat?: (app: string, tab: unknown) => void;
   /** Answers a local app's `/_space/feedback*` (docs/feedback.md) as the router does for source apps; unset, they are 404. */
@@ -37,7 +51,16 @@ export class PackageGateway {
    * on an isolated origin (docs/app-packages.md#source-apps-over-a-connection).
    */
   servicePort?: (app: string) => number | undefined;
-  constructor(readonly runtime: PackageRuntime, readonly links: PackageLinks, readonly spaceId: string) {}
+  constructor(readonly runtime: PackageRuntime, readonly links: PackageLinks, readonly spaceId: string) {
+    // A session opened directly over a connection ends with it, as the channel's streams do (links.ts).
+    this.unsubscribe = links.connections.onChange((id, change) => {
+      if (change.kind === "label") return;
+      if (change.kind === "reset") this.noDirect.delete(id);
+      const gone = change.kind === "grants" ? (app: string) => change.revoked.includes(app) : () => true;
+      for (const w of this.work) if (w.via === id && gone(w.app)) { this.work.delete(w); w.controller.abort(); }
+      for (const map of [this.tickets, this.sessions]) for (const [key, s] of map) if (s.via === id && gone(s.entry.app)) map.delete(key);
+    });
+  }
 
   start(port: number, publicBase?: string): number {
     const base = publicBase ? new URL(publicBase) : undefined;
@@ -45,12 +68,17 @@ export class PackageGateway {
     if (this.server) throw new Error("package gateway already started");
     this.server = Bun.serve({ hostname: "127.0.0.1", port, idleTimeout: 255, websocket: terminalWebSocket, fetch: (req, server) => this.fetch(req, server) });
     this.base = base ?? new URL(`http://localhost:${this.server.port}`);
+    this.publicBase = !!base;
     return this.server.port!;
   }
 
-  close(): void { this.server?.stop(true); this.tickets.clear(); this.sessions.clear(); this.entries.clear(); }
+  close(): void {
+    this.unsubscribe(); this.server?.stop(true);
+    for (const w of this.work) w.controller.abort();
+    this.work.clear(); this.tickets.clear(); this.sessions.clear(); this.entries.clear(); this.noDirect.clear();
+  }
 
-  async open(target: Target, path = "/"): Promise<{ url: string; spaceId: string; app: string }> {
+  async open(target: Target, path = "/"): Promise<{ url: string; spaceId: string; app: string; direct?: true }> {
     requestPath(path);
     if (!this.base) throw new Error("application gateway is disabled; configure SPACE_PACKAGE_PORT");
     installationKey(target.spaceId, target.app);
@@ -59,21 +87,58 @@ export class PackageGateway {
     } else {
       const c = target.connectionId ? this.links.connections.get(target.connectionId) : undefined;
       if (!c || c.remoteSpaceId !== target.spaceId) throw new Error("application connection does not match Space identity");
+      // First ask the owner for a ticket on its own gateway: one round trip, then the browser talks to it directly.
+      const direct = await this.direct(c.id, target, path);
+      if (direct) return { url: direct, spaceId: target.spaceId, app: target.app, direct: true };
       const response = await this.links.request(c.id, { operation: "catalogue" });
       const catalogue = await response.json() as { spaceId: string; apps: { app: string; page?: boolean }[] };
       const shared = catalogue.spaceId === target.spaceId ? catalogue.apps.find((a) => a.app === target.app) : undefined;
       if (!shared) throw new Error("remote application is not shared");
       if (shared.page === false) throw new Error("remote application has no page");
     }
+    return { url: this.ticket(target, path), spaceId: target.spaceId, app: target.app };
+  }
+
+  /**
+   * A direct open asked over connection `via` (links.ts `open` operation, after its grant was checked): a ticket on
+   * this Space's own origin of the local app, bound to that connection, as `{ url }`. Only an installed package's page
+   * on a public gateway: the loopback default means nothing to another Space, and a spec-1 page is not shared.
+   */
+  async openFor(via: string, app: string, path: unknown = "/"): Promise<Response> {
+    if (!this.base || !this.publicBase) return Response.json({ error: "direct open not available" }, { status: 404 });
+    if (!this.runtime.get(app)?.manifest.launch) return Response.json({ error: "application has no page" }, { status: 404 });
+    try { return Response.json({ url: this.ticket({ app, spaceId: this.spaceId }, requestPath(path), via) }); }
+    catch (e) { return Response.json({ error: (e as Error).message }, { status: 400 }); }
+  }
+
+  private ticket(target: Target, path: string, via?: string): string {
     this.prune();
     if (this.tickets.size + this.sessions.size >= 1024) throw new Error("application session limit reached");
     const label = originLabel(target.spaceId, target.app);
-    const origin = new URL(this.base); origin.hostname = `${label}.${origin.hostname}`;
+    const origin = new URL(this.base!); origin.hostname = `${label}.${origin.hostname}`;
     const entry = { ...target, label, origin: origin.origin };
     this.entries.set(origin.host, entry);
     const ticket = randomBytes(32).toString("base64url");
-    this.tickets.set(ticket, { entry, path, expires: Date.now() + 30_000 });
-    return { url: `${origin.origin}${TICKET_PATH}?ticket=${ticket}`, spaceId: target.spaceId, app: target.app };
+    this.tickets.set(ticket, { entry, path, expires: Date.now() + 30_000, ...(via ? { via } : {}) });
+    return `${origin.origin}${TICKET_PATH}?ticket=${ticket}`;
+  }
+
+  /**
+   * The owner's ticket URL for a direct open, or undefined to proxy as before: an owner that is older (403), has no public
+   * gateway (404) or is slow, or an answer that is not a ticket on that app's origin of that Space. Only an offline Space throws.
+   */
+  private async direct(id: string, target: Target, path: string): Promise<string | undefined> {
+    if ((this.noDirect.get(id) ?? 0) > Date.now()) return undefined;
+    let response: Response;
+    try { response = await this.links.request(id, { operation: "open", app: target.app, path }, null, AbortSignal.timeout(5000)); }
+    catch (e) { if ((e as Error).message === "remote Space is offline") throw e; return undefined; }
+    let answer: { url?: unknown; error?: unknown } | undefined;
+    try { answer = await response.json() as typeof answer; } catch { await response.body?.cancel().catch(() => {}); return undefined; }
+    // Not this owner at all, for any app: skip it for a while. A refusal of one app is not cached.
+    if (response.status === 403 && answer?.error === "operation not allowed" || response.status === 404 && answer?.error === "direct open not available") {
+      this.noDirect.set(id, Date.now() + NO_DIRECT_MS); return undefined;
+    }
+    return response.status === 200 && typeof answer?.url === "string" ? directUrl(answer.url, originLabel(target.spaceId, target.app)) : undefined;
   }
 
   /** The owning Space calls this only after its connection's local app grant was checked. */
@@ -152,7 +217,7 @@ export class PackageGateway {
       const ticket = this.tickets.get(token); this.tickets.delete(token);
       if (req.method !== "GET" || !ticket || ticket.expires <= Date.now() || ticket.entry.origin !== entry.origin) return new Response("Invalid or expired application ticket", { status: 403 });
       const session = randomBytes(32).toString("base64url");
-      this.sessions.set(session, { entry, expires: Date.now() + 12 * 3600_000 });
+      this.sessions.set(session, { entry, expires: Date.now() + 12 * 3600_000, ...(ticket.via ? { via: ticket.via } : {}) });
       // Commit a document on the app origin before navigating: Strict cookies are omitted in
       // a cross-site HTTP redirect chain, including a freshly issued cookie on its final hop.
       const path = (ticket.path ?? "/").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
@@ -161,24 +226,31 @@ export class PackageGateway {
     const values = (req.headers.get("cookie") ?? "").split(";").map((p) => p.trim()).filter((p) => p.startsWith(`${COOKIE}=`)).map((p) => p.slice(COOKIE.length + 1));
     const session = values.length === 1 ? this.sessions.get(values[0]!) : undefined;
     if (!session || session.expires <= Date.now() || session.entry.origin !== entry.origin) return new Response("Open this application from Space", { status: 401 });
+    // A direct open gets what its connection's grant gives now, no more.
+    if (session.via && !this.links.connections.allows(session.via, entry.app)) { this.sessions.delete(values[0]!); return new Response("Open this application from Space", { status: 401 }); }
+    const remote = !!(entry.connectionId || session.via);
     const origin = req.headers.get("origin");
     const site = req.headers.get("sec-fetch-site");
     if (origin && origin !== entry.origin || !origin && site && site !== "same-origin" && site !== "none" && req.headers.get("sec-fetch-mode") !== "navigate") return new Response("Cross-origin application request refused", { status: 403 });
     if (!origin && !["GET", "HEAD"].includes(req.method) && site !== "same-origin") return new Response("Application write requires same origin", { status: 403 });
     if (url.pathname === "/_space/ui.css") return this.uiKit ? this.uiKit(req) : new Response("Not found", { status: 404 });
-    const usage = this.usageResponse(req, entry, url.pathname);
+    const usage = this.usageResponse(req, entry, url.pathname, remote);
     if (usage) return usage;
     if (url.pathname === "/_space/feedback.js" || url.pathname === "/_space/feedback" || url.pathname.startsWith("/_space/feedback/")) {
-      // The app is the session's, never the page's; a remote app's feedback belongs to its own Space.
-      return entry.connectionId || !this.feedback ? new Response("Not found", { status: 404 }) : this.feedback(entry.app, req);
+      // The app is the session's, never the page's; a remote app's feedback belongs to its own Space, and
+      // another Space's operator opening this one's app directly does not file it here either.
+      return remote || !this.feedback ? new Response("Not found", { status: 404 }) : this.feedback(entry.app, req);
     }
     const headers = appHeaders([...req.headers]);
     const cookie = (headers.get("cookie") ?? "").split(";").filter((p) => !p.trim().startsWith(`${COOKIE}=`)).join(";");
     if (cookie) headers.set("cookie", cookie); else headers.delete("cookie");
     const meta = { operation: "fetch", app: entry.app, path: url.pathname + url.search, method: req.method, headers: [...headers] };
     try {
-      if (req.headers.get("upgrade")?.toLowerCase() === "websocket") return await this.browserSocket(req, server, entry, { ...meta, operation: "socket" });
-      const upstream = await this.dispatch(entry, meta, req.body, req.signal);
+      if (req.headers.get("upgrade")?.toLowerCase() === "websocket") return await this.browserSocket(req, server, entry, { ...meta, operation: "socket" }, session.via);
+      const work = session.via ? this.track(session.via, entry.app) : undefined;
+      let upstream: Response;
+      try { upstream = await this.dispatch(entry, meta, req.body, work ? AbortSignal.any([req.signal, work.signal]) : req.signal); }
+      catch (e) { work?.done(); throw e; }
       const output = new Headers(upstream.headers);
       output.delete("set-cookie");
       for (const cookie of upstream.headers.getSetCookie()) {
@@ -188,22 +260,35 @@ export class PackageGateway {
       }
       output.set("referrer-policy", "no-referrer"); output.set("origin-agent-cluster", "?1");
       output.set("x-content-type-options", "nosniff");
-      return new Response(req.method === "HEAD" ? null : upstream.body, { status: upstream.status, headers: output });
+      const response = new Response(req.method === "HEAD" ? null : upstream.body, { status: upstream.status, headers: output });
+      return work ? holdResponse(response, output, work.done) : response;
     } catch { return new Response("Application is unavailable", { status: 502 }); }
   }
 
-  private browserSocket(req: Request, server: Server<WsData>, entry: Entry, meta: unknown): Promise<Response | undefined> {
+  private browserSocket(req: Request, server: Server<WsData>, entry: Entry, meta: unknown, via?: string): Promise<Response | undefined> {
     if (req.headers.get("origin") !== entry.origin) return Promise.resolve(new Response("Socket origin refused", { status: 403 }));
-    return upgradeToChannelSocket(req, server, (input, signal) => this.dispatch(entry, meta, input, signal));
+    return upgradeToChannelSocket(req, server, (input, signal) => {
+      if (!via) return this.dispatch(entry, meta, input, signal);
+      const work = this.track(via, entry.app);
+      signal.addEventListener("abort", work.done, { once: true });
+      return this.dispatch(entry, meta, input, AbortSignal.any([signal, work.signal])).catch((e) => { work.done(); throw e; });
+    });
+  }
+
+  /** One in-flight request or socket of a `via` session: `signal` aborts when the grant goes; `done` forgets it. */
+  private track(via: string, app: string): { signal: AbortSignal; done: () => void } {
+    const w = { via, app, controller: new AbortController() };
+    this.work.add(w);
+    return { signal: w.controller.signal, done: () => { this.work.delete(w); } };
   }
 
   /**
    * The usage heartbeat (docs/usage.md) on a local app's origin, as the router does for source apps.
    * The app is the session's, never the page's. A remote app's beat belongs to its own Space.
    */
-  private usageResponse(req: Request, entry: Entry, path: string): Response | Promise<Response> | undefined {
+  private usageResponse(req: Request, entry: Entry, path: string, remote: boolean): Response | Promise<Response> | undefined {
     if (path !== "/_space/usage.js" && path !== USAGE_PATH) return undefined;
-    if (entry.connectionId || !this.usageBeat) return new Response("Not found", { status: 404 });
+    if (remote || !this.usageBeat) return new Response("Not found", { status: 404 });
     if (path === "/_space/usage.js") {
       if (req.method !== "GET" && req.method !== "HEAD") return new Response("Method not allowed", { status: 405 });
       return new Response(req.method === "HEAD" ? null : USAGE_SCRIPT, { headers: { "content-type": "text/javascript; charset=utf-8", "cache-control": "public, max-age=3600", "x-content-type-options": "nosniff" } });
@@ -237,6 +322,18 @@ export function originLabel(spaceId: string, app: string): string {
   const hash = sha256(new TextEncoder().encode(installationKey(spaceId, app))).slice(0, 16);
   const name = app.replace(/[._-]+/g, "-").slice(0, 40).replace(/^-+|-+$/g, "");
   return `${name}-${hash}`;
+}
+
+/**
+ * A direct open's ticket URL as the owner answered it, if it is one: HTTPS without credentials, exactly the ticket path
+ * with only a ticket, on a host whose first label is `label`, the origin of that app of that Space. Else undefined.
+ */
+function directUrl(raw: string, label: string): string | undefined {
+  let u: URL;
+  try { u = new URL(raw); } catch { return undefined; }
+  if (u.protocol !== "https:" || u.username || u.password || u.hash || u.pathname !== TICKET_PATH || !u.hostname.startsWith(`${label}.`)) return undefined;
+  if ([...u.searchParams.keys()].join() !== "ticket" || !u.searchParams.get("ticket")) return undefined;
+  return u.href;
 }
 
 /**
