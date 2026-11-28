@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Policy } from "./auth/gate.ts";
-import { guardHosts, hostAllowed, hostName, hostRules } from "./hosts.ts";
+import { fromLoopback, guardHosts, hostAllowed, hostName, hostRules, localViewer } from "./hosts.ts";
 
 const rules = hostRules({ panelHost: "space.example.com", domain: "apps.example.net", allowed: "box.tail1234.ts.net, *.lan.example.org" });
 
@@ -50,5 +50,26 @@ describe("guardHosts", () => {
   test("public and self routes are not checked", async () => {
     expect(guarded["/healthz"]).toBe(ok);
     expect(guarded["/api/peer/snapshot"].GET).toBe(ok);
+  });
+});
+
+describe("fromLoopback and localViewer", () => {
+  const at = (address: string) => ({ requestIP: () => ({ address }) });
+  const req = (path = "/api/apps", headers: Record<string, string> = {}) => new Request(`http://127.0.0.1:8700${path}`, { headers });
+
+  test("a loopback peer with no forwarding header is this machine", () => {
+    for (const ip of ["127.0.0.1", "127.3.4.5", "::1", "::ffff:127.0.0.1"]) expect(fromLoopback(req(), at(ip))).toBe(true);
+    for (const ip of ["192.168.1.5", "10.0.0.1", "::ffff:10.0.0.1"]) expect(fromLoopback(req(), at(ip))).toBe(false);
+    for (const h of ["x-forwarded-for", "forwarded", "cf-connecting-ip", "x-real-ip"]) expect(fromLoopback(req("/api/apps", { [h]: "203.0.113.9" }), at("127.0.0.1"))).toBe(false);
+    // An in-process call has no peer address.
+    expect(fromLoopback(req(), undefined)).toBe(false);
+    expect(fromLoopback(req(), { requestIP: () => null })).toBe(false);
+  });
+
+  test("a viewer here unless switched off or a peer's /api/peer call", () => {
+    expect(localViewer(req(), at("127.0.0.1"))).toBe(true);
+    expect(localViewer(req(), at("127.0.0.1"), false)).toBe(false);
+    expect(localViewer(req("/api/peer/snapshot"), at("127.0.0.1"))).toBe(false);
+    expect(localViewer(req(), at("192.168.1.5"))).toBe(false);
   });
 });

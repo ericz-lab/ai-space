@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import { expect, test } from "bun:test";
 import { guardBrowserWrites } from "../auth.ts";
+import { localViewer } from "../hosts.ts";
 import { terminalWebSocket } from "../terminal/api.ts";
 import { workspacePaths } from "../workspace.ts";
 import { Connections } from "./connections.ts";
@@ -77,5 +78,24 @@ test("an app's process is started, stopped and given a mode over the operator ro
     expect(listed.runtime).toMatchObject({ state: "stopped", kind: "process", declaredMode: "on-demand" });
     expect((await send("/api/packages/apps/demo/runtime", { mode: "default", action: "restart" }, operator)).body).toMatchObject({ ok: true, runtime: { state: "running", mode: "on-demand" } });
     expect(store.runtimeSetting("demo")).toEqual({});
+  } finally { server.stop(true); gateway.close(); links.close(); await runtime.close(0); db.close(); }
+});
+
+test("the panel's entry gives a viewer at this machine the loopback ticket, and one through a proxy the public", async () => {
+  const db = new Database(":memory:"), store = new PackageStore(db);
+  const runtime = new PackageRuntime({ logDir: "/unused", envFor: async () => ({}) });
+  await runtime.register({
+    dir: "/unused", index: { format: 1, target: { os: "any", arch: "any" }, sourceIncluded: true, files: [] },
+    manifest: parsePackageManifest("spec: 2\nname: demo\nversion: 1.0.0\nrequires: { spaceApi: 1, bun: 1.3.0 }\noffline: { features: [Read], online: [] }\nlaunch: { kind: process, runtime: bun, entry: app.ts, health: /healthz }"),
+  });
+  const links = new PackageLinks(new Connections(db, store.spaceId), { env: {}, apps: () => [] });
+  const gateway = new PackageGateway(runtime, links, store.spaceId);
+  const port = gateway.start(0, "https://apps.test");
+  const routes = createPackagePanelRoutes({ installer: new PackageInstaller(workspacePaths("/unused"), store), token: "operator-only", runtime, gateway, links, localViewer });
+  const server = Bun.serve({ port: 0, hostname: "127.0.0.1", websocket: terminalWebSocket, routes, fetch: () => new Response("missing", { status: 404 }) });
+  try {
+    const open = async (headers: Record<string, string> = {}) => new URL((await fetch(new URL("/_space/apps/demo", server.url), { headers, redirect: "manual" })).headers.get("location")!).host;
+    expect(await open()).toMatch(new RegExp(`^demo-[0-9a-f]{16}\\.localhost:${port}$`));
+    expect(await open({ "x-forwarded-for": "203.0.113.9" })).toMatch(/^demo-[0-9a-f]{16}\.apps\.test$/);
   } finally { server.stop(true); gateway.close(); links.close(); await runtime.close(0); db.close(); }
 });

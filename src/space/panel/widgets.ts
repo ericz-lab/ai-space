@@ -1,6 +1,6 @@
 import type { Manifest, ManifestWidget } from "../scheduler/manifest.ts";
 import { iconUrl, resolveLink, type ViewI18n, widgetI18n } from "./view.ts";
-import type { AppRegistry } from "./registry.ts";
+import { type AppRegistry, manifestFor } from "./registry.ts";
 import { type CardAction, MAX_ACTION_VALUE, type WidgetBlock, type WidgetViewDef, declaredActions, dedupeActionIds, sanitizeActions, sanitizeBlocks, sanitizeViews } from "./blocks.ts";
 
 /**
@@ -50,6 +50,7 @@ const MAX_ITEMS = 20;
 const ERROR_RETRY_MS = 30_000;
 
 export class WidgetFeed {
+  /** The payloads as the sources sent them, links unresolved: each read resolves them for its viewer. */
   private readonly cache = new Map<string, { at: number; data: WidgetResult }>();
 
   constructor(
@@ -57,17 +58,22 @@ export class WidgetFeed {
     private readonly opts: { fetch?: typeof fetch; timeoutMs?: number; appFetch?: (app: string, path: string, init: RequestInit) => Promise<Response> } = {},
   ) {}
 
-  /** Every widget of every visible app, in registry order (the API applies the layout order). */
-  async all(): Promise<WidgetView[]> {
+  /**
+   * Every widget of every visible app, in registry order (the API applies the layout order). `local`: the
+   * viewer is at this machine, and the links follow an app's loopback url (registry.ts `manifestFor`).
+   */
+  async all(local = false): Promise<WidgetView[]> {
     const out: Promise<WidgetView>[] = [];
-    for (const { manifest } of this.registry.list()) {
+    for (const entry of this.registry.list()) {
+      const { manifest } = entry;
       if (manifest.status === "archived") continue;
-      for (const w of manifest.widgets) out.push(this.one(manifest, w));
+      for (const w of manifest.widgets) out.push(this.one(manifest, w, manifestFor(entry, local)));
     }
     return Promise.all(out);
   }
 
-  async one(m: Manifest, w: ManifestWidget): Promise<WidgetView> {
+  /** `at`: the manifest whose url the links resolve against, `m` itself unless the viewer gets another url. */
+  async one(m: Manifest, w: ManifestWidget, at: Manifest = m): Promise<WidgetView> {
     const id = `${m.app}/${w.name}`;
     const base = {
       id,
@@ -76,7 +82,7 @@ export class WidgetFeed {
       title: w.title ?? m.title ?? m.app,
       ...widgetI18n(m, w),
       icon: iconUrl(m),
-      link: resolveLink(m, w.link),
+      link: resolveLink(at, w.link),
       kind: w.kind,
       size: w.size,
       refreshMs: w.refreshMs,
@@ -86,10 +92,10 @@ export class WidgetFeed {
     // A failure is retried sooner than a payload is refreshed: a source restarting for a deploy
     // should not leave the card on its error for a whole `refresh`.
     const ttl = hit?.data.ok === false ? Math.min(w.refreshMs, ERROR_RETRY_MS) : w.refreshMs;
-    if (hit && Date.now() - hit.at < ttl) return { ...base, ...hit.data };
+    if (hit && Date.now() - hit.at < ttl) return { ...base, ...withLinks(at, hit.data) };
     const data = await this.fetchItems(m, w);
     this.cache.set(id, { at: Date.now(), data });
-    return { ...base, ...data };
+    return { ...base, ...withLinks(at, data) };
   }
 
   /** Forgets a widget's cached payload: the next read fetches the source. */
@@ -97,20 +103,21 @@ export class WidgetFeed {
     this.cache.delete(id);
   }
 
-  /** The `items` widget of an active app, or undefined. */
-  private find(app: string, name: string): { m: Manifest; w: ManifestWidget } | undefined {
-    const m = this.registry.get(app)?.manifest;
-    if (!m || m.status === "archived") return undefined;
+  /** The `items` widget of an active app, with the manifest its viewer's links resolve against, or undefined. */
+  private find(app: string, name: string, local: boolean): { m: Manifest; w: ManifestWidget; at: Manifest } | undefined {
+    const entry = this.registry.get(app);
+    const m = entry?.manifest;
+    if (!entry || !m || m.status === "archived") return undefined;
     const w = m.widgets.find((x) => x.name === name && x.kind === "items");
-    return w ? { m, w } : undefined;
+    return w ? { m, w, at: manifestFor(entry, local) } : undefined;
   }
 
   /** Drops the cache entry and reads the source again (POST /api/widgets/:app/:name/refresh). */
-  async refresh(app: string, name: string): Promise<WidgetActResult> {
-    const f = this.find(app, name);
+  async refresh(app: string, name: string, local = false): Promise<WidgetActResult> {
+    const f = this.find(app, name, local);
     if (!f) return { ok: false, status: 404, error: `unknown widget: ${app}/${name}` };
     this.invalidate(`${app}/${name}`);
-    return { ok: true, widget: await this.one(f.m, f.w) };
+    return { ok: true, widget: await this.one(f.m, f.w, f.at) };
   }
 
   /**
@@ -118,10 +125,10 @@ export class WidgetFeed {
    * Only an id the widget's latest payload declares is forwarded; on success the cache is dropped and
    * the card comes back fresh, with the app's `message`.
    */
-  async act(app: string, name: string, req: { action?: unknown; value?: unknown }): Promise<WidgetActResult> {
-    const f = this.find(app, name);
+  async act(app: string, name: string, req: { action?: unknown; value?: unknown }, local = false): Promise<WidgetActResult> {
+    const f = this.find(app, name, local);
     if (!f) return { ok: false, status: 404, error: `unknown widget: ${app}/${name}` };
-    const { m, w } = f;
+    const { m, w, at } = f;
     if (typeof req.action !== "string" || !req.action) return { ok: false, status: 400, error: "action must be a string" };
     const current = await this.one(m, w);
     if (!current.ok) return { ok: false, status: 502, error: current.error };
@@ -148,7 +155,7 @@ export class WidgetFeed {
     }
     if (answer.ok !== true) return { ok: false, status: 502, error: typeof answer.error === "string" && answer.error ? answer.error.slice(0, 200) : "the app refused the action" };
     this.invalidate(current.id);
-    const widget = await this.one(m, w);
+    const widget = await this.one(m, w, at);
     return { ok: true, widget, ...(answer.message !== undefined ? { message: answer.message } : {}) };
   }
 
@@ -170,14 +177,14 @@ export class WidgetFeed {
       if (j.ok !== true || !Array.isArray(j.items)) throw new Error(typeof j.error === "string" ? j.error : "response is not { ok: true, items: [] }");
       const items = j.items.slice(0, MAX_ITEMS).map((it: Record<string, unknown>) => ({
         text: String(it?.text ?? ""),
-        url: typeof it?.url === "string" && it.url ? contentLink(m, it.url) : "",
+        url: typeof it?.url === "string" ? it.url : "",
         time: typeof it?.time === "string" ? it.time : "",
       }));
       const out: WidgetData = { ok: true, items };
       const blocks = sanitizeBlocks(j.blocks);
-      if (blocks) out.blocks = blockLinks(m, blocks);
+      if (blocks) out.blocks = blocks;
       const views = sanitizeViews(j.views);
-      if (views) out.views = views.map((v) => ({ ...v, blocks: blockLinks(m, v.blocks) }));
+      if (views) out.views = views;
       const actions = sanitizeActions(j.actions);
       if (actions) out.actions = actions;
       dedupeActionIds(out);
@@ -190,7 +197,18 @@ export class WidgetFeed {
   }
 }
 
-/** Block links (and a tank's) resolved against the app's public URL like an item's; a link that does not pass is dropped. */
+/** A cached payload with its item, block and view links resolved against `m`'s url, as the viewer gets it. */
+function withLinks(m: Manifest, data: WidgetResult): WidgetResult {
+  if (!data.ok) return data;
+  return {
+    ...data,
+    items: data.items.map((it) => ({ ...it, url: it.url ? contentLink(m, it.url) : "" })),
+    ...(data.blocks ? { blocks: blockLinks(m, data.blocks) } : {}),
+    ...(data.views ? { views: data.views.map((v) => ({ ...v, blocks: blockLinks(m, v.blocks) })) } : {}),
+  };
+}
+
+/** Block links (and a tank's) resolved against the app's URL like an item's; a link that does not pass is dropped. */
 function blockLinks(m: Manifest, blocks: WidgetBlock[]): WidgetBlock[] {
   return blocks.map((block) => {
     let b = block;
@@ -208,7 +226,7 @@ function blockLinks(m: Manifest, blocks: WidgetBlock[]): WidgetBlock[] {
   });
 }
 
-/** An item's or block's link, relative to the app's public URL; only http(s) reaches the page. */
+/** An item's or block's link, relative to the app's URL (the public one, or its loopback form for a local viewer); only http(s) reaches the page. */
 function contentLink(m: Manifest, url: string): string {
   const abs = resolveLink(m, url);
   return /^https?:\/\//.test(abs) || m.spec === 2 && abs.startsWith("/_space/apps/") ? abs : "";

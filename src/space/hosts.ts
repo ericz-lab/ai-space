@@ -91,3 +91,28 @@ export function guardHosts<T extends Record<string, unknown>>(routes: T, policie
   }
   return out as T;
 }
+
+type PeerAddress = { requestIP?: (req: Request) => { address: string } | null } | undefined;
+
+/** A loopback peer address: 127.0.0.0/8, ::1 or an IPv4-mapped 127 address. */
+export const LOOPBACK_IP = /^(?:127\.\d+\.\d+\.\d+|::1|::ffff:127\.\d+\.\d+\.\d+)$/;
+const FORWARDED = ["x-forwarded-for", "forwarded", "cf-connecting-ip", "x-real-ip"];
+
+/**
+ * A request straight from this machine: a loopback peer and no proxy's forwarding headers (a tunnel
+ * or the router in front always adds them). No server (an in-process call) is never one.
+ */
+export function fromLoopback(req: Request, server: PeerAddress): boolean {
+  if (FORWARDED.some((h) => req.headers.has(h))) return false;
+  const ip = server?.requestIP?.(req)?.address;
+  return ip !== undefined && LOOPBACK_IP.test(ip);
+}
+
+/**
+ * A panel request from a viewer at this machine (docs/router.md#a-viewer-on-this-machine), who is
+ * given an app's loopback address: `fromLoopback`, and not a peer's `/api/peer/*` call, whose answer
+ * is shown on another machine. `SPACE_LOCAL_OPEN=off` (`on` false) turns it off for everyone.
+ */
+export function localViewer(req: Request, server: unknown, on = true): boolean {
+  return on && !new URL(req.url).pathname.startsWith("/api/peer/") && fromLoopback(req, server as PeerAddress);
+}

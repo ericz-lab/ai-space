@@ -174,7 +174,9 @@ export function createPeerServeHandlers(opts: Omit<PeerServeOptions, "token">): 
 
   /**
    * Call a local GET route in-process and return its JSON body. The lists are read with the
-   * manifests' icons: this machine's icon pack is its own panel's, a hub shows its own.
+   * manifests' icons: this machine's icon pack is its own panel's, a hub shows its own. With no server
+   * the call is never a viewer at this machine (hosts.ts `localViewer`): the apps' public urls, wherever
+   * the peer request came from.
    */
   const local = async <T>(routes: Routes, path: string, base: string): Promise<T> => {
     const url = new URL(path, base);

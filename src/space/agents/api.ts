@@ -15,7 +15,7 @@ import type { AppCapabilities } from "../bus/bus.ts";
 import { capabilitiesPrompt } from "../bus/prompt.ts";
 import { type IconPacks, applyToAgent } from "../panel/icons.ts";
 import { type LayoutStore, orderBy } from "../panel/layout.ts";
-import type { AppRegistry } from "../panel/registry.ts";
+import { type AppRegistry, manifestFor } from "../panel/registry.ts";
 import { type AgentView, agentView } from "../panel/view.ts";
 import type { PeerHub } from "../peers/hub.ts";
 import type { RuntimeRegistry } from "../runtimes/registry.ts";
@@ -100,6 +100,11 @@ export type AgentsApiOptions = {
   callerApp?: (req: Request) => Promise<string | null>;
   /** Apps the operator lets reach every app's agents with their own token (SPACE_AGENT_CALLERS); not Space Assistant. */
   agentCallers?: readonly string[];
+  /**
+   * True for a request from a viewer at this machine (hosts.ts `localViewer`): the card links a request answers
+   * follow a local app's loopback url (docs/router.md#a-viewer-on-this-machine). The cards a run streams stay public.
+   */
+  localViewer?: (req: Request, server: unknown) => boolean;
   /** Chat turns as background runs; default: a registry over an in-memory database. */
   runs?: RunRegistry;
   /** SSE keepalive interval (tests). */
@@ -183,7 +188,7 @@ type ResolvedAgent = {
   app: string;
 };
 
-type Handler = (req: Request & { params: Record<string, string> }) => Response | Promise<Response>;
+type Handler = (req: Request & { params: Record<string, string> }, server?: unknown) => Response | Promise<Response>;
 type Routes = Record<string, Handler | Partial<Record<"GET" | "POST", Handler>>>;
 
 const MAX_MESSAGE = 20_000;
@@ -234,10 +239,12 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
     const app = agent.split("/")[0] ?? "";
     return app && app !== SPACE_APP && registry.get(app) ? app : null;
   };
-  const cardLink = (app: string) => (url: string) => {
-    const m = registry.get(app)?.manifest;
-    return m ? resolveLink(m, url) : "";
+  // `local`: a viewer at this machine, given the loopback url. The run stream's cards are shared by every watcher: public.
+  const cardLink = (app: string, local = false) => (url: string) => {
+    const entry = registry.get(app);
+    return entry ? resolveLink(manifestFor(entry, local), url) : "";
   };
+  const isLocal = (req: Request, server: unknown) => opts.localViewer?.(req, server) === true;
   const cards = new CardBook(runs, { appOf: cardApp, resolve: (app, url) => cardLink(app)(url) });
   /** One card call through the bus: the app's JSON answer, or an error response. */
   const callCard = async (app: string, capability: string, body: unknown): Promise<{ ok: true; data: Record<string, unknown> } | { ok: false; res: Response }> => {
@@ -299,7 +306,7 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
 
   const wrap =
     (h: Handler): Handler =>
-    async (req) => {
+    async (req, server) => {
       try {
         // An app's token reaches only its own agents, or every app's when the operator lists it in SPACE_AGENT_CALLERS;
         // an agent route without `:app` stays the owner's.
@@ -309,7 +316,7 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
           const granted = !!caller && !!target && target !== SPACE_APP && !!opts.agentCallers?.includes(caller);
           if (caller !== null && (!caller || (caller !== target && !granted))) return error(403, "an app may reach only its own agents");
         }
-        return await h(req);
+        return await h(req, server);
       } catch (e) {
         return e instanceof NotFound ? error(404, e.message) : error(400, (e as Error).message ?? String(e));
       }
@@ -526,7 +533,7 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
     },
 
     "/api/agents/cards/state": {
-      POST: wrap(async (req) => {
+      POST: wrap(async (req, server) => {
         const body = (await req.json().catch(() => null)) as { agent?: unknown; card?: unknown } | null;
         const app = typeof body?.agent === "string" ? cardApp(body.agent) : null;
         if (!app) return error(400, "agent must be an app agent of this space");
@@ -535,12 +542,12 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
         if (!card.state) return error(400, "this card has no state capability");
         const r = await callCard(app, card.state, { ids: card.items.map((i) => i.id) });
         if (!r.ok) return r.res;
-        return json({ ok: true, items: parseItemStates(r.data.items, cardLink(app)) });
+        return json({ ok: true, items: parseItemStates(r.data.items, cardLink(app, isLocal(req, server))) });
       }),
     },
 
     "/api/agents/cards/action": {
-      POST: wrap(async (req) => {
+      POST: wrap(async (req, server) => {
         const body = (await req.json().catch(() => null)) as { token?: unknown; card?: unknown; action?: unknown; items?: unknown } | null;
         const grant = typeof body?.token === "string" ? cards.grant(body.token) : undefined;
         if (!grant) return json({ ok: false, error: "this card is read-only now: the conversation has moved on", readOnly: true }, 409);
@@ -553,7 +560,7 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
         if (!chosen.length) return error(400, "no item of this card was chosen");
         const r = await callCard(grant.app, capability, { items: chosen.map((i) => ({ id: i.id, ...(i.version !== undefined ? { version: i.version } : {}) })) });
         if (!r.ok) return r.res;
-        const items = parseItemStates(r.data.items, cardLink(grant.app));
+        const items = parseItemStates(r.data.items, cardLink(grant.app, isLocal(req, server)));
         cards.removed(body!.token as string, items.filter((i) => i.status === "removed" && chosen.some((c) => c.id === i.id)).map((i) => i.id));
         return json({ ok: true, items });
       }),
@@ -639,7 +646,7 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
     },
 
     "/api/agents/:app/:agent/sessions/:sid": {
-      GET: wrap(async (req) => {
+      GET: wrap(async (req, server) => {
         const agent = await resolveAgent(req.params.app ?? "", req.params.agent ?? "");
         const sid = req.params.sid ?? "";
         if (!SESSION_ID_RE.test(sid)) return error(400, "invalid session id");
@@ -651,7 +658,7 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
         if (!messages) return error(404, "transcript not found");
         const app = cardApp(agent.id);
         const shown = messages.map((m) => (m.role === "user" ? { ...m, text: withoutChangesNote(m.text) } : m));
-        return json({ ok: true, messages: transcriptCards(shown, app ? cardLink(app) : null) });
+        return json({ ok: true, messages: transcriptCards(shown, app ? cardLink(app, isLocal(req, server)) : null) });
       }),
     },
   };

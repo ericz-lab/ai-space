@@ -48,6 +48,12 @@ test("loadConfig reads the environment and expands ~ in extra app dirs", () => {
   expect(c.maxConcurrency).toBe(4);
 });
 
+test("loadConfig opens apps on loopback for a local viewer unless SPACE_LOCAL_OPEN turns it off", () => {
+  expect(loadConfig(ws, {}).localOpen).toBe(true);
+  for (const v of ["on", "1", " yes ", ""]) expect(loadConfig(ws, { SPACE_LOCAL_OPEN: v }).localOpen).toBe(true);
+  for (const v of ["off", "0", "false", " OFF ", "no"]) expect(loadConfig(ws, { SPACE_LOCAL_OPEN: v }).localOpen).toBe(false);
+});
+
 test("loadConfig reads the postgres admin url", () => {
   expect(loadConfig(ws, {}).pgAdminUrl).toBe("");
   expect(loadConfig(ws, { SPACE_PG_ADMIN_URL: " postgres://admin:pw@127.0.0.1/postgres " }).pgAdminUrl).toBe("postgres://admin:pw@127.0.0.1/postgres");

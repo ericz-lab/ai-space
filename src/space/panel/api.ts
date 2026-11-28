@@ -92,11 +92,16 @@ export type PanelApiOptions = {
   fetch?: typeof fetch;
   /** Other machines whose panels this one merges. */
   peers?: PeerHub;
+  /**
+   * True for a request from a viewer at this machine (hosts.ts `localViewer`): the answers built for it
+   * give a local app's loopback url (docs/router.md#a-viewer-on-this-machine). Absent = never.
+   */
+  localViewer?: (req: Request, server: unknown) => boolean;
   /** The panel's icon packs; absent = the manifests' icons only. */
   icons?: IconPacks;
 };
 
-type Handler = (req: Request & { params: Record<string, string> }) => Response | Promise<Response>;
+type Handler = (req: Request & { params: Record<string, string> }, server?: unknown) => Response | Promise<Response>;
 type Routes = Record<string, Handler | Partial<Record<"GET" | "POST" | "PATCH" | "PUT" | "DELETE", Handler>>>;
 
 const NAME_RE = /^[a-z0-9][a-z0-9._-]*$/i;
@@ -133,9 +138,9 @@ export function createPanelRoutes(opts: PanelApiOptions): Routes {
 
   const wrap =
     (h: Handler): Handler =>
-    async (req) => {
+    async (req, server) => {
       try {
-        return await h(req);
+        return await h(req, server);
       } catch (e) {
         return e instanceof NotFound || e instanceof IconNotFound || e instanceof NoPet ? error(404, e.message) : error(400, (e as Error).message ?? String(e));
       }
@@ -162,15 +167,18 @@ export function createPanelRoutes(opts: PanelApiOptions): Routes {
     return p ? health.peek(p.port, p.path) : undefined;
   };
 
-  const viewOf = (name: string, hidden: Set<string>): AppView => {
+  const isLocal = (req: Request, server: unknown) => opts.localViewer?.(req, server) === true;
+  const viewOf = (name: string, hidden: Set<string>, local = false): AppView => {
     const entry = entryOf(name);
-    return appView(entry, { hidden: hidden.has(name), health: lastHealthOf(entry) });
+    return appView(entry, { hidden: hidden.has(name), health: lastHealthOf(entry), local });
   };
 
   // The grid holds what a person can open: apps with a `url`, not archived, not hidden by the
   // operator. Whether an app runs a service is a separate axis (the Services list). Agents and
   // widgets of an app without a url still show in their sections; only the tile is absent.
-  const listApps = async (all: boolean): Promise<AppView[]> => {
+  // `local`: the viewer is at this machine; a local app then opens on loopback. Peer and shared apps never change,
+  // and the same-url merge compares the public urls, which are what the peers' snapshots carry.
+  const listApps = async (all: boolean, local = false): Promise<AppView[]> => {
     const lay = layout.read();
     const hidden = new Set(lay.hidden);
     const entries = registry.list().filter((e) => all || (e.manifest.url && !hidden.has(e.manifest.app) && e.manifest.status !== "archived"));
@@ -183,7 +191,8 @@ export function createPanelRoutes(opts: PanelApiOptions): Routes {
     );
     const taken = new Set([...views, ...remote].map((v) => v.id));
     const shared = (opts.sharedApps?.(hidden) ?? []).filter((v) => !taken.has(v.id) && (all || (v.url && !v.hidden)));
-    return orderBy([...views, ...remote, ...shared], lay.order.apps, (v) => v.id, tier);
+    const own = local ? entries.map((e) => viewOf(e.manifest.app, hidden, true)) : views;
+    return orderBy([...own, ...remote, ...shared], lay.order.apps, (v) => v.id, tier);
   };
 
   // A card the panel replaces in place: the operator's size and frame and the active icon pack apply as in GET /api/widgets.
@@ -214,12 +223,12 @@ export function createPanelRoutes(opts: PanelApiOptions): Routes {
 
   return {
     "/api/apps": {
-      GET: wrap(async (req) => {
+      GET: wrap(async (req, server) => {
         const all = new URL(req.url).searchParams.get("all") === "1";
         const o = await overridesFor(req);
-        return json({ ok: true, apps: (await listApps(all)).map((v) => applyToApp(o, v)), builtins: builtinIcons(o), asOf: new Date().toISOString() });
+        return json({ ok: true, apps: (await listApps(all, isLocal(req, server))).map((v) => applyToApp(o, v)), builtins: builtinIcons(o), asOf: new Date().toISOString() });
       }),
-      POST: wrap(async (req) => {
+      POST: wrap(async (req, server) => {
         let body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
         if (typeof body.link === "string" && body.link.trim() && !body.name) {
           const link = body.link.trim();
@@ -236,19 +245,19 @@ export function createPanelRoutes(opts: PanelApiOptions): Routes {
         if (registry.get(app.name)) return error(409, `app "${app.name}" already exists`);
         const dir = await createLinkApp(opts.ws, app);
         await opts.onCreate(dir);
-        return json({ ok: true, app: viewOf(app.name, new Set(layout.read().hidden)) }, 201);
+        return json({ ok: true, app: viewOf(app.name, new Set(layout.read().hidden), isLocal(req, server)) }, 201);
       }),
     },
 
     "/api/apps/:app": {
-      GET: wrap(async (req) => json({ ok: true, app: viewOf(name(req.params.app), new Set(layout.read().hidden)) })),
-      PATCH: wrap(async (req) => {
+      GET: wrap(async (req, server) => json({ ok: true, app: viewOf(name(req.params.app), new Set(layout.read().hidden), isLocal(req, server)) })),
+      PATCH: wrap(async (req, server) => {
         const n = name(req.params.app);
         entryOf(n);
         const body = (await req.json().catch(() => ({}))) as { hidden?: unknown };
         if (typeof body.hidden !== "boolean") return error(400, "hidden must be a boolean");
         const lay = layout.hide(n, body.hidden);
-        return json({ ok: true, app: viewOf(n, new Set(lay.hidden)) });
+        return json({ ok: true, app: viewOf(n, new Set(lay.hidden), isLocal(req, server)) });
       }),
       // Uninstall: a run of the app in flight blocks it (?force=1 goes ahead anyway), because
       // stopping the service and moving the directory pulls the ground from under that run. Then
@@ -317,13 +326,15 @@ export function createPanelRoutes(opts: PanelApiOptions): Routes {
     },
 
     "/api/widgets": {
-      GET: wrap(async (req) => {
+      GET: wrap(async (req, server) => {
         const o = await overridesFor(req);
         const lay = layout.read();
         const hidden = new Set(lay.hidden);
         const local = (await widgets.all()).filter((w) => !hidden.has(w.app));
+        // The same-link merge compares the public links, as GET /api/apps does; a viewer at this machine then gets the loopback ones.
+        const own = isLocal(req, server) ? (await widgets.all(true)).filter((w) => !hidden.has(w.app)) : local;
         const removed = new Set(lay.hiddenWidgets);
-        const all = [...local, ...dropSameLink(local, peers?.widgets(hidden) ?? [])]
+        const all = [...own, ...dropSameLink(local, peers?.widgets(hidden) ?? [])]
           .filter((w) => !removed.has(w.id))
           .map((w) => withLayout(lay, w));
         // `hidden` lists the widgets removed from the panel, so the settings can show them again.
@@ -332,15 +343,15 @@ export function createPanelRoutes(opts: PanelApiOptions): Routes {
     },
 
     "/api/widgets/:app/:name/action": {
-      POST: wrap(async (req) => {
+      POST: wrap(async (req, server) => {
         const body = (await req.json().catch(() => null)) as { action?: unknown; value?: unknown } | null;
         if (!body || typeof body !== "object") return error(400, "body must be { action, value? }");
-        return widgetAnswer(req, await widgets.act(name(req.params.app), name(req.params.name), body));
+        return widgetAnswer(req, await widgets.act(name(req.params.app), name(req.params.name), body, isLocal(req, server)));
       }),
     },
 
     "/api/widgets/:app/:name/refresh": {
-      POST: wrap(async (req) => widgetAnswer(req, await widgets.refresh(name(req.params.app), name(req.params.name)))),
+      POST: wrap(async (req, server) => widgetAnswer(req, await widgets.refresh(name(req.params.app), name(req.params.name), isLocal(req, server)))),
     },
 
     "/api/widgets/:app/:name/embed": {
@@ -391,9 +402,9 @@ export function createPanelRoutes(opts: PanelApiOptions): Routes {
     },
 
     "/api/pets/:app/:name/mood": {
-      GET: wrap(async (req) => {
+      GET: wrap(async (req, server) => {
         if (!opts.pets) throw new NotFound("no pets");
-        return json(await opts.pets.mood(name(req.params.app), name(req.params.name)));
+        return json(await opts.pets.mood(name(req.params.app), name(req.params.name), isLocal(req, server)));
       }),
     },
 
