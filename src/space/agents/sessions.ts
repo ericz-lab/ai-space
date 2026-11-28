@@ -4,6 +4,9 @@ import type { Database } from "bun:sqlite";
  * Recent chat sessions per agent, so the panel can list and resume them.
  * Each turn of a resumed session gets a new session id from the runtime; the
  * previous id is replaced in place so a conversation stays one row.
+ *
+ * Each agent keeps its newest `keep` sessions; a session something else still points at (an
+ * order topic's, docs/orders.md#data) is exempt, named by the `exempt` hook.
  */
 
 export type ChatSession = { sid: string; title: string; ts: number; runtime?: string | null; model?: string | null };
@@ -20,6 +23,8 @@ CREATE INDEX IF NOT EXISTS chat_sessions_agent_ts ON chat_sessions(agent, ts DES
 `;
 
 export class SessionStore {
+  private exemptOf: ((agent: string) => string[]) | null = null;
+
   constructor(
     private readonly db: Database,
     private readonly keep = 10,
@@ -31,8 +36,18 @@ export class SessionStore {
     }
   }
 
+  /** Sessions of an agent the retention never deletes, whatever their age (set once the owner of the pointers exists). */
+  exempt(fn: ((agent: string) => string[]) | null): void {
+    this.exemptOf = fn;
+  }
+
+  /** The newest `keep` sessions, and the exempt ones older than those (at most 50 in all), newest first. */
   list(agent: string): ChatSession[] {
-    return this.db.query<ChatSession, [string, number]>("SELECT sid, title, ts, runtime, model FROM chat_sessions WHERE agent = ? ORDER BY ts DESC LIMIT ?").all(agent, this.keep);
+    const newest = this.db.query<ChatSession, [string, number]>("SELECT sid, title, ts, runtime, model FROM chat_sessions WHERE agent = ? ORDER BY ts DESC LIMIT ?").all(agent, this.keep);
+    const exempt = (this.exemptOf?.(agent) ?? []).filter((sid) => !newest.some((s) => s.sid === sid));
+    if (!exempt.length) return newest;
+    const older = this.db.query<ChatSession, (string | number)[]>(`SELECT sid, title, ts, runtime, model FROM chat_sessions WHERE agent = ? AND sid IN (${exempt.map(() => "?").join(", ")}) ORDER BY ts DESC LIMIT ?`).all(agent, ...exempt, 50 - newest.length);
+    return [...newest, ...older];
   }
 
   get(agent: string, sid: string): ChatSession | null {
@@ -54,7 +69,9 @@ export class SessionStore {
       this.db
         .query("INSERT INTO chat_sessions (agent, sid, title, ts, runtime, model, intent_id, intent_timezone) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(agent, sid) DO UPDATE SET ts = excluded.ts, runtime = excluded.runtime, model = excluded.model, intent_id = excluded.intent_id, intent_timezone = excluded.intent_timezone")
         .run(agent, sid, prev?.title || title.slice(0, 80), now, runtime ?? null, model ?? null, context?.id ?? null, context?.timezone ?? null);
-      this.db.query("DELETE FROM chat_sessions WHERE agent = ? AND sid NOT IN (SELECT sid FROM chat_sessions WHERE agent = ? ORDER BY ts DESC LIMIT ?)").run(agent, agent, this.keep);
+      const exempt = this.exemptOf?.(agent) ?? [];
+      const keepAlso = exempt.length ? ` AND sid NOT IN (${exempt.map(() => "?").join(", ")})` : "";
+      this.db.query(`DELETE FROM chat_sessions WHERE agent = ? AND sid NOT IN (SELECT sid FROM chat_sessions WHERE agent = ? ORDER BY ts DESC LIMIT ?)${keepAlso}`).run(agent, agent, this.keep, ...exempt);
     });
     tx();
   }

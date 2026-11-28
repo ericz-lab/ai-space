@@ -1,15 +1,18 @@
 import { mdHtml, BARE_URL, trimUrl } from "./chat-markdown.ts";
 import { readChatImages, imageURL, type ChatImage } from "./chat-images.ts";
-import { applyJobs, ChatSteps, historySteps, ReplyActivity, stepGroups, submitsChat, type ChatJob, type ChatQuestion, type ChatStep, type HistoryStep } from "./chat-steps.ts";
+import { applyJobs, ChatSteps, historySteps, ReplyActivity, stepGroups, submitsChat, type ChatJob, type ChatStep, type HistoryStep } from "./chat-steps.ts";
 import { Glyph, JobsBadge, NoticeStep, ToolGroup, WorkStep } from "./ChatToolRow.tsx";
+import { ApprovalStep, DelegationResult, DelegationStep, QuestionStep } from "./ChatWork.tsx";
+import { historyBeforeRun, postAnswer, SseParser } from "./run-follow.ts";
+import { parseResultHeader } from "../space/agents/delegation-view.ts";
 import { cardApp, ChatCards, type ShownCard } from "./ChatCards.tsx";
 import type { Card } from "../space/agents/cards.ts";
 import { browserZone } from "./shortcuts.ts";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { type AgentGroup, conversationTabs, groupAgents, groupKeyOf, groupOf, preferredMachine, rememberMachine } from "./agent-groups.ts";
-import { agentBase, type AgentInfo, type AppInfo, type ChatSession, getJson, isImgIcon, relTime, type ChatRun, type MachineInventory } from "./api.ts";
+import { agentBase, type AgentInfo, type AppInfo, type ChatSession, getJson, isImgIcon, relTime, sendJson, type ChatRun, type MachineInventory } from "./api.ts";
 import { ChoiceOption, SavedChoice } from "./model-choices.tsx";
-import { queuedChatTurn, type QueuedChatTurn } from "./chat-request.ts";
+import { chatPermOfTeam, queuedChatTurn, teamMemberOf, teamPermOfChat, type QueuedChatTurn, type TeamPermissionMember } from "./chat-request.ts";
 import { localized, useLang } from "./i18n.ts";
 import { PAGE, chatHref, withDraft } from "./panel-link.ts";
 
@@ -31,6 +34,9 @@ import { PAGE, chatHref, withDraft } from "./panel-link.ts";
 //   when an agent starts a turn by itself to answer a background job's report; the conversation it
 //   belongs to attaches to it like to any run. The same stream carries each conversation's job list:
 //   the header's badge, and the end of a Monitor or background command row.
+// - A turn started elsewhere on a shown session (an order's, a delegation's result) is followed too,
+//   after the session's transcript up to it is read again; one that ended unseen reloads the transcript.
+// - For a member of the team (docs/orders.md#team) the permission menu is the team's setting.
 
 // User messages render as text; URLs inside become links without HTML injection.
 const linkNodes = (text: string) =>
@@ -66,11 +72,15 @@ const fromHistory = (m: HistoryMessage): Msg => {
 };
 const EMPTY_CONV: Conv = { agent: null, msgs: [], sid: null, busy: false, queued: 0 };
 /** The turn a conversation is following: its run (once the server named it) and the stream's abort. */
-type Active = { ctrl: AbortController; typer: { target: string }; base: string; runId: string | null; stopRequested: boolean };
+type Active = { ctrl: AbortController; typer: { target: string }; base: string; runId: string | null; stopRequested: boolean; elsewhere?: boolean };
 /** `attach`: runs the agent started by itself while a turn was being followed, followed next. */
 type Runner = { queue: QueuedChatTurn[]; attach: { base: string; source: TurnSource }[]; running: boolean; active: Active | null };
-/** A turn to follow: a new message, or a run on the server (`background`: one the agent started by itself). */
-type TurnSource = { kind: "new"; turn: QueuedChatTurn } | { kind: "attach"; runId: string; background?: boolean };
+/**
+ * A turn to follow: a new message, or a run on the server (`background`: one the agent started by
+ * itself; `elsewhere`: one started outside this window, an order's say, which leaving the
+ * conversation detaches from without stopping).
+ */
+type TurnSource = { kind: "new"; turn: QueuedChatTurn } | { kind: "attach"; runId: string; background?: boolean; elsewhere?: boolean };
 /** What `GET …/watch` sends (docs/runtimes.md#background-work). */
 type WatchNews = { type: "run"; run: ChatRun } | { type: "jobs"; agent?: string; sessionId: string; jobs: ChatJob[] };
 const RECONNECT_TRIES = 5;
@@ -140,6 +150,37 @@ export default function Chat({ open, agent, agents = [], apps = [], onClose, onS
   useEffect(() => {
     permRef.current = perm;
   }, [perm]);
+  // A member of the team (docs/orders.md#team) has one permission, the team's: the turns orders and
+  // delegations start use it, so for such an agent the menu shows it, a change writes the team, and
+  // a message typed here is sent with it. Unreadable (a caller that is not the owner): the menu alone.
+  const [team, setTeam] = useState<TeamPermissionMember[] | null>(null);
+  const teamRef = useRef(team);
+  teamRef.current = team;
+  const [permError, setPermError] = useState("");
+  useEffect(() => {
+    if (!open) return;
+    let live = true;
+    getJson<{ members: TeamPermissionMember[] }>("/api/team").then((d) => { if (live) setTeam(d.members); }).catch(() => {});
+    return () => { live = false; };
+  }, [open]);
+  /** The permission mode a turn of `a` is sent with: the team's for a member, else the menu's. */
+  const turnPerm = (a: AgentInfo) => {
+    const m = teamMemberOf(teamRef.current, a);
+    return m ? chatPermOfTeam(m.permission) : permRef.current;
+  };
+  /** Write a member's permission to the team; false when the team refused it (the reason is shown). */
+  const setMemberPerm = async (m: TeamPermissionMember, mode: string): Promise<boolean> => {
+    try {
+      const d = await sendJson<{ members: TeamPermissionMember[] }>("PUT", "/api/team", { members: [{ role: m.role, permission: teamPermOfChat(mode) }] });
+      teamRef.current = d.members;
+      setTeam(d.members);
+      setPermError("");
+      return true;
+    } catch (e) {
+      setPermError(tRef.current("chat.permTeamFailed", { error: (e as Error).message }));
+      return false;
+    }
+  };
   const convsRef = useRef(convs);
   useEffect(() => {
     convsRef.current = convs;
@@ -248,6 +289,8 @@ export default function Chat({ open, agent, agents = [], apps = [], onClose, onS
     localStorage.setItem("chat-model", e.target.value);
   };
   const pickPerm = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const m = teamMemberOf(teamRef.current, agent);
+    if (m) return void setMemberPerm(m, e.target.value);
     setPerm(e.target.value);
     permRef.current = e.target.value;
     localStorage.setItem("chat-perm", e.target.value);
@@ -280,12 +323,12 @@ export default function Chat({ open, agent, agents = [], apps = [], onClose, onS
     };
     const setNote = (note: string) => upd((x) => ({ ...x, note }));
     const ctrl = new AbortController();
-    const active: Active = { ctrl, typer, base: chatBase, runId: source.kind === "attach" ? source.runId : null, stopRequested: false };
+    const active: Active = { ctrl, typer, base: chatBase, runId: source.kind === "attach" ? source.runId : null, stopRequested: false, elsewhere: source.kind === "attach" && !!source.elsewhere };
     runner(turnKey).active = active;
     const setSid = (sid: string) => patch(turnKey, (v) => ({ ...v, sid }));
     let acc = ""; // finished text of this turn (tool calls split it into several assistant messages)
     let streamed = ""; // delta of the current message
-    let lastSeq = 0; // the run's last event seen, to reattach after it
+    const parser = new SseParser(); // its lastSeq is the run's last event seen, to reattach after it
     let finished = false; // the stream said "done"
     const seenTools = new Set<string>();
     const toolNames = new Map<string, string>();
@@ -360,7 +403,7 @@ export default function Chat({ open, agent, agents = [], apps = [], onClose, onS
           signal: ctrl.signal,
         });
       }
-      return fetch(`${chatBase}/runs/${encodeURIComponent(active.runId!)}/events?after=${lastSeq}`, { signal: ctrl.signal });
+      return fetch(`${chatBase}/runs/${encodeURIComponent(active.runId!)}/events?after=${parser.lastSeq}`, { signal: ctrl.signal });
     };
     let retries = 0;
     try {
@@ -381,35 +424,18 @@ export default function Chat({ open, agent, agents = [], apps = [], onClose, onS
           throw new Error(j.error || `HTTP ${r.status}`);
         }
         active.runId ||= r.headers.get("x-run-id");
+        // This window's own turn: its news on the watch stream is not a turn started elsewhere.
+        if (active.runId) attachedRef.current.add(active.runId);
         if (active.stopRequested) void stopRun(active).catch(() => {});
         const reader = r.body.getReader();
         const dec = new TextDecoder();
-        let buf = "";
-        let seq: number | null = null;
+        parser.reset();
         try {
           for (;;) {
             const { done, value } = await reader.read();
             if (done) break;
             retries = 0;
-            buf += dec.decode(value, { stream: true });
-            const lines = buf.split("\n");
-            buf = lines.pop() ?? "";
-            for (const raw of lines) {
-              if (raw.startsWith("id: ")) seq = Number(raw.slice(4));
-              if (!raw.startsWith("data: ")) continue;
-              let ev: unknown;
-              try {
-                ev = JSON.parse(raw.slice(6));
-              } catch {
-                continue;
-              }
-              if (seq !== null && Number.isFinite(seq)) {
-                if (seq <= lastSeq) { seq = null; continue; }
-                lastSeq = seq;
-              }
-              seq = null;
-              handle(ev);
-            }
+            for (const ev of parser.push(dec.decode(value, { stream: true }))) handle(ev);
           }
         } catch (e) {
           if ((e as Error).name === "AbortError" || !active.runId || retries >= RECONNECT_TRIES) throw e;
@@ -485,8 +511,7 @@ export default function Chat({ open, agent, agents = [], apps = [], onClose, onS
           const j = await getJson<{ messages: HistoryMessage[] }>(`${b}/sessions/${encodeURIComponent(run.sessionId)}`);
           history = j.messages.map(fromHistory);
           // The transcript may already hold this turn: cut it at the run's own message.
-          const last = history.findLastIndex((m) => m.role === "user");
-          if (last >= 0 && history[last]!.text.trim() === run.message.trim()) history = history.slice(0, last);
+          history = historyBeforeRun(history, run.message);
         } catch {
           /* no transcript: the run alone */
         }
@@ -528,12 +553,50 @@ export default function Chat({ open, agent, agents = [], apps = [], onClose, onS
       return;
     }
     const run = news.run;
-    if (run.trigger !== "background" || run.status !== "running" || (run.sessionId !== conv.sid && run.sid !== conv.sid)) return;
+    const sid = conv.sid;
+    if (run.sessionId !== sid && run.sid !== sid) return;
     if (attachedRef.current.has(run.id)) return;
+    const b = agentBase(a);
+    if (run.status !== "running") {
+      // A turn on this conversation that started and ended without this window following it (its
+      // start went by unseen): the transcript, which now holds it, replaces what is shown.
+      if (runner(k).running) return;
+      attachedRef.current.add(run.id);
+      void readTranscript(b, sid).then((history) => {
+        if (history && convsRef.current[k]?.sid === sid && !runner(k).running) patch(k, (v) => ({ ...v, msgs: history }));
+      });
+      return;
+    }
+    // A turn of the person's while this window follows one is this window's own (the session runs one turn at a time).
+    if (run.trigger !== "background" && run.trigger !== "delegation" && runner(k).running) return;
     attachedRef.current.add(run.id);
-    const source: TurnSource = { kind: "attach", runId: run.id, background: true };
-    if (runner(k).running) runner(k).attach.push({ base: agentBase(a), source });
-    else void drain(k, agentBase(a), source);
+    void followElsewhere(k, b, sid, run);
+  };
+
+  /** A session's transcript as messages; null when it cannot be read. */
+  const readTranscript = async (b: string, sid: string): Promise<Msg[] | null> => {
+    try {
+      return (await getJson<{ messages: HistoryMessage[] }>(`${b}/sessions/${encodeURIComponent(sid)}`)).messages.map(fromHistory);
+    } catch {
+      return null;
+    }
+  };
+  // A turn started elsewhere on an open conversation's session: an order's (docs/orders.md), the
+  // agent answering a background job, or a delegation's result delivered to it
+  // (docs/orders.md#the-result-comes-back). What is shown may be older than the session (a turn
+  // came and went unseen), so the transcript up to the run's own message is read first, then the
+  // run's message and its events. A turn the agent started by itself has no message to cut the
+  // transcript at; it, and a turn arriving while this window follows another, goes after what is shown.
+  const followElsewhere = async (k: string, b: string, sid: string, run: ChatRun) => {
+    const background = run.trigger === "background";
+    const source: TurnSource = { kind: "attach", runId: run.id, background, elsewhere: !background };
+    const history = background || runner(k).running ? null : await readTranscript(b, sid);
+    if (convsRef.current[k]?.sid !== sid) return; // the conversation moved on meanwhile
+    const own: Msg[] = background ? [] : [{ role: "user", text: run.message }];
+    if (history && !runner(k).running) patch(k, (v) => ({ ...v, msgs: [...historyBeforeRun(history, run.message), ...own] }));
+    else patch(k, (v) => ({ ...v, msgs: [...v.msgs, ...own] }));
+    if (runner(k).running) runner(k).attach.push({ base: b, source });
+    else void drain(k, b, source);
   };
   const newsRef = useRef(onNews);
   newsRef.current = onNews;
@@ -558,7 +621,7 @@ export default function Chat({ open, agent, agents = [], apps = [], onClose, onS
 
   const send = (text: string, intentId?: string, images?: ChatImage[]) => {
     patch(key, (v) => ({ ...v, agent: agent || v.agent, msgs: [...v.msgs, { role: "user", text, images }] }));
-    runner(key).queue.push({ ...queuedChatTurn(agent, text, modelRef.current, baseChoice(key), permRef.current, intentId ? { intentId, timezone: browserZone() } : undefined), images });
+    runner(key).queue.push({ ...queuedChatTurn(agent, text, modelRef.current, baseChoice(key), turnPerm(agent), intentId ? { intentId, timezone: browserZone() } : undefined), images });
     drain(key, base);
   };
   // A question from the box starts a new conversation, unless the current one is still working:
@@ -621,7 +684,7 @@ export default function Chat({ open, agent, agents = [], apps = [], onClose, onS
     mark((p) => { const i = p.lastIndexOf(label); return i < 0 ? p : p.filter((_, j) => j !== i); });
     if (runner(k).active === a || runner(k).running) {
       patch(k, (v) => ({ ...v, msgs: [...v.msgs, { role: "user", text, images }] }));
-      runner(k).queue.push({ ...queuedChatTurn(agent, text, modelRef.current, baseChoice(k), permRef.current), images });
+      runner(k).queue.push({ ...queuedChatTurn(agent, text, modelRef.current, baseChoice(k), turnPerm(agent)), images });
       patch(k, (v) => ({ ...v, queued: runner(k).queue.length }));
       void drain(k, a.base);
     } else send(text, undefined, images);
@@ -631,14 +694,8 @@ export default function Chat({ open, agent, agents = [], apps = [], onClose, onS
   const answer = async (k: string, id: string, decision: "allow" | "deny", answers?: Record<string, string[]>): Promise<string | null> => {
     const a = runner(k).active;
     if (!a?.runId) return t("chat.approval.failed", { error: "no run" });
-    try {
-      const r = await fetch(`${a.base}/runs/${encodeURIComponent(a.runId)}/approvals/${encodeURIComponent(id)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ decision, ...(answers ? { answers } : {}) }) });
-      if (r.ok) return null;
-      const j = (await r.json().catch(() => ({}))) as { error?: string };
-      return t("chat.approval.failed", { error: j.error || `HTTP ${r.status}` });
-    } catch (e) {
-      return t("chat.approval.failed", { error: (e as Error).message });
-    }
+    const error = await postAnswer(a.base, a.runId, id, decision, answers);
+    return error === null ? null : t("chat.approval.failed", { error });
   };
 
   // ⏹ stops the run on the server; its stream then ends with the "stopped" error and "done".
@@ -669,13 +726,14 @@ export default function Chat({ open, agent, agents = [], apps = [], onClose, onS
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [open, onClose]);
-  // Leaving a conversation (new one, a past session) stops its running turn and detaches.
+  // Leaving a conversation (new one, a past session) stops its running turn and detaches; a turn
+  // started elsewhere (an order's) is only detached from: it is not this window's to stop.
   const leave = (k: string) => {
     const r = runner(k);
     r.queue = [];
     r.attach = [];
     if (r.active) {
-      void stopRun(r.active).catch(() => {});
+      if (!r.active.elsewhere) void stopRun(r.active).catch(() => {});
       r.active.ctrl.abort();
     }
   };
@@ -689,8 +747,13 @@ export default function Chat({ open, agent, agents = [], apps = [], onClose, onS
 
   // After a refusal: raise the tier the refused tool needs (commands need every permission, edits just
   // "edit files") and ask the agent to redo the refused step in the same session.
-  const retryWithPerm = (denied: string[]) => {
-    const v = denied.includes("Bash") || permRef.current === "acceptEdits" ? "bypassPermissions" : "acceptEdits";
+  const retryWithPerm = async (denied: string[]) => {
+    const v = denied.includes("Bash") || turnPerm(agent) === "acceptEdits" ? "bypassPermissions" : "acceptEdits";
+    const m = teamMemberOf(teamRef.current, agent);
+    if (m) {
+      if (await setMemberPerm(m, v)) send(t("chat.retryMessage"));
+      return;
+    }
     setPerm(v);
     permRef.current = v;
     localStorage.setItem("chat-perm", v);
@@ -720,6 +783,8 @@ export default function Chat({ open, agent, agents = [], apps = [], onClose, onS
   // Pick a past session: restore its transcript and resume it; without a transcript the session still resumes.
   const pickSession = async (s: ChatSession) => {
     setHist(null);
+    // The conversation shown, with its turn followed: nothing to leave or load.
+    if (s.sid === convsRef.current[key]?.sid && runner(key).running) return;
     if (agent.modelOptions) {
       const runtime = s.runtime ?? agent.runtime;
       const option = agent.modelOptions.find((o) => o.runtime === runtime && o.model === s.model);
@@ -733,7 +798,19 @@ export default function Chat({ open, agent, agents = [], apps = [], onClose, onS
     } catch (e) {
       msgs = [{ role: "ai", text: t("chat.transcriptUnavailable", { error: (e as Error).message }), tools: [], denied: [] }];
     }
-    patch(key, (v) => ({ ...v, sid: s.sid, msgs, jobs: undefined }));
+    // Restored after a page load meanwhile (`restoreRuns`): it is followed already.
+    if (s.sid === convsRef.current[key]?.sid && runner(key).running) return;
+    // A turn running on the session (an order's, one in another window): the transcript up to it,
+    // then the run followed, so the turn is shown once.
+    const run = await getJson<{ runs: ChatRun[] }>(`${base}/runs?recent=0`)
+      .then((j) => j.runs.find((r) => r.status === "running" && (r.sessionId === s.sid || r.sid === s.sid) && !attachedRef.current.has(r.id)))
+      .catch(() => undefined);
+    if (run && !runner(key).running) {
+      attachedRef.current.add(run.id);
+      const background = run.trigger === "background";
+      patch(key, (v) => ({ ...v, sid: s.sid, msgs: [...historyBeforeRun(msgs, run.message), ...(background ? [] : [{ role: "user" as const, text: run.message }])], jobs: undefined }));
+      void drain(key, base, { kind: "attach", runId: run.id, background, elsewhere: !background });
+    } else patch(key, (v) => ({ ...v, sid: s.sid, msgs, jobs: undefined }));
     setStick(true);
     inputRef.current?.focus();
   };
@@ -757,6 +834,7 @@ export default function Chat({ open, agent, agents = [], apps = [], onClose, onS
   // agent's always among them (agent-groups.ts).
   const avatars = conversationTabs(tabs.flatMap(([, v]) => (v.agent ? [v.agent] : [])), agent);
   const shown = localized(lang, agent);
+  const member = teamMemberOf(team, agent);
 
   return (
     // Always mounted so conversations survive closing; the overlay is hidden, not removed.
@@ -872,12 +950,14 @@ export default function Chat({ open, agent, agents = [], apps = [], onClose, onS
               </select>
             )}</label>
             <label className="chat-permission">{t("chat.permTitle")}
-            <select className="chat-model" value={perm} onChange={pickPerm} title={t("chat.permTitle")} aria-label={t("chat.permTitle")}>
+            <select className="chat-model" value={member ? chatPermOfTeam(member.permission) : perm} onChange={pickPerm} title={member ? t("chat.permTeam") : t("chat.permTitle")} aria-label={t("chat.permTitle")}>
               <option value="">{t("chat.permRead")}</option>
               <option value="acceptEdits">{t("chat.permEdit")}</option>
               <option value="bypassPermissions">{t("chat.permAll")}</option>
             </select></label>
           </div>
+          {member?.permission === "full" && <p className="chat-perm-warn">{t("orders.team.fullWarning", { name: (lang === "zh" && member.i18n?.zh?.title) || member.title })}</p>}
+          {member && permError && <p className="chat-perm-warn">{permError}</p>}
           {hist && (
             <div className="chat-hist">
               {hist.length === 0 && <p className="hist-empty">{t(histFailed ? "chat.sessionsFailed" : "chat.noSessions")}</p>}
@@ -901,7 +981,10 @@ export default function Chat({ open, agent, agents = [], apps = [], onClose, onS
               {shown.description || (agent.app === "space" ? t("chat.helloSpace") : agent.id)}
             </div>
           )}
-          {conv.msgs.map((m, i) => (
+          {conv.msgs.map((m, i) => m.role === "user" && parseResultHeader(m.text) ? (
+            // A delegation's result delivered into this conversation (docs/orders.md#the-result-comes-back): not a message of the person's.
+            <div key={i} className="msg ai"><DelegationResult text={m.text} /></div>
+          ) : (
             <div key={i} className={`msg ${m.role}`}>
               {m.role === "ai" ? <>
                 {m.background && <div className="chat-bg-label"><Glyph name="notice" size={12} weight={1.3} />{t("chat.backgroundRun")}</div>}
@@ -914,6 +997,8 @@ export default function Chat({ open, agent, agents = [], apps = [], onClose, onS
                   step.kind === "approval" && step.questions ? <QuestionStep key={step.id} step={step} onAnswer={m.live ? (answers) => answer(key, step.id.slice("approval:".length), answers ? "allow" : "deny", answers ?? undefined) : undefined} /> :
                   step.kind === "approval" ? <ApprovalStep key={step.id} step={step} onAnswer={m.live ? (decision) => answer(key, step.id.slice("approval:".length), decision) : undefined} /> :
                   step.kind === "notice" ? <NoticeStep key={step.id} step={step} /> :
+                  step.kind === "delegation" ? <DelegationStep key={step.id} delegation={step.delegation} id={step.delegationId} /> :
+                  parseResultHeader(step.text) ? <DelegationResult key={step.id} text={step.text} /> :
                   <div key={step.id} className="chat-steer"><b>↳ {t("chat.steerYou")}</b> {linkNodes(step.text)}</div>
                 ) : <>
                   {m.tools.length > 0 && <div className="chat-tools">{m.tools.map((tool, index) => <WorkStep key={index} step={{ id: String(index), kind: "tool", name: tool.name, text: tool.hint, output: "", state: "incomplete" }} />)}</div>}
@@ -926,7 +1011,7 @@ export default function Chat({ open, agent, agents = [], apps = [], onClose, onS
               {m.role === "ai" && m.denied.length > 0 && !m.steps?.some((step) => step.kind === "approval") && (
                 <span className="msg-denied">
                   {t("chat.denied", { tools: m.denied.join(", ") })}
-                  {!m.live && <button onClick={() => retryWithPerm(m.denied)}>{t("chat.grantRetry")}</button>}
+                  {!m.live && <button onClick={() => void retryWithPerm(m.denied)}>{t("chat.grantRetry")}</button>}
                 </span>
               )}
               {m.role === "ai" && m.live && m.status && <span className="msg-status">{m.status}</span>}
@@ -979,92 +1064,4 @@ export default function Chat({ open, agent, agents = [], apps = [], onClose, onS
       </aside>
     </div>
   );
-}
-
-/** An action the agent waits on: what it wants to do, and the person's answer while the turn runs. */
-function ApprovalStep({ step, onAnswer }: { step: ChatStep; onAnswer?: (decision: "allow" | "deny") => Promise<string | null> }) {
-  const { t } = useLang();
-  const [sending, setSending] = useState(false);
-  const [error, setError] = useState("");
-  const reply = async (decision: "allow" | "deny") => {
-    setSending(true);
-    setError("");
-    const failed = await onAnswer!(decision);
-    setSending(false);
-    if (failed) setError(failed);
-  };
-  const waiting = step.state === "waiting" && !!onAnswer;
-  return <section className={`chat-work chat-approval ${step.state}`} aria-label={step.name}>
-    <div className="chat-work-head"><span className="chat-work-icon" aria-hidden="true"><Glyph name="shield" /></span><strong>{step.name}</strong><span className="chat-work-state">{t(`chat.step.${step.state}`)}</span></div>
-    {step.text && <pre className="chat-work-input">{step.text}</pre>}
-    {step.output && <p className="chat-approval-why">{step.output}</p>}
-    {waiting && <div className="chat-approval-actions">
-      <button className="primary" disabled={sending} onClick={() => void reply("allow")}>{t("chat.approval.allow")}</button>
-      <button disabled={sending} onClick={() => void reply("deny")}>{t("chat.approval.deny")}</button>
-    </div>}
-    {error && <small role="alert">{error}</small>}
-  </section>;
-}
-
-/**
- * A question the agent asks while its turn runs: pick an option or type an answer. One question
- * with one choice goes back on the click; otherwise the answers go back with Send. Skip answers
- * nothing and the agent goes on without it.
- */
-function QuestionStep({ step, onAnswer }: { step: ChatStep; onAnswer?: (answers: Record<string, string[]> | null) => Promise<string | null> }) {
-  const { t } = useLang();
-  const questions = step.questions ?? [];
-  const [picked, setPicked] = useState<Record<string, string[]>>({});
-  const [typed, setTyped] = useState<Record<string, string>>({});
-  const [sending, setSending] = useState(false);
-  const [error, setError] = useState("");
-  const waiting = step.state === "waiting" && !!onAnswer;
-  const answerOf = (q: ChatQuestion, p = picked, ty = typed): string[] => {
-    const own = (ty[q.id] ?? "").trim();
-    if (!q.multiSelect) return own ? [own] : p[q.id] ?? [];
-    return [...(p[q.id] ?? []), ...(own ? [own] : [])];
-  };
-  const reply = async (answers: Record<string, string[]> | null) => {
-    setSending(true);
-    setError("");
-    const failed = await onAnswer!(answers);
-    setSending(false);
-    if (failed) setError(failed);
-  };
-  const all = (p: Record<string, string[]>, ty: Record<string, string>) => Object.fromEntries(questions.map((q) => [q.id, answerOf(q, p, ty)]));
-  const choose = (q: ChatQuestion, label: string) => {
-    const current = picked[q.id] ?? [];
-    const next = { ...picked, [q.id]: q.multiSelect ? (current.includes(label) ? current.filter((l) => l !== label) : [...current, label]) : [label] };
-    const nextTyped = q.multiSelect ? typed : { ...typed, [q.id]: "" };
-    setPicked(next);
-    setTyped(nextTyped);
-    if (questions.length === 1 && !q.multiSelect) void reply(all(next, nextTyped));
-  };
-  const ready = questions.every((q) => answerOf(q).length > 0);
-  const shown = step.answers ?? {};
-  return <section className={`chat-work chat-approval chat-question ${step.state}`} aria-label={t("chat.question.label")}>
-    <div className="chat-work-head"><span className="chat-work-icon" aria-hidden="true"><Glyph name="question" /></span><strong>{t("chat.question.label")}</strong><span className="chat-work-state">{t(step.state === "allowed" ? "chat.question.answered" : step.state === "denied" ? "chat.question.skipped" : `chat.step.${step.state}`)}</span></div>
-    {questions.map((q) => <div key={q.id} className="chat-question-item">
-      {q.header && <small className="chat-question-header">{q.header}</small>}
-      <p>{q.question}</p>
-      {waiting ? <>
-        {q.options.length > 0 && <div className="chat-question-options" role={q.multiSelect ? "group" : "radiogroup"}>
-          {q.options.map((o) => {
-            const on = (picked[q.id] ?? []).includes(o.label) && !(!q.multiSelect && (typed[q.id] ?? "").trim());
-            return <button key={o.label} type="button" className={on ? "on" : ""} role={q.multiSelect ? "checkbox" : "radio"} aria-checked={on} disabled={sending} onClick={() => choose(q, o.label)}>
-              <b>{o.label}</b>{o.description && <small>{o.description}</small>}
-            </button>;
-          })}
-        </div>}
-        <input className="chat-question-own" value={typed[q.id] ?? ""} disabled={sending} placeholder={t(q.options.length ? "chat.question.other" : "chat.question.type")} aria-label={t("chat.question.type")}
-          onChange={(e) => setTyped({ ...typed, [q.id]: e.target.value })}
-          onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing && ready) { e.preventDefault(); void reply(all(picked, typed)); } }} />
-      </> : shown[q.id]?.length ? <p className="chat-question-answer">→ {shown[q.id]!.join(", ")}</p> : null}
-    </div>)}
-    {waiting && <div className="chat-approval-actions">
-      {(questions.length > 1 || questions.some((q) => q.multiSelect) || questions.some((q) => (typed[q.id] ?? "").trim())) && <button className="primary" disabled={sending || !ready} onClick={() => void reply(all(picked, typed))}>{t("chat.question.send")}</button>}
-      <button disabled={sending} onClick={() => void reply(null)}>{t("chat.question.skip")}</button>
-    </div>}
-    {error && <small role="alert">{error}</small>}
-  </section>;
 }

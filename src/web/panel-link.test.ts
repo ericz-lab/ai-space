@@ -9,6 +9,14 @@ test("a fragment opens one of the panel's windows", () => {
   expect(parsePanelLink("terminal")).toEqual({ open: "terminal" });
   expect(parsePanelLink("#settings")).toEqual({ open: "settings" });
   expect(parsePanelLink("#shortcuts")).toEqual({ open: "shortcuts" });
+  expect(parsePanelLink("#orders")).toEqual({ open: "orders" });
+});
+
+test("an order's link opens the Orders window on that order; a bad id is left alone", () => {
+  expect(parsePanelLink("#order=12")).toEqual({ open: "orders", order: 12 });
+  expect(parsePanelLink("#order=0")).toBeNull();
+  expect(parsePanelLink("#order=abc")).toBeNull();
+  expect(parsePanelLink("#order=")).toBeNull();
 });
 
 test("any other fragment is left alone", () => {
@@ -48,7 +56,7 @@ test("a draft joins what the field holds", () => {
 });
 
 test("a page address names one built-in window, and nothing else", () => {
-  for (const name of ["inbox", "terminal", "settings", "shortcuts", "store"] as const) expect(parsePanelPage(pageHref(name).slice(1))).toBe(name);
+  for (const name of ["inbox", "terminal", "settings", "shortcuts", "store", "orders"] as const) expect(parsePanelPage(pageHref(name).slice(1))).toBe(name);
   expect(parsePanelPage("?lang=zh&page=terminal")).toBe("terminal");
   expect(parsePanelPage("")).toBeNull();
   expect(parsePanelPage("?page=tasks")).toBeNull();

@@ -2,9 +2,10 @@ import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { Inbox, NotifyService, NotifyStore, createNotifyRoutes, createTaskNotifier, loadChannels, parseNotifySpec } from "./space/notify/index.ts";
-import { RunRegistry, SessionStore, callerAppOf, createAgentRoutes, fixerAgentView, spaceAgentView } from "./space/agents/index.ts";
+import { DelegationService, DelegationStore, RunRegistry, RunTokens, SessionStore, builtinAgentViews, callerAppOf, createAgentRoutes, createDelegationRoutes } from "./space/agents/index.ts";
+import { check as gateCheck } from "./space/auth/gate.ts";
 import { AppRegistry, HealthProbe, IconPacks, LayoutStore, PetFeed, SpaceMood, WidgetFeed, createPanelRoutes, linkPrompt, parseLinkAnswer, runStopCommand } from "./space/panel/index.ts";
-import { ConnectionPeers, PeerHub, PeerLedgers, PeerStore, createAdoptHandler, createConnectionPeerServe, createMigrateRoutes, createPeerRoutes, createPeerServeHandlers, createPeerServeRoutes, loadPeers, peerRuntimes, renamePeer } from "./space/peers/index.ts";
+import { ConnectionPeers, PeerHub, PeerLedgers, PeerStore, createAdoptHandler, createConnectionPeerServe, createMigrateRoutes, createPeerRoutes, createPeerServeHandlers, createPeerServeRoutes, loadPeers, peerMachines, peerRuntimes, renamePeer } from "./space/peers/index.ts";
 import { ModelService, ModelStore, RuntimeHealth, createModelRoutes, createPeerModelRoutes, createPeerUsageRoutes, recordAgentRun } from "./space/model/index.ts";
 import { probeTargets, statusTable } from "./space/model/machines.ts";
 import { setActivePrices } from "./space/prices/index.ts";
@@ -18,7 +19,10 @@ import { ChatService, ChatStore, createChatRoutes } from "./space/chat/index.ts"
 import { buildWidget } from "./web/chat-widget/build.ts";
 import { RuntimeRegistry, loadRuntimes } from "./space/runtimes/index.ts";
 import { refreshCodexTiers } from "./space/runtimes/codex-upgrade.ts";
-import { Bus, BusStore, Consumers, capabilityCaller, createBusRoutes, isConsumerKey } from "./space/bus/index.ts";
+import { Bus, BusStore, Consumers, SPACE_BUS_SPEC, capabilityCaller, createBusRoutes, isConsumerKey } from "./space/bus/index.ts";
+import { DIRECTOR_ID, ORDERS_TOPIC_TAG, OrdersService, OrdersStore, SORT_TIMEOUT_MS, SPACE_MODEL_SPEC, captureHandler, createOrdersRoutes } from "./space/orders/index.ts";
+import { TeamStore } from "./space/team/store.ts";
+import { createTeamRoutes } from "./space/team/api.ts";
 import { SpeechService, SpeechStore, buildAdapters, checkGatewayProviders, createSpeechRoutes, loadSpeech } from "./space/speech/index.ts";
 import { type Manifest, Scheduler, Store, createPeerTaskRoutes, createRoutes, effectiveEnabled, loadManifest, runTarget } from "./space/scheduler/index.ts";
 import { createStorageRoutes, parseStorageSpec } from "./space/storage/index.ts";
@@ -221,7 +225,8 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   const model = new ModelService({ store: modelStore, runtimes, maxConcurrency: config.model.maxConcurrency, health: runtimeHealth, gateway: { link: modelGateway.link } });
   // Per app and tag, when a call names no model (docs/model.md#app-models): panel overrides, the manifest, then the default above.
   const appModels = new AppModels(store.db, {
-    manifest: (app) => registry.get(app)?.manifest.model,
+    // ai-space's own calls by tag (docs/orders.md#topics): the orders' topic call runs on the basic tier unless overridden.
+    manifest: (app) => (app === SPACE_APP ? SPACE_MODEL_SPEC : registry.get(app)?.manifest.model),
     fallback: appDefaultModel,
     runnable: (m) => {
       try {
@@ -240,7 +245,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     options: () => [...modelPreferences.options(), ...runtimes.machineTierOptions(), ...gatewayModelOptions(model.gatewayChoices())],
   });
   // The Models page's rows, for this panel and for a hub's (peers/serve.ts).
-  const appModelRouteOpts = { appModels, apps: () => registry.list().map((e) => e.manifest.app), seenTags: (app: string) => modelStore.tags(app, Date.now() - 30 * 86400_000) };
+  const appModelRouteOpts = { appModels, apps: () => [SPACE_APP, ...registry.list().map((e) => e.manifest.app)], seenTags: (app: string) => modelStore.tags(app, Date.now() - 30 * 86400_000) };
   const chatStore = new ChatStore(config.dbPath);
   const chat = new ChatService({ store: chatStore, model, defaultModel: (app, tag) => appModels.resolve(app, tag), fileDir: (app) => join(storage.appDataDir(app), "chat") });
   // A chat turn the last process did not live to finish is closed here, with the text it had saved (docs/chat.md#turn).
@@ -583,7 +588,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
         return c.later + c.review;
       },
       title: (agent) => {
-        const builtin = [spaceAgentView(), fixerAgentView()].find((v) => v.id === agent);
+        const builtin = builtinAgentViews().find((v) => v.id === agent);
         if (builtin) return { en: builtin.title, ...(builtin.i18n?.zh?.title ? { zh: builtin.i18n.zh.title } : {}) };
         const [app, name] = agent.split("/");
         const m = registry.get(app ?? "")?.manifest;
@@ -619,6 +624,10 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
         ? { stopService: (app: string) => runStopCommand(config.serviceStop, app) }
         : {}),
   });
+  // The team (docs/orders.md#team): the built-in Director and Engineer and the members the person adds.
+  const team = new TeamStore(store.db);
+  // Run tokens: a Director turn's SPACE_RUN_TOKEN, the only credential the delegation routes take from an agent.
+  const runTokens = new RunTokens(agentRuns);
   const callerApp = (req: Request) => callerAppOf(req, { operatorToken: config.apiToken, hubToken: config.hubToken, isDevice: (t) => Boolean(auth.verifyDevice(t)), appForToken: (t) => storage.appForToken(t) });
   const agentRoutes = createAgentRoutes({ actionCatalogue: () => shortcuts.catalogue(),
     // The command box's model layer: the space's basic tier, slim, no tools or thinking (docs/shortcuts.md#model-interpretation).
@@ -627,7 +636,8 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       return r?.outcome.ok ? r.outcome.text : undefined;
     },
     shortcuts: shortcutStore, holdApp: async (app) => packageRuntime.get(app) ? (await packageRuntime.acquire(app, false)).release : undefined, ws, registry, layout, sessions, runs: agentRuns, runtimes, defaultModel: config.chatModel, baseDefaultModel, appModel: (app) => ({ override: appModels.overrides(app).app, manifest: registry.get(app)?.manifest.model?.default }), envFor: appEnvFor, peers, icons, capabilities: () => [...bus.capabilities(), ...peers.capabilities()], sharedSkills: SHARED_SKILLS,
-    callerApp, agentCallers: config.agentCallers,
+    callerApp, agentCallers: config.agentCallers, teamModel: (agent) => team.byAgent(agent)?.model,
+    runTokens, apiUrl: `http://${config.host === "0.0.0.0" || config.host === "::" ? "127.0.0.1" : config.host}:${config.port}`, teamRoster: () => team.list(),
     // Chat cards read and act on their app as the operator (docs/chat-cards.md).
     cardCall: async (app, capability, body) => {
       const r = await bus.call(SPACE_APP, app, capability, { body, contentType: "application/json", accept: "application/json" });
@@ -667,6 +677,66 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     },
   });
   feedback.resume();
+  // Orders (docs/orders.md): the built-in capture target `space/order`, topics sorted by one model call, and turns
+  // of the Director (`space/director`) started in process through the chat route, as the Fix Engineer's are.
+  const ordersStore = new OrdersStore(store.db, { dataDir: ws.data });
+  // A session an order topic points at outlives the chat sessions' retention.
+  sessions.exempt((agent) => (agent === DIRECTOR_ID ? ordersStore.pinnedSessions() : []));
+  const sessionRoute = (agentRoutes["/api/agents/:app/:agent/sessions/:sid"] as { GET: Parameters<typeof localFixer>[0] }).GET;
+  // Delegation (docs/orders.md#delegation): a Director turn hands work to a team member through the same chat route.
+  // A member on another machine runs through the peer client, in process (docs/orders.md#on-another-machine).
+  const delegateMachines = peerMachines(peers, () => connectionPeers.status());
+  const delegations = new DelegationService({
+    store: new DelegationStore(store.db),
+    team,
+    runs: agentRuns,
+    chat: chatRoute,
+    machines: delegateMachines,
+    agentExists: (id) => {
+      const [app, name] = id.split("/");
+      if (app === SPACE_APP) return builtinAgentViews().some((v) => v.id === id);
+      return Boolean(registry.get(app ?? "")?.manifest.agents.some((a) => a.name === name));
+    },
+    orders: {
+      of: (session) => {
+        const topic = ordersStore.topicOfSession(session);
+        return { topicId: topic?.id ?? null, orderId: topic ? (ordersStore.ofTopic(topic.id).pop()?.id ?? null) : null };
+      },
+      image: async (orderId, session) => {
+        const o = ordersStore.get(orderId);
+        const topic = o?.topicId != null ? ordersStore.topic(o.topicId) : undefined;
+        if (!o?.imagePath || !o.imageMime || topic?.sessionId !== session) return undefined;
+        const bytes = await Bun.file(o.imagePath).arrayBuffer().catch(() => null);
+        return bytes ? { name: `order-${o.id}.${o.imageMime.split("/")[1]}`, mediaType: o.imageMime, data: Buffer.from(bytes).toString("base64") } : undefined;
+      },
+    },
+    publish: (name, data) => scheduler.publish({ app: SPACE_APP, name, data }),
+  });
+  const orders = new OrdersService({
+    delegations,
+    store: ordersStore,
+    team,
+    runs: agentRuns,
+    chat: chatRoute,
+    decide: async (prompt, system, signal) => {
+      const r = await model.run(SPACE_APP, { prompt, system, model: appModels.resolve(SPACE_APP, ORDERS_TOPIC_TAG).model, mode: "slim", tag: ORDERS_TOPIC_TAG, tools: [], timeoutMs: SORT_TIMEOUT_MS, maxTokens: 300, thinking: 0 }, signal).catch(() => undefined);
+      return r?.outcome.ok ? r.outcome.text : undefined;
+    },
+    messages: async (sid) => {
+      const res = await sessionRoute(Object.assign(new Request(`http://space.local/api/agents/${DIRECTOR_ID}/sessions/${encodeURIComponent(sid)}`), { params: { app: SPACE_APP, agent: "director", sid } }));
+      return res.ok ? ((await res.json()) as { messages: { role: string; text: string }[] }).messages : [];
+    },
+    publish: (name, data) => scheduler.publish({ app: SPACE_APP, name, data }),
+    notify: async (n) => {
+      await notify.send(SPACE_APP, { level: "warn", title: n.title, text: n.text, url: n.url, key: n.key, windowMs: 1, ...(n.channel ? { channels: [n.channel] } : {}) }, { internal: true });
+    },
+    panelBase: config.router.panelHost ? `https://${config.router.panelHost}` : "",
+    channels: () => notify.channelViews().map((c) => c.name),
+  });
+  // ai-space's own entry in the bus (docs/events.md#events-of-ai-space-itself): its events and the order target.
+  bus.syncBuiltin(SPACE_APP, SPACE_BUS_SPEC, { order: captureHandler(orders) });
+  orders.start();
+  delegations.start();
   const feedbackScript = buildFeedbackScript({ dev: process.env.SPACE_DEV === "1" });
   const uiKit = loadUiKit({ dev: process.env.SPACE_DEV === "1" });
   packageGateway.uiKit = (req) => uiKitResponse(req, uiKit);
@@ -801,6 +871,32 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       ["owner", createRouterRoutes({ router })],
       ["owner", createUsageRoutes({ service: usage, knownApp: (app) => Boolean(registry.get(app)), routerKey })],
       ["owner", feedbackRoutes],
+      ["owner", createOrdersRoutes({ service: orders, store: ordersStore, team, callerApp, channels: () => notify.channelViews().map((c) => c.name), delegations: (sid) => delegations.ofSession(sid), imports: { dataDir: ws.data, spaceName: config.name } })],
+      ["owner", createTeamRoutes({
+        team,
+        callerApp,
+        modelOptions: () => runtimes.tierOptions().filter((o) => o.capabilities.chat).map(({ value, runtime, tier, model, unavailable }) => ({ value, runtime, tier, model, ...(unavailable ? { unavailable } : {}) })),
+        // The agents a member may be: this Space's own and its apps', and its peers' with whether this Space may run them there.
+        agents: () => [
+          ...builtinAgentViews().map((v) => ({ id: v.id, title: v.title, description: v.description ?? "", builtin: true })),
+          ...registry.list().filter(({ manifest }) => manifest.status !== "archived").flatMap(({ manifest }) => manifest.agents.map((a) => ({ id: `${manifest.app}/${a.name}`, title: a.title ?? a.name, description: a.description ?? "" }))),
+          ...peers.agents(new Set()).map((a) => {
+            const peer = a.peer ?? "";
+            const access = delegateMachines.access(peer);
+            return { id: a.id, title: a.title, description: a.description ?? "", peer, ...(a.stale ? { offline: true } : {}), ...(!access.ok && access.reason !== "offline" ? { unavailable: access.error } : {}), models: a.modelOptions ?? [] };
+          }),
+        ],
+      })],
+      // Delegation routes check their own callers: a turn's run token, or the owner (docs/orders.md#who-may-call).
+      ["self", createDelegationRoutes({
+        service: delegations,
+        tokens: runTokens,
+        owner: async (req) => {
+          const refused = config.auth === "builtin" ? await gateCheck(req, "owner", { mode: config.auth, auth, operatorToken: config.apiToken, isAppCredential: async () => false }) : undefined;
+          if (refused) return refused;
+          return (await callerApp(req)) === null ? undefined : new Response(JSON.stringify({ ok: false, error: "delegations are read by the owner or the delegating turn" }), { status: 403, headers: { "content-type": "application/json" } });
+        },
+      })],
       ["owner", createLogsRoutes({ template: config.serviceLogs, token: config.apiToken, knownApp: (app) => Boolean(registry.get(app)), ...(logsToFile() && !env.SPACE_SERVICE_LOGS?.trim() ? { spaceTemplate: `tail -n {lines} {follow} '${join(ws.logs, "space.log").replace(/'/g, `'\\''`)}'` } : {}), ...(supervisor.mode !== "space" ? {} : manager instanceof Launchctl ? { appTemplate: manager.logsTemplate() } : { unitOf: (app: string) => manager.unitName(app) }) })],
       ["owner", createServiceRoutes({ supervisor, hasService: (app) => { const e = registry.get(app); return e ? Boolean(e.manifest.service) : undefined; }, manifest: (app) => registry.get(app)?.manifest })],
       ["owner", agentRoutes],
@@ -892,7 +988,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       hasCredential: async (req) => {
         const t = bearer(req);
         if (!t) return false;
-        return tokenEquals(t, config.apiToken) || tokenEquals(t, config.hubToken) || Boolean(auth.verifyDevice(t)) || Boolean(await storage.appForToken(t)) || Boolean(consumers.authenticate(t));
+        return tokenEquals(t, config.apiToken) || tokenEquals(t, config.hubToken) || Boolean(auth.verifyDevice(t)) || runTokens.known(t) || Boolean(await storage.appForToken(t)) || Boolean(consumers.authenticate(t));
       },
       log: (l) => console.error(l),
     }) as never,
@@ -919,6 +1015,8 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     clearInterval(probeTimer);
     console.log("[space] shutting down");
     scheduler.stop();
+    orders.stop();
+    delegations.stop();
     bus.stop();
     notify.stop();
     peers.stop();

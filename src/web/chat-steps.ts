@@ -9,19 +9,28 @@
  * `task_notification` event in the stream, or the conversation's job list: `applyJobs`). A job's
  * report the agent answers is a `notice` step: the `<task-notification>` message, the CLI's
  * `task_notification` event, or ai-space's own `notice` event.
+ *
+ * Delegation (docs/orders.md#in-the-chat-view): a `{"type":"delegation","delegation":…}` event is a
+ * step keyed `delegation:<id>`, placed where the delegation first appeared; a later event of the
+ * same id replaces what it shows. A restored transcript has no such event: a `space delegate start`
+ * call whose output names the delegation becomes its step (`delegationId`, no `delegation` yet).
  */
 import { monitorInput, taskNotice, toolErrorText } from "../space/runtimes/tool-text.ts";
+import { startedId, type DelegationView } from "../space/agents/delegation-view.ts";
 
 export type ChatQuestion = { id: string; header: string; question: string; options: { label: string; description: string }[]; multiSelect: boolean };
 export type ChatStep = {
   id: string;
-  kind: "text" | "tool" | "approval" | "steer" | "notice";
+  kind: "text" | "tool" | "approval" | "steer" | "notice" | "delegation";
   name: string;
   text: string;
   output: string;
   state: "running" | "background" | "completed" | "failed" | "incomplete" | "stopped" | "waiting" | "allowed" | "denied" | "cancelled";
   questions?: ChatQuestion[];
   answers?: Record<string, string[]>;
+  /** `delegation`: the delegation's id, and its view when the stream carried one. */
+  delegationId?: number;
+  delegation?: DelegationView;
 };
 /** A conversation's background job as `GET …/watch` reports it (`BackgroundJob` on the server). */
 export type ChatJob = { id: string; kind: "bash" | "monitor" | "agent" | "other"; description: string; status: "running" | "completed" | "failed" | "stopped"; startedAt: number; endedAt: number | null; toolUseId?: string; summary?: string };
@@ -44,6 +53,7 @@ type Event = {
   status?: string;
   summary?: string;
   kind?: string;
+  delegation?: DelegationView;
 };
 /** A job's end as a tool row's state. */
 const endState = (status: string | undefined): ChatStep["state"] | undefined =>
@@ -100,6 +110,12 @@ export class ChatSteps {
       this.notice(`notice:${event.task_id}:${event.status ?? ""}`, event.summary || event.task_id, [event.summary, event.status && `status: ${event.status}`].filter(Boolean).join("\n"), event.tool_use_id, event.status);
     }
     if (event.type === "notice" && event.text) this.notice(`notice:${++this.serial}`, event.text, "");
+    if (event.type === "delegation" && event.delegation && typeof event.delegation.id === "number") {
+      const d = event.delegation;
+      const current = this.steps.find((s) => s.id === `delegation:${d.id}`);
+      if (current) current.delegation = d;
+      else this.steps.push({ id: `delegation:${d.id}`, kind: "delegation", name: d.to?.role ?? "", text: d.label ?? "", output: "", state: "completed", delegationId: d.id, delegation: d });
+    }
     for (const block of Array.isArray(event.message?.content) ? event.message.content : []) {
       if (event.type === "assistant" && block.type === "text" && block.text) this.text(block.text, true);
       if (event.type === "assistant" && block.type === "tool_use" && block.id) {
@@ -225,7 +241,13 @@ export const historySteps = (steps: HistoryStep[]): ChatStep[] => steps.map((ste
   ? { id: `history:${i}`, kind: "text", name: "", text: step.text, output: "", state: "completed" }
   : step.kind === "notice"
   ? { id: `history:${i}`, kind: "notice", name: "", text: step.text, output: step.detail, state: "completed" }
+  : delegationStarted(step) !== undefined
+  ? { id: `history:${i}`, kind: "delegation", name: step.name, text: step.input, output: step.output, state: "completed", delegationId: delegationStarted(step)! }
   : { id: `history:${i}`, kind: "tool", name: step.name, text: step.input, output: step.output, state: step.failed ? "failed" : "completed" });
+
+/** The delegation a restored `space delegate start` call started; undefined for any other call. */
+export const delegationStarted = (step: { input: string; output: string; failed?: boolean }): number | undefined =>
+  !step.failed && /\bspace\s+delegate\s+start\b/.test(step.input) ? startedId(step.output) : undefined;
 
 /** How a tool row is drawn: its icon, its localized title, and the one-line summary beside it. */
 export type ToolVariant = "bash" | "read" | "write" | "edit" | "search" | "web" | "code" | "task" | "plan" | "monitor" | "other";

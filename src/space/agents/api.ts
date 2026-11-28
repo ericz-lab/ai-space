@@ -31,11 +31,15 @@ import { readTranscript } from "./transcript.ts";
 import { CardBook, parseCard, parseItemStates, transcriptCards, withoutChangesNote } from "./cards.ts";
 import { resolveLink } from "../panel/view.ts";
 import { fixerSystemPrompt } from "../feedback/prompt.ts";
+import { DIRECTOR_AGENT, ENGINEER_AGENT, type RosterMember, directorSystemPrompt, engineerSystemPrompt } from "../orders/prompt.ts";
+import type { RunTokens } from "./delegations.ts";
+import type { RunTrigger } from "./runs.ts";
 
 /**
  * HTTP surface for agents, shaped as a Bun.serve `routes` table.
  *
- *   GET  /api/agents                              every agent of every visible app, plus the space agent, then the peers' agents
+ *   GET  /api/agents                              every agent of every visible app, plus the space's own (Space Assistant,
+ *                                                 the Director, the Engineer, the Fix Engineer), then the peers' agents
  *   POST /api/agents/:app/:agent/chat             { message, sessionId?, model?, permissionMode?, effort?, interactive? } → SSE of a new background run (x-run-id)
  *   GET  /api/agents/runs?recent=<s>&agent=        runs newest first: running ones and those that ended in the last `recent` seconds
  *   GET  /api/agents/:app/:agent/runs              the agent's runs (same query)
@@ -109,7 +113,27 @@ export type AgentsApiOptions = {
    * (docs/chat-cards.md); absent: cards are shown as they were printed and have no actions.
    */
   cardCall?: (app: string, capability: string, body: string) => Promise<{ status: number; body: string }>;
+  /**
+   * A built-in team member's model from its team row (docs/orders.md#team), by agent id (`space/director`,
+   * `space/engineer`): a new conversation with it runs on this; absent or undefined, the default.
+   */
+  teamModel?: (agent: string) => string | null | undefined;
+  /**
+   * The run tokens of agents that may delegate (docs/orders.md#who-may-call): a turn of such an agent gets
+   * `SPACE_RUN_TOKEN` and `SPACE_API_URL` (`apiUrl`) in its environment. Absent: no turn delegates.
+   */
+  runTokens?: RunTokens;
+  /** This Space's API on loopback, for a turn's `space` commands (`http://127.0.0.1:8700`). */
+  apiUrl?: string;
+  /** The team, for the Director's prompt (its roles and summaries). */
+  teamRoster?: () => RosterMember[];
 };
+
+/**
+ * What the Director may run without an approval besides reading (Claude Code's allowed-tools syntax):
+ * its own delegation commands. What a delegate may do is the delegate's permission setting.
+ */
+export const DIRECTOR_TOOLS = ["Bash(space delegate:*)"] as const;
 
 /** The space's own agent: the default chat identity, working in the workspace root. */
 export const SPACE_APP = "space";
@@ -150,6 +174,53 @@ export function fixerAgentView(runtimes?: RuntimeRegistry, defaultModel?: string
     runtime: runtimes ? baseRuntime(runtimes, defaultModel) : "claude",
     ...(runtimes ? { modelOptions: chatOptions(runtimes) } : {}),
   };
+}
+
+/**
+ * The space's Director (docs/orders.md#the-built-in-director): takes every order, spoken or typed,
+ * one conversation per topic. The orders service starts its turns; the person can chat with it too.
+ */
+export { DIRECTOR_AGENT };
+
+export function directorAgentView(runtimes?: RuntimeRegistry, defaultModel?: string): AgentView {
+  return {
+    id: `${SPACE_APP}/${DIRECTOR_AGENT}`,
+    app: SPACE_APP,
+    name: DIRECTOR_AGENT,
+    title: "Director",
+    description: "Takes your orders, spoken or typed, one conversation per topic: answers, looks things up, records to-dos, and asks you when an order needs more.",
+    i18n: { zh: { title: "总管", description: "接你的口谕（说的或打的），一个话题一个对话：回答、查资料、记待办，需要你拿主意时会问你。" } },
+    avatar: "/assistant.svg",
+    appIcon: "📜",
+    runtime: runtimes ? baseRuntime(runtimes, defaultModel) : "claude",
+    ...(runtimes ? { modelOptions: chatOptions(runtimes) } : {}),
+  };
+}
+
+/**
+ * The space's Engineer (docs/orders.md#built-in-members): changes an app's source in app-src/<app>/,
+ * runs its checks and deploys it through the app's own channel, briefed by the Director.
+ */
+export { ENGINEER_AGENT };
+
+export function engineerAgentView(runtimes?: RuntimeRegistry, defaultModel?: string): AgentView {
+  return {
+    id: `${SPACE_APP}/${ENGINEER_AGENT}`,
+    app: SPACE_APP,
+    name: ENGINEER_AGENT,
+    title: "Engineer",
+    description: "Changes an app's source in app-src/<app>/ as the Director briefs it, runs the app's checks and deploys it through the app's own channel.",
+    i18n: { zh: { title: "工程师", description: "按总管的交代改一个 app 的源码（app-src/<app>/），跑它的检查，再按它自己的渠道部署。" } },
+    avatar: "/assistant.svg",
+    appIcon: "🧰",
+    runtime: runtimes ? baseRuntime(runtimes, defaultModel) : "claude",
+    ...(runtimes ? { modelOptions: chatOptions(runtimes) } : {}),
+  };
+}
+
+/** The space's own agents, in the order the agent list shows them. */
+export function builtinAgentViews(runtimes?: RuntimeRegistry, defaultModel?: string): AgentView[] {
+  return [spaceAgentView(runtimes, defaultModel), directorAgentView(runtimes, defaultModel), engineerAgentView(runtimes, defaultModel), fixerAgentView(runtimes, defaultModel)];
 }
 
 /** The runtime/tier values any agent's chat may pick. */
@@ -330,6 +401,17 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
       const prompt = [fixerSystemPrompt(opts.ws.home, skillDir ? join(skillDir, "scope.ts") : undefined), skill ? `--- The app-fix skill ---\n${skill.slice(0, MAX_CONTEXT)}` : ""].filter(Boolean).join("\n\n");
       return { id: `${SPACE_APP}/${FIXER_AGENT}`, runtime: baseRuntime(opts.runtimes, baseDefault()), cwd: opts.ws.home, systemPrompt: prompt, tools: [], app: SPACE_APP };
     }
+    if (app === SPACE_APP && name === DIRECTOR_AGENT) {
+      const model = opts.teamModel?.(`${SPACE_APP}/${DIRECTOR_AGENT}`) ?? undefined;
+      return { id: `${SPACE_APP}/${DIRECTOR_AGENT}`, runtime: model?.includes("/") ? model.slice(0, model.indexOf("/")) : baseRuntime(opts.runtimes, baseDefault()), ...(model ? { model } : {}), cwd: opts.ws.home, systemPrompt: withCatalogue(directorSystemPrompt(opts.ws.home, opts.teamRoster?.() ?? []), SPACE_APP), tools: opts.runTokens ? [...DIRECTOR_TOOLS] : [], app: SPACE_APP };
+    }
+    if (app === SPACE_APP && name === ENGINEER_AGENT) {
+      const model = opts.teamModel?.(`${SPACE_APP}/${ENGINEER_AGENT}`) ?? undefined;
+      const skillDir = opts.sharedSkills ? join(opts.sharedSkills, "app-fix") : undefined;
+      const skill = skillDir ? await Bun.file(join(skillDir, "SKILL.md")).text().catch(() => "") : "";
+      const prompt = [engineerSystemPrompt(opts.ws.home, skillDir ? join(skillDir, "scope.ts") : undefined), skill ? `--- The app-fix skill (the procedure for changing an app; a brief from the Director replaces the Fix this request, and the RESULT line is optional) ---\n${skill.slice(0, MAX_CONTEXT)}` : ""].filter(Boolean).join("\n\n");
+      return { id: `${SPACE_APP}/${ENGINEER_AGENT}`, runtime: model?.includes("/") ? model.slice(0, model.indexOf("/")) : baseRuntime(opts.runtimes, baseDefault()), ...(model ? { model } : {}), cwd: opts.ws.home, systemPrompt: withCatalogue(prompt, SPACE_APP), tools: [], app: SPACE_APP };
+    }
     const entry = registry.get(app);
     const a = entry?.manifest.agents.find((x) => x.name === name);
     if (!entry || !a) throw new NotFound(`unknown agent: ${app}/${name}`);
@@ -420,7 +502,7 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
       GET: async (req) => {
         const lay = layout.read();
         const hidden = new Set(lay.hidden);
-        const agents: AgentView[] = [spaceAgentView(opts.runtimes, baseDefault()), fixerAgentView(opts.runtimes, baseDefault())];
+        const agents: AgentView[] = builtinAgentViews(opts.runtimes, baseDefault());
         for (const { manifest } of registry.list()) {
           if (hidden.has(manifest.app) || manifest.status === "archived") continue;
           for (const a of manifest.agents) {
@@ -500,6 +582,15 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
           // Which agent this turn is, for a command the agent runs that wants to return to this conversation later.
           SPACE_AGENT_ID: agent.id,
         };
+        // A turn of an agent that may delegate gets its run token (docs/orders.md#who-may-call); no other turn does.
+        delete env.SPACE_RUN_TOKEN;
+        const minted = opts.runTokens?.mint(agent.id);
+        if (minted) {
+          env.SPACE_RUN_TOKEN = minted.token;
+          if (opts.apiUrl) env.SPACE_API_URL = opts.apiUrl;
+        }
+        // Set in process only (a delegation's result, agents/delegations.ts); a request from outside cannot carry it.
+        const trigger = (req as { spaceTrigger?: RunTrigger }).spaceTrigger;
         // What the person changed through the last turn's cards goes before the message (docs/chat-cards.md).
         const changes = cards.changesNote(agent.id, sessionId);
         let run;
@@ -509,14 +600,17 @@ export function createAgentRoutes(opts: AgentsApiOptions): Routes {
             agent: agent.id,
             runtime,
             model,
+            ...(trigger ? { trigger } : {}),
             ...(changes ? { message } : {}),
             // The manifest's tool list is Claude Code's syntax; other runtimes bound the agent by the permission mode's sandbox.
             turn: { message: changes ? `${changes}\n\n${message}` : message, images, sessionId, model, permissionMode, ...(effort ? { effort } : {}), interactive, systemPrompt: agent.systemPrompt, allowedTools: runtime.kind === "claude-code" ? agent.tools : [], cwd: agent.cwd, env },
             onSession: (sid) => sessions.record(agent.id, sid, sessionId, message.slice(0, 40), runtime.name, model, skillIntent ?? undefined),
           });
           if (release) runs.subscribe(run.id, run.lastSeq, { onEvent() {}, onEnd: release });
+          minted?.bind(run.id);
         } catch (e) {
           release?.();
+          minted?.drop();
           if (e instanceof RunBusyError) return error(409, e.message);
           if (e instanceof RunClosedError) return error(503, e.message);
           throw e;

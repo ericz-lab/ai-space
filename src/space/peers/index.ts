@@ -13,3 +13,4 @@ export { PeerStore } from "./store.ts";
 export { RenameError, checkRename, renameEnvText, renamePeer, renamePeerData, type PeerRenameOptions, type PeerRenamed, type RenameCounts } from "./rename.ts";
 export { adoptConnection, adoptHeadersEnv, adoptTokenEnv, createAdoptHandler, type AdoptOptions } from "./adopt.ts";
 export { createMigrateRoutes, migratePeer, type MigrateDeps, type MigrateRequest, type MigrateResult } from "./migrate.ts";
+export { machineAccess, peerMachines } from "./delegates.ts";

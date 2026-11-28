@@ -215,3 +215,34 @@ test("an answered approval resumes the status once nothing else waits", () => {
   expect(next({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "x", content: "ok" }] } })).toBeUndefined();
   expect(next({ type: "approval_resolved", id: "2", decision: "allow" })).toEqual({ key: "chat.running", name: "Bash" });
 });
+
+const delegation = (id: number, state: string, notes: unknown[] = []) => ({
+  id, label: `Delegation #${id}`, from: { agent: "space/director", session: "s1" }, to: { agent: "space/engineer", role: "engineer", title: "Engineer", machine: "", session: "s2", runId: "r2" },
+  state, permission: "edit", orderId: 1, continued: null, createdAt: "2026-11-26T10:00:00Z", endedAt: null, notes, delivered: null, asking: [],
+});
+test("a delegation event is one step where it first appeared; a later event of the same id replaces it", () => {
+  const steps = new ChatSteps();
+  steps.apply({ type: "assistant", message: { content: [{ type: "text", text: "Handing it over." }] } });
+  steps.apply({ type: "delegation", delegation: delegation(3, "running") } as never);
+  steps.apply({ type: "assistant", message: { content: [{ type: "text", text: "Assigned." }] } });
+  steps.apply({ type: "delegation", delegation: delegation(3, "done", [{ seq: 1, at: "x", kind: "result", text: "ok" }]) } as never);
+  steps.apply({ type: "done" });
+  const shot = steps.snapshot();
+  expect(shot.map((s) => [s.kind, s.id])).toEqual([["text", "text:1"], ["delegation", "delegation:3"], ["text", "text:2"]]);
+  expect(shot[1]).toMatchObject({ delegationId: 3, state: "completed", name: "engineer" });
+  expect(shot[1]!.delegation?.state).toBe("done");
+  expect(shot[1]!.delegation?.notes).toHaveLength(1);
+  // A malformed event changes nothing.
+  steps.apply({ type: "delegation" } as never);
+  expect(steps.steps).toHaveLength(3);
+});
+test("a restored `space delegate start` call becomes its delegation's step; other calls stay tool rows", () => {
+  const out = historySteps([
+    { kind: "tool", name: "Bash", input: "space delegate start engineer --brief-file /tmp/b.md", output: "Delegation #7 started (engineer). The result comes back here.", failed: false },
+    { kind: "tool", name: "Bash", input: "space delegate start engineer --brief-file /tmp/b.md", output: "error: engineer is disabled", failed: true },
+    { kind: "tool", name: "Bash", input: "echo 'Delegation #8 started'", output: "Delegation #8 started", failed: false },
+    { kind: "tool", name: "Bash", input: "space delegate show 7", output: "Delegation #7 started …", failed: false },
+  ]);
+  expect(out.map((s) => [s.kind, s.delegationId])).toEqual([["delegation", 7], ["tool", undefined], ["tool", undefined], ["tool", undefined]]);
+  expect(out[0]).toMatchObject({ id: "history:0", text: "space delegate start engineer --brief-file /tmp/b.md" });
+});

@@ -125,6 +125,8 @@ The target is called as `space` (so `callers`, when set, must include it) with a
 
 `targets` holds the targets that take `image` only, as clients older than `text` read it; `textTargets` the ones that take `text`. A target that takes both is in both lists, and `kinds` on each says what it takes. `POST /api/capture/image?to=<id>` and `POST /api/capture/text?to=<id>` forward the client's request as the operator to that one, here or through its peer; each refuses an id that is not a declared target or one that does not take its kind (404), and the text route refuses an empty or too long note, a `via` it does not know and an `id` that is not a UUID (400, 413) before anything is sent. All three are panel routes: no token, writes held to the panel's origin.
 
+Every Space also offers its own target, `space/order` (`kinds: [text, image]`, title Orders / 口谕): an order for its built-in Director ([orders.md](orders.md#the-capture-target)). It is a capability of ai-space's own bus entry (below), answered in process, so it is listed, called and offered to a hub (`<peer>/space/order`) like an app's. It takes calls from `space` and `<hub>/space` only; a picture without words is refused (400). It answers `{ ok, url: "/#order=<id>", label: "Order #<id>" }`.
+
 ## Catalogue
 
 `GET /api/capabilities` lists, per app, what it provides (with description, method, path, timeout, callers), what it publishes (with description and example) and what it consumes, plus call counts, failures and mean duration per capability. Peers' apps follow under `<peer>/<app>` with a `peer` field, the peer's `health` (`ok` when it answers, `down` otherwise; the same rule as `GET /api/peers`) and `asOf`, the time of its last good snapshot. This is what an agent reads to learn that "save this link" is `keep/save-link`, and what a new app reads to find which events exist.
@@ -159,7 +161,31 @@ DELETE /api/consumers/:name               revoke
 
 ## Events of ai-space itself
 
-ai-space publishes under the reserved app name `space`. Subscribe like to any app's event (`consumes: [{ event: space/peer.renamed }]`).
+ai-space publishes under the reserved app name `space`. Subscribe like to any app's event (`consumes: [{ event: space/peer.renamed }]`). ai-space is in the bus as that app (`src/space/bus/builtin.ts`, registered at boot with `Bus.syncBuiltin`): `GET /api/capabilities` lists its events and its one capability, `order`, a peer's snapshot carries them, and a hub mirrors them as `<peer>/space/…` like an app's.
+
+### order.issued, order.sorted, order.state
+
+The orders ([orders.md](orders.md#events)). None carries the picture or a path to it; texts are at most 600 characters.
+
+| event | when | data |
+| --- | --- | --- |
+| `space/order.issued` | an order is stored | `{ id, text, via, image?: { mime, bytes }, createdAt, url }` (`url` is `/#order=<id>`, relative to this Space) |
+| `space/order.sorted` | it has a topic | `{ id, topic: { id, title, new }, by: model \| fallback \| person }` |
+| `space/order.state` | a topic's state changes | `{ topic: { id, title }, state: working \| needs-you \| done \| failed, order?, summary? }` |
+
+`order.issued` comes before the order's `order.sorted`. A repeated client id publishes nothing.
+
+### delegation.started, delegation.noted, delegation.ended
+
+Delegation ([orders.md](orders.md#delegation)). None carries the brief, an added message or the result in full.
+
+| event | when | data |
+| --- | --- | --- |
+| `space/delegation.started` | an agent's turn delegated work to a team member | `{ id, order?, topic?, from, to, role }` (`from` and `to` are agents, `role` the member's) |
+| `space/delegation.noted` | a message was added to it, or it was stopped | `{ id, kind: say \| stop, taken? }` (`taken`: the runtime accepted the message) |
+| `space/delegation.ended` | the delegate's turn ended | `{ id, state: done \| error \| stopped \| timeout \| interrupted, summary }` (`summary`: at most 600 characters of the result) |
+
+A delegation interrupted by a restart publishes its `delegation.ended` at the next start.
 
 ### peer.renamed
 

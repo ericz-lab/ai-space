@@ -8,7 +8,7 @@ import { DEVICE_CLIENTS, type DeviceClient, type BeatResult, KEY_PATTERN, KINDS,
  */
 
 /** What the agent hooks need of a run (`RunInfo` in agents/runs.ts). */
-export type AgentRun = { id: string; agent: string; sessionId: string | null; sid: string | null; startedAt: number; finishedAt: number | null; trigger?: "user" | "background" };
+export type AgentRun = { id: string; agent: string; sessionId: string | null; sid: string | null; startedAt: number; finishedAt: number | null; trigger?: "user" | "background" | "delegation" };
 
 export class UsageService {
   private readonly now: () => number;
@@ -62,9 +62,9 @@ export class UsageService {
     return this.store.beat(app, tab, this.now());
   }
 
-  /** `RunRegistry`'s start hook: one turn is one open of the agent; a turn the agent started by itself is not. */
+  /** `RunRegistry`'s start hook: one turn is one open of the agent; a turn the agent started by itself, or a delegation's result started, is not. */
   runStarted = (run: AgentRun): void => {
-    if (run.trigger === "background") return;
+    if (run.trigger === "background" || run.trigger === "delegation") return;
     try {
       this.store.addOpen("agent", run.agent, "chat", run.startedAt);
     } catch (e) {

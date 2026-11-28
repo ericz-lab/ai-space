@@ -6,13 +6,15 @@ import { groupKeyOf } from "./agent-groups.ts";
  * once the page is up, so a desktop client can show the Inbox, the Terminal, Settings, the App Store or a chat
  * without a native copy of them. `#chat=<app>/<agent>&text=…` opens that agent's chat with the
  * text in its message field. The text is a draft: it is never sent, so a link from anywhere cannot
- * make an agent act. The panel clears the fragment once it is read.
+ * make an agent act. `#order=<id>` opens the Orders window on that order's topic (docs/orders.md):
+ * the link a capture answers with. The panel clears the fragment once it is read.
  */
 export type PanelLink =
   | { open: "chat"; agent: string | null; text: string }
+  | { open: "orders"; order?: number }
   | { open: "inbox" | "terminal" | "settings" | "shortcuts" | "store" };
 
-const WINDOWS = ["inbox", "terminal", "settings", "shortcuts", "store"] as const;
+const WINDOWS = ["inbox", "terminal", "settings", "shortcuts", "store", "orders"] as const;
 
 /**
  * A built-in tile's own page (docs/panel.md#built-in-pages): `/?page=<name>` shows that window
@@ -47,6 +49,10 @@ export function parsePanelLink(hash: string): PanelLink | null {
   if (first === "chat") {
     const agent = params.get("chat")?.trim() || null;
     return { open: "chat", agent, text: (params.get("text") ?? "").slice(0, MAX_DRAFT) };
+  }
+  if (first === "order") {
+    const id = Number(params.get("order"));
+    return Number.isInteger(id) && id > 0 ? { open: "orders", order: id } : null;
   }
   const name = WINDOWS.find((w) => w === first);
   return name && !params.get(name) ? { open: name } : null;

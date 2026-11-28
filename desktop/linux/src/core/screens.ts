@@ -16,7 +16,7 @@ export { HOME, addScreen, move, pin, removeScreen, unpin };
 export const LIMIT = 20;
 
 /** The `builtin:` tiles this client draws: the panel's own (BUILTINS in src/web/screens.ts, in its order), and the web panel itself. */
-export const BUILTIN_NAMES = ["store", "inbox", "shortcuts", "terminal", "panel", "settings"] as const;
+export const BUILTIN_NAMES = ["store", "orders", "inbox", "shortcuts", "terminal", "panel", "settings"] as const;
 export type BuiltinName = (typeof BUILTIN_NAMES)[number];
 
 /**
@@ -26,11 +26,11 @@ export type BuiltinName = (typeof BUILTIN_NAMES)[number];
  * included) and that one is drawn; this is what shows until it loads, or when the Space names
  * none. The web panel's tile is this client's own and has no such picture.
  */
-export const BUILTIN_ART = { store: "store.svg", inbox: "inbox.svg", shortcuts: "shortcuts.svg", terminal: "terminal.svg", settings: "settings.svg" } as const satisfies Partial<Record<BuiltinName, string>>;
+export const BUILTIN_ART = { store: "store.svg", orders: "orders.svg", inbox: "inbox.svg", shortcuts: "shortcuts.svg", terminal: "terminal.svg", settings: "settings.svg" } as const satisfies Partial<Record<BuiltinName, string>>;
 export const builtinArt = (name: BuiltinName): string | undefined => (BUILTIN_ART as Partial<Record<BuiltinName, string>>)[name];
 
 /** The page of the panel a tile opens in a tab, for the ones this client has no view of its own for (docs/panel.md#built-in-pages). */
-export const builtinPage = (name: BuiltinName): string | undefined => (name === "store" || name === "shortcuts" ? `/?page=${name}` : name === "panel" ? "/" : undefined);
+export const builtinPage = (name: BuiltinName): string | undefined => (name === "store" || name === "orders" || name === "shortcuts" ? `/?page=${name}` : name === "panel" ? "/" : undefined);
 
 /**
  * `apps`: every app (`app:<id>`) the Space has had since this record first looked, so an app is

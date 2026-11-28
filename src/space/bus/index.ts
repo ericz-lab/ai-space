@@ -1,7 +1,8 @@
 export * from "./types.ts";
 export { parseEventsSpec, parseProvidesSpec, triggersFromConsumes, EMPTY_EVENTS_SPEC } from "./spec.ts";
 export { BusStore, type DeliveryCreate, type DeliveryPatch } from "./store.ts";
-export { Bus, CallError, type AppBusSpec, type AppCapabilities, type BusOptions, type CallRequest, type CallResult, type Fetch, type StreamListener } from "./bus.ts";
+export { Bus, CallError, type AppBusSpec, type AppCapabilities, type BusOptions, type CallRequest, type CallResult, type Fetch, type InProcessHandler, type StreamListener } from "./bus.ts";
 export { capabilityCaller, createBusRoutes, deliveryView, callView, OPERATOR, type BusApiOptions, type RemoteBus, type RemotePeer } from "./api.ts";
 export { capabilitiesPrompt, type CapabilitiesPromptOptions } from "./prompt.ts";
 export { Consumers, ConsumerError, consumerView, hashToken, parseConsumerInput, type ConsumerInput, type ConsumersOptions } from "./consumers.ts";
+export { ORDER_CAPABILITY, SPACE_BUS_SPEC, SPACE_PUBLISHES } from "./builtin.ts";

@@ -11,6 +11,7 @@ const PUBLIC: Record<string, string> = {
   "/favicon.svg": "favicon.svg",
   "/settings.svg": "settings.svg",
   "/terminal.svg": "terminal.svg",
+  "/orders.svg": "orders.svg",
   "/inbox.svg": "inbox.svg",
   "/store.svg": "store.svg",
   "/shortcuts.svg": "shortcuts.svg",
