@@ -1,4 +1,5 @@
 import { bearer } from "../auth.ts";
+import { LOOPBACK_IP, fromLoopback } from "../hosts.ts";
 import type { GatewayOperation, ModelGateway } from "./service.ts";
 
 /**
@@ -28,16 +29,6 @@ type Server = { requestIP?: (req: Request) => { address: string } | null } | und
 const MESSAGES: GatewayOperation = { base: "messages", path: "/v1/messages", usage: "messages", pin: true, errors: "anthropic" };
 const COUNT: GatewayOperation = { base: "messages", path: "/v1/messages/count_tokens", usage: "none", pin: false, errors: "anthropic" };
 const openai = (path: string, usage: GatewayOperation["usage"]): GatewayOperation => ({ base: "openai", path, usage, pin: false, errors: "openai" });
-
-const LOOPBACK = /^(?:127\.\d+\.\d+\.\d+|::1|::ffff:127\.\d+\.\d+\.\d+)$/;
-const FORWARDED = ["x-forwarded-for", "forwarded", "cf-connecting-ip", "x-real-ip"];
-
-/** A request straight from this machine: a loopback peer and no proxy's forwarding headers. */
-export function fromLoopback(req: Request, server: Server): boolean {
-  if (FORWARDED.some((h) => req.headers.has(h))) return false;
-  const ip = server?.requestIP?.(req)?.address;
-  return ip !== undefined && LOOPBACK.test(ip);
-}
 
 export function createGatewayRoutes(gateway: ModelGateway) {
   const caller = (req: Request, server: Server, errors: GatewayOperation["errors"]): string | Response => {
@@ -79,6 +70,6 @@ export function gatewayBase(host: string, port: number): { base: string } | { re
   const h = host.trim().replace(/^\[|\]$/g, "");
   if (h === "127.0.0.1" || h === "localhost" || h === "0.0.0.0" || h === "" || h === "::") return { base: `http://127.0.0.1:${port}${GATEWAY_PREFIX}` };
   if (h === "::1") return { base: `http://[::1]:${port}${GATEWAY_PREFIX}` };
-  if (LOOPBACK.test(h)) return { base: `http://${h}:${port}${GATEWAY_PREFIX}` };
+  if (LOOPBACK_IP.test(h)) return { base: `http://${h}:${port}${GATEWAY_PREFIX}` };
   return { reason: `ai-space listens on ${host} only (SPACE_HOST), not on loopback, so the built-in model gateway is off` };
 }

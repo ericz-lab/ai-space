@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DEFAULT_APPS, applyEnvOverrides, cloneDefaultApps, describeInstalls, installDefaultApps, newPackagePort, newWorkspaceEnv, parseDefaultApps, urlOverrideKey, withManifestQuery } from "./defaults.ts";
+import { DEFAULT_APPS, applyEnvOverrides, cloneDefaultApps, describeInstalls, installDefaultApps, loopbackUrl, newPackagePort, newWorkspaceEnv, parseDefaultApps, urlOverrideKey, withManifestQuery } from "./defaults.ts";
 import { loadManifest } from "./scheduler/manifest.ts";
 import { WINDOWS } from "./testing.ts";
 import { workspacePaths } from "./workspace.ts";
@@ -136,5 +136,20 @@ describe("applyEnvOverrides", () => {
     await writeFile(join(dir, "space.yaml"), "name: notes\nurl: /\n");
     const bare = await loadManifest(dir);
     expect(() => applyEnvOverrides(bare, {}, { domain: "example.com" })).toThrow(/needs a service with a port/);
+  });
+
+  test("loopbackUrl keeps the loopback form of a path url a domain made public, and nothing else", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "space-app-"));
+    await writeFile(join(dir, "space.yaml"), "name: notes\nurl: /docs?lang={lang}\nservice: { command: bun run, port: 8710 }\n");
+    const m = await loadManifest(dir);
+    expect(loopbackUrl(m, {}, { domain: "example.com" })).toBe("http://127.0.0.1:8710/docs?lang={lang}");
+    // Without a domain the url already is this; an override points somewhere on purpose.
+    expect(loopbackUrl(m, {})).toBeUndefined();
+    expect(loopbackUrl(m, { SPACE_APP_URL_NOTES: "https://n.example.org/" }, { domain: "example.com" })).toBeUndefined();
+    expect(loopbackUrl(m, { SPACE_APP_URL_NOTES: " " }, { domain: "example.com" })).toBe("http://127.0.0.1:8710/docs?lang={lang}");
+    await writeFile(join(dir, "space.yaml"), "name: notes\nurl: https://notes.example.org/\nservice: { command: bun run, port: 8710 }\n");
+    expect(loopbackUrl(await loadManifest(dir), {}, { domain: "example.com" })).toBeUndefined();
+    await writeFile(join(dir, "space.yaml"), "name: notes\nurl: /\n");
+    expect(loopbackUrl(await loadManifest(dir), {}, { domain: "example.com" })).toBeUndefined();
   });
 });

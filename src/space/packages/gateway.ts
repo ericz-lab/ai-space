@@ -35,9 +35,10 @@ export class PackageGateway {
   private readonly work = new Set<Work>();
   /** Connections whose owner answered that it cannot open directly, until when (`NO_DIRECT_MS`). */
   private readonly noDirect = new Map<string, number>();
-  private base?: URL;
-  /** Whether `base` is a public HTTPS origin (`SPACE_PACKAGE_BASE_URL`), the only one handed to another Space. */
-  private publicBase = false;
+  /** `http://localhost:<port>`, set once the server listens: a viewer at this machine opens a local app here. */
+  private loopback?: URL;
+  /** The public HTTPS origin (`SPACE_PACKAGE_BASE_URL`), if any: every other viewer's, and the only one handed to another Space. */
+  private publicBase?: URL;
   private readonly unsubscribe: () => void;
   /** Records a local app's usage heartbeat; set once the usage service exists. Unset, the paths are 404. */
   usageBeat?: (app: string, tab: unknown) => void;
@@ -67,8 +68,8 @@ export class PackageGateway {
     if (base && (base.protocol !== "https:" || base.username || base.password || base.pathname !== "/" || base.search || base.hash)) throw new Error("package public base must be an HTTPS origin");
     if (this.server) throw new Error("package gateway already started");
     this.server = Bun.serve({ hostname: "127.0.0.1", port, idleTimeout: 255, websocket: terminalWebSocket, fetch: (req, server) => this.fetch(req, server) });
-    this.base = base ?? new URL(`http://localhost:${this.server.port}`);
-    this.publicBase = !!base;
+    this.loopback = new URL(`http://localhost:${this.server.port}`);
+    this.publicBase = base;
     return this.server.port!;
   }
 
@@ -78,12 +79,18 @@ export class PackageGateway {
     this.work.clear(); this.tickets.clear(); this.sessions.clear(); this.entries.clear(); this.noDirect.clear();
   }
 
-  async open(target: Target, path = "/"): Promise<{ url: string; spaceId: string; app: string; direct?: true }> {
+  /**
+   * A ticket URL that opens the app's page. `local`: the viewer is at this machine (hosts.ts `localViewer`), and a
+   * local app opens on its loopback origin even with a public one (docs/app-packages.md); an app over a connection
+   * does not change. Both origins of one app work, each with its own sessions.
+   */
+  async open(target: Target, path = "/", opts: { local?: boolean } = {}): Promise<{ url: string; spaceId: string; app: string; direct?: true }> {
     requestPath(path);
-    if (!this.base) throw new Error("application gateway is disabled; configure SPACE_PACKAGE_PORT");
+    if (!this.loopback) throw new Error("application gateway is disabled; configure SPACE_PACKAGE_PORT");
     installationKey(target.spaceId, target.app);
     if (target.spaceId === this.spaceId) {
       if (target.connectionId || !this.runtime.get(target.app)?.manifest.launch) throw new Error("local application has no page");
+      if (opts.local) return { url: this.ticket(target, path, this.loopback), spaceId: target.spaceId, app: target.app };
     } else {
       const c = target.connectionId ? this.links.connections.get(target.connectionId) : undefined;
       if (!c || c.remoteSpaceId !== target.spaceId) throw new Error("application connection does not match Space identity");
@@ -96,7 +103,7 @@ export class PackageGateway {
       if (!shared) throw new Error("remote application is not shared");
       if (shared.page === false) throw new Error("remote application has no page");
     }
-    return { url: this.ticket(target, path), spaceId: target.spaceId, app: target.app };
+    return { url: this.ticket(target, path, this.publicBase ?? this.loopback), spaceId: target.spaceId, app: target.app };
   }
 
   /**
@@ -105,17 +112,18 @@ export class PackageGateway {
    * on a public gateway: the loopback default means nothing to another Space, and a spec-1 page is not shared.
    */
   async openFor(via: string, app: string, path: unknown = "/"): Promise<Response> {
-    if (!this.base || !this.publicBase) return Response.json({ error: "direct open not available" }, { status: 404 });
+    if (!this.publicBase) return Response.json({ error: "direct open not available" }, { status: 404 });
     if (!this.runtime.get(app)?.manifest.launch) return Response.json({ error: "application has no page" }, { status: 404 });
-    try { return Response.json({ url: this.ticket({ app, spaceId: this.spaceId }, requestPath(path), via) }); }
+    try { return Response.json({ url: this.ticket({ app, spaceId: this.spaceId }, requestPath(path), this.publicBase, via) }); }
     catch (e) { return Response.json({ error: (e as Error).message }, { status: 400 }); }
   }
 
-  private ticket(target: Target, path: string, via?: string): string {
+  /** A single-use ticket on `base` (the loopback or the public origin); the app's entry there is keyed by its host. */
+  private ticket(target: Target, path: string, base: URL, via?: string): string {
     this.prune();
     if (this.tickets.size + this.sessions.size >= 1024) throw new Error("application session limit reached");
     const label = originLabel(target.spaceId, target.app);
-    const origin = new URL(this.base!); origin.hostname = `${label}.${origin.hostname}`;
+    const origin = new URL(base); origin.hostname = `${label}.${origin.hostname}`;
     const entry = { ...target, label, origin: origin.origin };
     this.entries.set(origin.host, entry);
     const ticket = randomBytes(32).toString("base64url");
@@ -405,14 +413,15 @@ function holdResponse(response: Response, headers: Headers, release: () => void)
 }
 
 type RequestWithParams = Request & { params: Record<string, string> };
-export function createPackageOpenRoutes(gateway: PackageGateway, token: string) {
+/** `localViewer`: a caller at this machine (`space package open` there) gets the loopback entry of a local app. */
+export function createPackageOpenRoutes(gateway: PackageGateway, token: string, localViewer?: (req: Request, server: unknown) => boolean) {
   return {
-    "/api/packages/open": { POST: async (req: RequestWithParams) => {
+    "/api/packages/open": { POST: async (req: RequestWithParams, server?: unknown) => {
       if (!isOperator(req, token)) return Response.json({ ok: false, error: "unauthorized" }, { status: 401 });
       try {
         const d = mapping(await req.json(), "application target", ["app", "spaceId", "connectionId"]);
         const target = { app: text(d.app, "app", 64), spaceId: text(d.spaceId, "spaceId", 36), ...(d.connectionId === undefined ? {} : { connectionId: text(d.connectionId, "connectionId", 36) }) };
-        return Response.json({ ok: true, ...await gateway.open(target) });
+        return Response.json({ ok: true, ...await gateway.open(target, "/", { local: localViewer?.(req, server) === true }) });
       } catch (e) { return Response.json({ ok: false, error: (e as Error).message }, { status: 400 }); }
     } },
   };

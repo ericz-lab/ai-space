@@ -17,14 +17,25 @@ export type RegisteredApp = {
    */
   manifestOnly: boolean;
   registeredAt: number;
+  /**
+   * The loopback form of a public `url` (defaults.ts `loopbackUrl`), for a viewer at this machine
+   * (docs/router.md#a-viewer-on-this-machine). `manifest.url` stays the public one: whatever is stored,
+   * sent to another machine or routed uses that.
+   */
+  localUrl?: string;
 };
+
+/** The manifest a viewer sees the app through: with `url` swapped for its loopback form when `local` and it has one. */
+export function manifestFor(entry: RegisteredApp, local: boolean): Manifest {
+  return local && entry.localUrl ? { ...entry.manifest, url: entry.localUrl } : entry.manifest;
+}
 
 export class AppRegistry {
   private readonly apps = new Map<string, RegisteredApp>();
 
-  async set(manifest: Manifest): Promise<RegisteredApp> {
+  async set(manifest: Manifest, opts: { localUrl?: string } = {}): Promise<RegisteredApp> {
     const manifestOnly = manifest.spec !== 2 && !manifest.service && !(await isDir(join(manifest.dir, ".git")));
-    const entry = { manifest, manifestOnly, registeredAt: Date.now() };
+    const entry: RegisteredApp = { manifest, manifestOnly, registeredAt: Date.now(), ...(opts.localUrl ? { localUrl: opts.localUrl } : {}) };
     this.apps.set(manifest.app, entry);
     return entry;
   }

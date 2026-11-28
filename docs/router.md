@@ -34,12 +34,18 @@ Rules:
 
 `url` accepts one more form: a **path** (`/`, `/docs`). A path means "my page, at this path, on whatever hostname the space gives me". ai-space resolves it when the manifest is loaded, after `SPACE_APP_URL_<NAME>` (which still wins, and must be absolute):
 
-| Space has | `url: /docs` resolves to |
-| --- | --- |
-| `SPACE_DOMAIN=example.com` | `https://<app>.example.com/docs` |
-| no domain | `http://127.0.0.1:<service.port>/docs` |
+| Space has | `url: /docs` resolves to | a viewer at this machine gets |
+| --- | --- | --- |
+| `SPACE_DOMAIN=example.com` | `https://<app>.example.com/docs` | `http://127.0.0.1:<service.port>/docs` |
+| no domain | `http://127.0.0.1:<service.port>/docs` | the same |
 
 A path `url` requires a `service` with a `port`; the manifest is rejected otherwise. Everything downstream (tiles, widget links, `{lang}`, the peer snapshot) sees the resolved absolute URL and does not change. An absolute `url` behaves as today. A public app can now write `url: /` and be correct on every machine.
+
+### A viewer at this machine
+
+A panel opened on the machine that runs the app (`http://127.0.0.1:<SPACE_PORT>`, or a desktop client on its local Space) would otherwise be sent out through the tunnel and the access layer and back. So the server decides per request: a request from a loopback address with no forwarding header (a tunnel or Caddy always adds one) is a viewer here, and the answers built for it (`GET /api/apps` and `/api/apps/:app`, widget links and payload links, a pet's link, chat card links in a transcript or a card answer) give the loopback form of a path `url` (third column). Every client, web or native, gets it from the same API. The public `url` stays for everything that is stored, sent to another machine or routed: the routing table, the peer snapshot and every `/api/peer/*` answer, the connection catalogue, feedback's `todoUrl`, notifications, and the cards a run streams to every watcher. An absolute `url` or a `SPACE_APP_URL_<NAME>` override has no loopback form, and a peer's app or one shared over a connection is never rewritten.
+
+On loopback the router is not in front, so the page loses what it adds: the `/_space/*` paths on the app's origin (the usage beat, Fix this; `ui.css` falls back to the app's own copy) and `X-Space-User`. That is what a Space without a domain has always given. An operator whose panel comes through an SSH port forward looks like loopback but cannot reach the app ports: `SPACE_LOCAL_OPEN=off` gives everyone the public `url`.
 
 ## Routing table
 
@@ -118,6 +124,7 @@ Workspace `.env`:
 | `SPACE_PANEL_HOST` | unset | route this hostname to the panel too |
 | `SPACE_ROUTER_CADDY` | `caddy` | the binary |
 | `SPACE_ROUTER_FALLBACK` | unset | a loopback port (`9071` or `127.0.0.1:9071`) that answers the hostnames no app claims, instead of the 404 |
+| `SPACE_LOCAL_OPEN` | on | `off` (or `0`, `false`, `no`): a viewer at this machine gets the public `url` too ([above](#a-viewer-on-this-machine)) |
 
 `run/` joins the workspace layout (`workspace.ts`): `run/Caddyfile`, `run/caddy.sock`. `logs/router/` holds the per-app access logs.
 

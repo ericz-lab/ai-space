@@ -42,6 +42,11 @@ export type Config = {
   appCatalogs: string[];
   packagePort?: number;
   packageBaseUrl?: string;
+  /**
+   * A viewer at this machine opens its apps on loopback (SPACE_LOCAL_OPEN, docs/router.md#a-viewer-on-this-machine):
+   * on unless `off`, `0`, `false` or `no`, for an operator whose panel comes through an SSH port forward.
+   */
+  localOpen: boolean;
   maxConcurrency: number;
   /**
    * How long a shutdown waits for the task runs and model calls in flight before it
@@ -153,6 +158,7 @@ export function loadConfig(ws: Workspace, env: Record<string, string | undefined
     appCatalogs: catalogSources(env.SPACE_APP_CATALOG, ws.home),
     packagePort,
     packageBaseUrl: env.SPACE_PACKAGE_BASE_URL?.trim() || undefined,
+    localOpen: !/^(0|false|no|off)$/i.test(env.SPACE_LOCAL_OPEN?.trim() ?? ""),
     maxConcurrency: Math.max(1, Number(env.SPACE_MAX_CONCURRENCY ?? 2) || 2),
     drainMs: drainSeconds(env.SPACE_DRAIN_SECONDS) * 1000,
     pgAdminUrl: env.SPACE_PG_ADMIN_URL?.trim() ?? "",

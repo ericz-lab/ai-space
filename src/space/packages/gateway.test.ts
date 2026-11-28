@@ -68,8 +68,8 @@ async function link(owner: Awaited<ReturnType<typeof machine>>, opener: Awaited<
 }
 
 /** `port`: the gateway the URL's host is served by when that is not the URL's own port (a public origin's edge in front of it). */
-async function browser(gateway: PackageGateway, target: Parameters<PackageGateway["open"]>[0], port?: number) {
-  const opened = await gateway.open(target);
+async function browser(gateway: PackageGateway, target: Parameters<PackageGateway["open"]>[0], port?: number, opts?: { local?: boolean }) {
+  const opened = await gateway.open(target, "/", opts);
   const url = new URL(opened.url);
   const request = (path: string, init: RequestInit = {}) => {
     const local = new URL(path, url); local.hostname = "127.0.0.1";
@@ -110,6 +110,44 @@ test("local app has an isolated authenticated origin, proxies writes and preserv
   expect(await (await b.request("/api/echo", { headers: { "x-keep-token": "app-secret", "x-space-caller": "operator", "x-forwarded-host": "spoofed" } })).json()).toMatchObject({ custom: "app-secret", caller: null, forwarded: null });
   expect(await (await m.gateway.request("notes", "/api/echo", { headers: { "x-space-caller": "trusted-app" } })).json()).toMatchObject({ caller: "trusted-app" });
   await expect(m.gateway.open({ app: "notes", spaceId: m.connections.spaceId }, "//evil.example")).rejects.toThrow(/local/);
+});
+
+test("a viewer at this machine opens a local app on the loopback origin, beside the public one", async () => {
+  const m = await machine("both", { publicBase: "https://apps.test" });
+  const target = { app: "notes", spaceId: m.connections.spaceId };
+  const label = originLabel(m.connections.spaceId, "notes");
+  const pub = await browser(m.gateway, target, m.port);
+  expect(pub.url.host).toBe(`${label}.apps.test`);
+  const ticket = new URL((await m.gateway.open(target, "/", { local: true })).url);
+  expect(ticket.host).toBe(`${label}.localhost:${m.port}`);
+  const loc = await browser(m.gateway, target, undefined, { local: true });
+  expect(loc.url.host).toBe(`${label}.localhost:${m.port}`);
+  // Each origin has its own sessions: the cookie is Secure only on https, and neither is good on the other.
+  const raw = async (b: typeof pub) => (await fetch(`http://127.0.0.1:${m.port}${b.url.pathname}`, { headers: { host: b.url.host } })).status;
+  expect(await raw(pub)).toBe(403);
+  expect(await (await loc.request("/api/echo")).json()).toMatchObject({ label: "both" });
+  expect(await (await pub.request("/api/echo")).json()).toMatchObject({ label: "both" });
+  expect((await loc.request("/api/echo", { headers: { cookie: pub.cookie } })).status).toBe(401);
+  expect((await pub.request("/api/echo", { headers: { cookie: loc.cookie } })).status).toBe(401);
+  // Another Space is only ever handed the public origin.
+  const direct = await (await m.gateway.openFor("connection-id", "notes")).json() as { url: string };
+  expect(new URL(direct.url).host).toBe(`${label}.apps.test`);
+});
+
+test("a ticket's cookie is Secure only on the public https origin; without one nothing changes for a local viewer", async () => {
+  const m = await machine("cookies", { publicBase: "https://apps.test" });
+  const target = { app: "notes", spaceId: m.connections.spaceId };
+  const set = async (local: boolean) => {
+    const url = new URL((await m.gateway.open(target, "/", { local })).url);
+    const r = await fetch(`http://127.0.0.1:${m.port}${url.pathname}${url.search}`, { headers: { host: url.host } });
+    return r.headers.get("set-cookie") ?? "";
+  };
+  expect(await set(false)).toContain("Secure");
+  expect(await set(true)).not.toContain("Secure");
+  const plain = await machine("plain");
+  const host = async (local: boolean) => new URL((await plain.gateway.open({ app: "notes", spaceId: plain.connections.spaceId }, "/", { local })).url).host;
+  expect(await host(true)).toBe(await host(false));
+  expect(await host(true)).toMatch(/\.localhost:\d+$/);
 });
 
 test("a local app's page gets the usage script and its beats are recorded under the session's app", async () => {
@@ -217,6 +255,9 @@ test("remote HTTP and WebSocket work over the peer outbound channel and revoke i
 test("an owner with a public gateway hands the opener a ticket on its own origin, bound to the connection", async () => {
   const owner = await machine("owner", { publicBase: "https://apps.test" }), opener = await machine("opener");
   const l = await link(owner, opener);
+  // An app over a connection opens the same way for a viewer at the opener's machine.
+  expect(new URL((await opener.gateway.open(l.target, "/", { local: true })).url).host).toBe(`${originLabel(owner.connections.spaceId, "notes")}.apps.test`);
+  l.sent.splice(0); owner.opens.splice(0);
   const opened = await opener.gateway.open(l.target, "/api/echo?x=1");
   const url = new URL(opened.url);
   expect(opened).toMatchObject({ direct: true, spaceId: owner.connections.spaceId, app: "notes" });

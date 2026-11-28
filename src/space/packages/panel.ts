@@ -4,17 +4,18 @@ import { createConnectionRoutes, type PackageLinks } from "./links.ts";
 import type { PackageRuntime } from "./runtime.ts";
 
 /** Same trust boundary as the existing operator panel; never served on app origins. */
-export function createPackagePanelRoutes(opts: Parameters<typeof createPackageRoutes>[0] & { gateway: PackageGateway; links: PackageLinks; runtime: PackageRuntime }) {
+/** `localViewer` (hosts.ts): a viewer at this machine opens a local app on the gateway's loopback origin. */
+export function createPackagePanelRoutes(opts: Parameters<typeof createPackageRoutes>[0] & { gateway: PackageGateway; links: PackageLinks; runtime: PackageRuntime; localViewer?: (req: Request, server: unknown) => boolean }) {
   const packages = createPackageRoutes({ ...opts, token: "" });
   const connections = createConnectionRoutes({ links: opts.links, token: "" });
   type RequestWithParams = Request & { params: Record<string, string> };
-  const entry = async (req: RequestWithParams) => {
+  const entry = async (req: RequestWithParams, server?: unknown) => {
     if (req.headers.get("sec-fetch-site") === "cross-site") return new Response("Open from Space", { status: 403 });
     try {
       const connectionId = req.params.connection;
       const spaceId = connectionId ? opts.links.connections.get(connectionId)?.remoteSpaceId : opts.installer.store.spaceId;
       if (!spaceId) throw new Error("unknown Space connection");
-      const result = await opts.gateway.open({ app: req.params.app!, spaceId, ...(connectionId ? { connectionId } : {}) }, new URL(req.url).searchParams.get("path") ?? "/");
+      const result = await opts.gateway.open({ app: req.params.app!, spaceId, ...(connectionId ? { connectionId } : {}) }, new URL(req.url).searchParams.get("path") ?? "/", { local: opts.localViewer?.(req, server) === true });
       return new Response(null, { status: 303, headers: { location: result.url, "cache-control": "no-store", "referrer-policy": "no-referrer" } });
     } catch (e) { return new Response((e as Error).message, { status: 503 }); }
   };

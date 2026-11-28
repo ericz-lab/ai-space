@@ -187,6 +187,17 @@ export function applyEnvOverrides(manifest: Manifest, env: Record<string, string
 }
 
 /**
+ * The address a viewer at this machine opens the app at (docs/router.md#a-viewer-on-this-machine):
+ * `http://127.0.0.1:<port><path>`, kept beside the url `applyEnvOverrides` resolved, for a path `url`
+ * with a service port that a domain made public. None for an absolute `url` or an override (the
+ * operator pointed it somewhere on purpose), and none without a domain, where the url is this already.
+ */
+export function loopbackUrl(manifest: Manifest, env: Record<string, string | undefined>, opts: { domain?: string } = {}): string | undefined {
+  if (!opts.domain || env[urlOverrideKey(manifest.app)]?.trim() || !manifest.url?.startsWith("/") || !manifest.service?.port) return undefined;
+  return `http://127.0.0.1:${manifest.service.port}${manifest.url}`;
+}
+
+/**
  * The override with the manifest url's query string carried over when the override has none of its
  * own (`https://usage.example.com` + `/?lang={lang}` -> `https://usage.example.com/?lang={lang}`). An
  * override with a query, even an empty `?`, is used as written; a fragment stays at the end.

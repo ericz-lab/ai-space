@@ -1,6 +1,6 @@
 import type { I18nText, Manifest, ManifestAgent, ManifestWidget } from "../scheduler/manifest.ts";
 import type { Health } from "./health.ts";
-import type { RegisteredApp } from "./registry.ts";
+import { type RegisteredApp, manifestFor } from "./registry.ts";
 
 /**
  * What the panel API shows for apps and agents. Loopback addresses, prompts
@@ -141,8 +141,9 @@ export function agentView(m: Manifest, a: ManifestAgent, chat?: Pick<AgentView, 
   };
 }
 
-export function appView(entry: RegisteredApp, opts: { hidden: boolean; health?: Health | "unknown" }): AppView {
-  const m = entry.manifest;
+/** `local`: the viewer is at this machine, and the url and the links derived from it are the loopback form when the app has one. */
+export function appView(entry: RegisteredApp, opts: { hidden: boolean; health?: Health | "unknown"; local?: boolean }): AppView {
+  const m = manifestFor(entry, opts.local === true);
   return {
     id: m.app,
     name: m.app,

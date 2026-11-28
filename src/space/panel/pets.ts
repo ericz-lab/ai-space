@@ -1,6 +1,6 @@
 import type { Manifest } from "../scheduler/manifest.ts";
 import type { ManifestPet, PetAnimation } from "./pet-spec.ts";
-import type { AppRegistry } from "./registry.ts";
+import { type AppRegistry, manifestFor } from "./registry.ts";
 import { resolveLink } from "./view.ts";
 
 /**
@@ -50,7 +50,8 @@ const ERROR_RETRY_MS = 15_000;
 export class NoPet extends Error {}
 
 export class PetFeed {
-  private readonly moods = new Map<string, { at: number; data: MoodResult }>();
+  /** The last mood with its link resolved against the public url, and the link as the source sent it. */
+  private readonly moods = new Map<string, { at: number; data: MoodResult; link?: string }>();
   private readonly sheets = new Map<string, { at: number; type: string; bytes: Uint8Array }>();
 
   constructor(
@@ -102,23 +103,33 @@ export class PetFeed {
     return out;
   }
 
-  async mood(app: string, name: string): Promise<MoodResult> {
+  /** `local`: the viewer is at this machine, and the link follows the app's loopback url (registry.ts `manifestFor`). */
+  async mood(app: string, name: string, local = false): Promise<MoodResult> {
     const { m, p } = this.find(app, name);
     if (!p.mood) return { ok: true, animation: p.rest, move: "roam" };
     const key = `${app}/${name}`;
-    const hit = this.moods.get(key);
+    let hit = this.moods.get(key);
     const ttl = hit?.data.ok === false ? Math.min(p.refreshMs, ERROR_RETRY_MS) : p.refreshMs;
-    if (hit && Date.now() - hit.at < ttl) return hit.data;
-    let data: MoodResult;
-    try {
-      const r = await this.get(m, p.mood);
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      data = sanitizeMood(m, p, await r.json());
-    } catch (e) {
-      data = { ok: false, error: String((e as Error).message ?? e).slice(0, 200) };
+    if (!hit || Date.now() - hit.at >= ttl) {
+      let data: MoodResult;
+      let link: string | undefined;
+      try {
+        const r = await this.get(m, p.mood);
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const raw = await r.json();
+        data = sanitizeMood(m, p, raw);
+        link = typeof (raw as { link?: unknown })?.link === "string" ? (raw as { link: string }).link : undefined;
+      } catch (e) {
+        data = { ok: false, error: String((e as Error).message ?? e).slice(0, 200) };
+      }
+      hit = { at: Date.now(), data, ...(link ? { link } : {}) };
+      this.moods.set(key, hit);
     }
-    this.moods.set(key, { at: Date.now(), data });
-    return data;
+    const at = local ? manifestFor(this.registry.get(app)!, true) : m;
+    if (at === m || !hit.data.ok || !hit.link) return hit.data;
+    const { link: _, ...rest } = hit.data;
+    const abs = resolveLink(at, hit.link);
+    return /^https?:\/\//.test(abs) ? { ...rest, link: abs } : rest;
   }
 
   private find(app: string, name: string): { m: Manifest; p: ManifestPet } {

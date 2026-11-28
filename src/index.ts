@@ -25,7 +25,7 @@ import { createStorageRoutes, parseStorageSpec } from "./space/storage/index.ts"
 import { BACKUP_TASK, SPACE_APP, backupTask, createBackupRoutes, parseBackupSpec, spaceManifest } from "./space/storage/backup/index.ts";
 import { type Workspace, discoverApps } from "./space/workspace.ts";
 import { describeSkillLinks, linkSkills } from "./space/skills.ts";
-import { applyEnvOverrides } from "./space/defaults.ts";
+import { applyEnvOverrides, loopbackUrl } from "./space/defaults.ts";
 import { localMachine, syncGuide } from "./space/guide.ts";
 import { TerminalService, TerminalStore, createTerminalRoutes, terminalWebSocket } from "./space/terminal/index.ts";
 import { Router, createRouterRoutes } from "./space/router/index.ts";
@@ -61,7 +61,7 @@ import { createPackagePanelRoutes } from "./space/packages/panel.ts";
 import { type Config, SHARED_SKILLS, backupTaskDefaults, openBackups, openStorage } from "./space/config.ts";
 import { run } from "./cli/main.ts";
 import { bearer, guardBrowserWrites, tokenEquals } from "./space/auth.ts";
-import { guardHosts, hostRules } from "./space/hosts.ts";
+import { guardHosts, hostRules, localViewer } from "./space/hosts.ts";
 import { AUTH_PUBLIC, AUTH_SELF, AuthService, AuthStore, composeRoutes, createAuthRoutes, ensureOperatorToken, gateRoutes } from "./space/auth/index.ts";
 import { ShortcutStore, Shortcuts, createShortcutRoutes } from "./space/shortcuts/index.ts";
 import { settleWorkingDirectory } from "./space/host-fs.ts";
@@ -466,7 +466,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
 
   // Storage first, so a command task started right after sync already sees its DATABASE_URL.
   // Returns the tasks the services contribute for the app: its backup task, unless the manifest opts out.
-  const provision = async (manifest: Manifest) => {
+  const provision = async (manifest: Manifest, localUrl?: string) => {
     if (manifest.app === SPACE_APP) throw new Error(`the app name "${SPACE_APP}" is reserved for ai-space itself`);
     const result = await storage.syncApp(manifest.app, parseStorageSpec(manifest.storage));
     for (const p of result.created) console.log(`[storage] ${manifest.app}: created ${p}`);
@@ -475,7 +475,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     bus.syncApp(manifest.app, { events: manifest.events, provides: manifest.provides });
     const backup = backupsOn ? backupTask(manifest.app, parseBackupSpec(manifest.backup), taskDefaults) : undefined;
     if (backup && manifest.tasks.some((t) => t.name === BACKUP_TASK)) throw new Error(`task name "${BACKUP_TASK}" is reserved for ai-space's backup task; rename it, or set backup: false to bring your own`);
-    await registry.set(manifest.spec === 2 && packageRuntime.get(manifest.app)?.manifest.launch ? { ...manifest, url: `/_space/apps/${encodeURIComponent(manifest.app)}` } : manifest);
+    await registry.set(manifest.spec === 2 && packageRuntime.get(manifest.app)?.manifest.launch ? { ...manifest, url: `/_space/apps/${encodeURIComponent(manifest.app)}` } : manifest, { localUrl });
     // After storage, so the unit's environment has the app's space.env. Never throws: a unit that
     // fails is recorded and shows on the Services list, the rest of the app still registers.
     if (manifest.spec !== 2) await supervisor.apply(manifest);
@@ -495,8 +495,10 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     return installed.manifest;
   };
   const syncDir = async (dir: string, changing = false) => {
-    const manifest = resolve(await loadApp(dir, changing));
-    const extra = await provision(manifest);
+    const loaded = await loadApp(dir, changing);
+    const manifest = resolve(loaded);
+    // A viewer at this machine opens a routed path url on loopback instead (docs/router.md#a-viewer-on-this-machine).
+    const extra = await provision(manifest, loaded.spec === 2 ? undefined : loopbackUrl(loaded, env, { domain: config.router.domain }));
     scheduler.syncManifest(Scheduler.schedulable(manifest), extra);
   };
 
@@ -555,7 +557,10 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
   void router.sync();
 
   const moodInbox = new Inbox(notifyStore.db);
+  // A viewer at this machine opens its apps on loopback (docs/router.md#a-viewer-on-this-machine).
+  const isLocalViewer = (req: Request, server: unknown) => localViewer(req, server, config.localOpen);
   const panelRoutes = createPanelRoutes({
+    localViewer: isLocalViewer,
     // "Add an app from a link" reads the page on whichever runtime this space has, as every other
     // model call does: a machine with only Codex has no `claude` to spawn.
     resolveLink: async (link) => {
@@ -627,7 +632,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       return r?.outcome.ok ? r.outcome.text : undefined;
     },
     shortcuts: shortcutStore, holdApp: async (app) => packageRuntime.get(app) ? (await packageRuntime.acquire(app, false)).release : undefined, ws, registry, layout, sessions, runs: agentRuns, runtimes, defaultModel: config.chatModel, baseDefaultModel, appModel: (app) => ({ override: appModels.overrides(app).app, manifest: registry.get(app)?.manifest.model?.default }), envFor: appEnvFor, peers, icons, capabilities: () => [...bus.capabilities(), ...peers.capabilities()], sharedSkills: SHARED_SKILLS,
-    callerApp, agentCallers: config.agentCallers,
+    callerApp, agentCallers: config.agentCallers, localViewer: isLocalViewer,
     // Chat cards read and act on their app as the operator (docs/chat-cards.md).
     cardCall: async (app, capability, body) => {
       const r = await bus.call(SPACE_APP, app, capability, { body, contentType: "application/json", accept: "application/json" });
@@ -795,9 +800,9 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
       ["owner", createActivityRoutes({ token: config.apiToken, tasks: () => scheduler.running(), modelCalls: () => model.inFlight(), agentTurns: () => agentRuns.running(), terminals: () => terminal.status().active, packageChanges: () => packageInstaller.busy + packageLifecycle.busy })],
       ["owner", createStudioRoutes({ ...studioDeps, token: config.apiToken })],
       ["owner", createAppCatalogRoutes(appCatalog, config.apiToken)],
-      ["owner", createPackagePanelRoutes({ installer: packageInstaller, token: config.apiToken, trustedKeys: packageTrustKeys, runtime: packageRuntime, lifecycle: packageLifecycle, activate: activatePackage, gateway: packageGateway, links: packageLinks })],
+      ["owner", createPackagePanelRoutes({ installer: packageInstaller, token: config.apiToken, trustedKeys: packageTrustKeys, runtime: packageRuntime, lifecycle: packageLifecycle, activate: activatePackage, gateway: packageGateway, links: packageLinks, localViewer: isLocalViewer })],
       ["owner", createConnectionRoutes({ links: packageLinks, token: config.apiToken })],
-      ["owner", createPackageOpenRoutes(packageGateway, config.apiToken)],
+      ["owner", createPackageOpenRoutes(packageGateway, config.apiToken, isLocalViewer)],
       ["owner", createRouterRoutes({ router })],
       ["owner", createUsageRoutes({ service: usage, knownApp: (app) => Boolean(registry.get(app)), routerKey })],
       ["owner", feedbackRoutes],
