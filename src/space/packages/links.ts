@@ -59,6 +59,11 @@ export class PackageLinks {
     /** The icon image of a locally owned app, for the tile a connected Space shows. */
     icon?: (app: string) => Promise<Response | undefined>;
     handle?: LinkHandler;
+    /**
+     * Answers an `open` operation (a direct open, gateway.ts `openFor`) for a granted, locally owned app: `{ url }`, a
+     * ticket on this Space's own gateway bound to the connection. Unset, the operation is refused as an older version does.
+     */
+    open?: (connection: Connection, meta: Record<string, unknown>) => Promise<Response>;
     /** Tests shorten these. */
     timing?: Partial<typeof DIAL_TIMING>;
   }) {
@@ -195,11 +200,12 @@ export class PackageLinks {
     if (m.operation === "catalogue") return Response.json({ spaceId: this.connections.spaceId, ...(this.options.name ? { name: this.options.name } : {}), apps: this.options.apps().filter((a) => this.connections.allows(id, a.app)), peer: { scopes: grantedScopes(c), fullTrust: c.fullTrust } });
     if (m.operation === "peer") return this.peer ? this.peer(c, m, body, signal) : Response.json({ ok: false, error: "peer API not available" }, { status: 404 });
     if (typeof m.app !== "string" || !this.connections.allows(id, m.app)) return Response.json({ error: "application access denied" }, { status: 403 });
-    if (m.operation !== "icon" && m.operation !== "fetch" && m.operation !== "socket") return Response.json({ error: "operation not allowed" }, { status: 403 });
+    if (m.operation !== "icon" && m.operation !== "fetch" && m.operation !== "socket" && !(m.operation === "open" && this.options.open)) return Response.json({ error: "operation not allowed" }, { status: 403 });
     // Only locally owned apps are dispatched. No forwarding to another connection or admin API.
     const owned = this.options.apps().some((a) => a.app === m.app);
     if (m.operation === "icon") return (owned && await this.options.icon?.(m.app)) || Response.json({ error: "application has no icon" }, { status: 404 });
     if (!owned) return Response.json({ error: "application not found" }, { status: 404 });
+    if (m.operation === "open") return this.options.open!(c, m);
     if (!this.options.handle) return Response.json({ error: "application gateway not available" }, { status: 503 });
     return this.options.handle(c, m, body, signal);
   }

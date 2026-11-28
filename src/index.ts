@@ -146,6 +146,7 @@ export async function boot(ws: Workspace, config: Config, env: Record<string, st
     env,
     name: config.name,
     handle: (_connection, meta, body, signal) => packageGateway.local(meta, body, signal),
+    open: (connection, meta) => packageGateway.openFor(connection.id, meta.app as string, meta.path ?? "/"),
     // Installed packages, then spec-1 apps with a service port, API-only (docs/app-packages.md#source-apps-over-a-connection).
     apps: () => [...packageStore.installed().filter((o) => packageRuntime.get(o.app)).map((o) => {
       const app = packageRuntime.get(o.app)!;
